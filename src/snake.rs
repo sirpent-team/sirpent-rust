@@ -1,29 +1,22 @@
-use std::fmt::Debug;
-
 use grid::*;
 
-#[derive(Clone, Copy, Debug)]
-pub struct SnakeSegment<G : Grid> {
-    pub position : G::Vector
-}
-
 #[derive(Clone, Debug)]
-pub struct Snake<G : Grid + Debug> {
+pub struct Snake<G : Grid> {
     pub dead : bool,
-    pub segments : Vec<SnakeSegment<G>>
+    pub segments : Vec<G::Vector>
 }
 
-impl<G : Grid + Debug> Snake<G> {
+impl<G : Grid> Snake<G> {
     pub fn is_head_at(&self, v : &G::Vector) -> bool {
-        self.segments.len() > 0 && self.segments[0].position == *v
+        self.segments.len() > 0 && self.segments[0] == *v
     }
 
     pub fn has_segment_at(&self, v : &G::Vector) -> bool {
-        self.segments.iter().any(|x| &x.position == v)
+        self.segments.iter().any(|x| x == v)
     }
 
     pub fn has_collided_into(&self, other : &Snake<G>) -> bool {
-        self.segments.len() > 0 && other.has_segment_at(&self.segments[0].position)
+        self.segments.len() > 0 && other.has_segment_at(&self.segments[0])
     }
 
     pub fn step_in_direction(&mut self, dir : <<G as Grid>::Vector as Vector>::Direction) {
@@ -31,9 +24,9 @@ impl<G : Grid + Debug> Snake<G> {
             return;
         }
         for i in (1..self.segments.len()).rev() {
-            self.segments[i].position = self.segments[i-1].position;
+            self.segments[i] = self.segments[i-1];
         }
-        self.segments[0].position = self.segments[0].position.neighbour(dir);
+        self.segments[0] = self.segments[0].neighbour(dir);
     }
 }
 
@@ -52,7 +45,7 @@ mod tests {
             let segments = (0..size).scan(head, |state, _| {
                 let dir = Arbitrary::arbitrary(g);
                 *state = (*state).neighbour(dir);
-                Some(SnakeSegment{position : *state})
+                Some(*state)
             }).collect();
             return Snake{dead : dead, segments : segments};
         }
@@ -67,7 +60,7 @@ mod tests {
     }
 
     fn snake_is_connected_prop(snake : Snake<HexGrid>) -> bool {
-        snake.segments.windows(2).all(|x| x[0].position.distance(&x[1].position) == 1)
+        snake.segments.windows(2).all(|x| x[0].distance(&x[1]) == 1)
     }
 
     #[test]
@@ -88,7 +81,7 @@ mod tests {
     }
 
     fn head_is_at_head_prop(snake : Snake<HexGrid>) -> bool {
-        snake.segments.len() == 0 || snake.is_head_at(&snake.segments[0].position)
+        snake.segments.len() == 0 || snake.is_head_at(&snake.segments[0])
     }
 
     #[test]
@@ -100,9 +93,9 @@ mod tests {
         if snake.segments.len() == 0 {
             return true;
         }
-        let head_position = snake.segments[0].position;
+        let head_position = snake.segments[0];
         for x in snake.segments.clone() {
-            if x.position != head_position && snake.is_head_at(&x.position) {
+            if x != head_position && snake.is_head_at(&x) {
                 return false;
             }
         }
