@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["Nathan van Doorn <nvd1234@gmail.com>"]
 
 [dependencies]
+uuid = {version = "0.2.*", features = ["v4"]}
+rand = "0.3.*"
 
 [dev-dependencies]
 quickcheck = "0.2.*"
