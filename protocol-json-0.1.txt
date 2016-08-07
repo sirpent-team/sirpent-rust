@@ -1,0 +1,153 @@
+> server connects to server run by player
+220 {
+  "sirpent": {
+    "version": "0.1",
+    "msg_type": "new-game"
+  },
+  "world": {
+    "grid": "hexagonal",
+    "shape": {
+      "type": "hexagonal",
+      "rings": 30
+    }
+  },
+  "player": {
+    "name": "drogon"
+  }
+}
+
+> player closes socket to refuse game
+> or player accepts game with this reply
+68 {
+  "sirpent": {
+    "version": "0.1",
+    "msg": "player-ack"
+  }
+}
+
+> server asks for moves in a loop
+  N.B. starting value of moved should be empty?
+1036 {
+  "sirpent": {
+    "version": "0.1",
+    "msg_type": "request-move"
+  },
+  "world": {
+    "grid": "hexagonal",
+    "shape": {
+      "type": "hexagonal",
+      "rings": 30
+    }
+  },
+  "player": {
+    "name": "drogon",
+    "snake_uuid": "123e4567-e89b-12d3-a456-426655440000"
+  },
+  "game_state": {
+    "food": {
+      "x": 10,
+      "y": 3
+    },
+    "snakes": {
+      "123e4567-e89b-12d3-a456-426655440000": {
+        "uuid": "123e4567-e89b-12d3-a456-426655440000",
+        "alive": true,
+        "moved": "NORTH",
+        "segments": [
+          {"x": 1, "y": 2},
+          {"x": 2, "y": 2},
+          {"x": 3, "y": 2},
+          {"x": 3, "y": 3},
+          [...]
+        ]
+      },
+      "ae1290dd-e89b-12d3-a456-426655441111": {
+        "uuid": "ae1290dd-e89b-12d3-a456-426655441111",
+        "alive": true,
+        "moved": "SOUTHEAST",
+        "segments": [
+          {"x": 1, "y": 2},
+          {"x": 2, "y": 2},
+          {"x": 3, "y": 2},
+          {"x": 3, "y": 3},
+          [...]
+        ]
+      },
+      [...]
+    }
+  }
+}
+
+> player responds with a move
+  if they time out or close the socket, player dies as normal
+116 {
+  "sirpent": {
+    "version": "0.1",
+    "msg_type": "player-move"
+  },
+  "move": {
+    "direction": "SOUTH"
+  }
+}
+
+> player dies
+  if socket still open, server notifies
+1029 {
+  "sirpent": {
+    "version": "0.1",
+    "msg_type": "died"
+  },
+  "world": {
+    "grid": "hexagonal",
+    "shape": {
+      "type": "hexagonal",
+      "rings": 30
+    }
+  },
+  "player": {
+    "name": "drogon",
+    "snake_uuid": "123e4567-e89b-12d3-a456-426655440000"
+  },
+  "game_state": {
+    "food": {
+      "x": 10,
+      "y": 3
+    },
+    "snakes": {
+      "123e4567-e89b-12d3-a456-426655440000": {
+        "uuid": "123e4567-e89b-12d3-a456-426655440000",
+        "alive": false,
+        "moved": "SOUTH",
+        "segments": [
+          {"x": 1, "y": 3},
+          {"x": 2, "y": 2},
+          {"x": 3, "y": 2},
+          {"x": 3, "y": 3},
+          [...]
+        ]
+      },
+      "ae1290dd-e89b-12d3-a456-426655441111": {
+        "uuid": "ae1290dd-e89b-12d3-a456-426655441111",
+        "alive": true,
+        "moved": "SOUTHEAST",
+        "segments": [
+          {"x": 1, "y": 2},
+          {"x": 2, "y": 2},
+          {"x": 3, "y": 2},
+          {"x": 3, "y": 3},
+          [...]
+        ]
+      },
+      [...]
+    }
+  }
+}
+
+> server notifies end of play
+65 {
+  "sirpent": {
+    "version": "0.1",
+    "msg": "closing"
+  }
+}
+> server closes socket
