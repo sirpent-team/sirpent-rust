@@ -4,7 +4,7 @@ use grid::*;
 
 #[derive(Clone, Debug)]
 pub struct Snake<V : Vector> {
-    pub growing : bool,
+    pub dead : bool,
     pub uuid : Uuid,
     pub segments : Vec<V>
 }
@@ -37,8 +37,9 @@ impl<V : Vector> Snake<V> {
 mod tests {
     use quickcheck::{Arbitrary, Gen, quickcheck};
     use super::*;
-    use hexgrid::*;
+    use hex_grid::*;
     use grid::Vector;
+    use uuid::Uuid;
 
     impl Arbitrary for Snake<HexVector> {
         fn arbitrary<G : Gen>(g : &mut G) -> Snake<HexVector> {
@@ -50,13 +51,13 @@ mod tests {
                 *state = (*state).neighbour(&dir);
                 Some(*state)
             }).collect();
-            return Snake{dead : dead, segments : segments};
+            return Snake{dead : dead, segments : segments, uuid : Uuid::nil()};
         }
 
         fn shrink(&self) -> Box<Iterator<Item=Snake<HexVector>>> {
             let mut shrinks = Vec::new();
             for i in 0..self.segments.len() {
-                shrinks.push(Snake{dead : self.dead, segments : self.segments[..i].to_vec()})
+                shrinks.push(Snake{dead : self.dead, segments : self.segments[..i].to_vec(), uuid : Uuid::nil()})
             }
             return Box::new(shrinks.into_iter());
         }

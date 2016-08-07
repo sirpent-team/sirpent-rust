@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use sirpent::grid::*;
 use sirpent::hex_grid::*;
+use sirpent::square_grid::*;
+use sirpent::triangle_grid::*;
 use sirpent::snake::*;
 use sirpent::player::*;
 
@@ -20,7 +22,7 @@ fn main() {
 
     let snake : Snake<HexVector>;
     snake = Snake {
-        growing : false,
+        dead : false,
         uuid : Uuid::nil(),
         segments : vec!()
     };

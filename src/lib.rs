@@ -1,8 +1,11 @@
 extern crate uuid;
 extern crate rand;
+#[cfg(test)] extern crate quickcheck;
 
 pub mod grid;
 pub mod hex_grid;
+pub mod square_grid;
+pub mod triangle_grid;
 pub mod snake;
 pub mod player;
 
