@@ -37,15 +37,15 @@ impl<V : Vector> Snake<V> {
 mod tests {
     use quickcheck::{Arbitrary, Gen, quickcheck};
     use super::*;
-    use hex_grid::*;
+    use hexagon_grid::*;
     use grid::Vector;
     use uuid::Uuid;
 
-    impl Arbitrary for Snake<HexVector> {
-        fn arbitrary<G : Gen>(g : &mut G) -> Snake<HexVector> {
+    impl Arbitrary for Snake<HexagonVector> {
+        fn arbitrary<G : Gen>(g : &mut G) -> Snake<HexagonVector> {
             let dead = Arbitrary::arbitrary(g);
             let size = {let s = g.size(); g.gen_range(0, s)};
-            let head : HexVector = Arbitrary::arbitrary(g);
+            let head : HexagonVector = Arbitrary::arbitrary(g);
             let segments = (0..size).scan(head, |state, _| {
                 let dir = Arbitrary::arbitrary(g);
                 *state = (*state).neighbour(&dir);
@@ -54,7 +54,7 @@ mod tests {
             return Snake{dead : dead, segments : segments, uuid : Uuid::nil()};
         }
 
-        fn shrink(&self) -> Box<Iterator<Item=Snake<HexVector>>> {
+        fn shrink(&self) -> Box<Iterator<Item=Snake<HexagonVector>>> {
             let mut shrinks = Vec::new();
             for i in 0..self.segments.len() {
                 shrinks.push(Snake{dead : self.dead, segments : self.segments[..i].to_vec(), uuid : Uuid::nil()})
@@ -63,17 +63,17 @@ mod tests {
         }
     }
 
-    fn snake_is_connected_prop(snake : Snake<HexVector>) -> bool {
+    fn snake_is_connected_prop(snake : Snake<HexagonVector>) -> bool {
         snake.segments.windows(2).all(|x| x[0].distance(&x[1]) == 1)
     }
 
     #[test]
     fn snake_is_connected() {
         // this is really to test the Arbitrary instance for Snake
-        quickcheck(snake_is_connected_prop as fn(Snake<HexVector>) -> bool);
+        quickcheck(snake_is_connected_prop as fn(Snake<HexagonVector>) -> bool);
     }
 
-    fn step_preserves_connectedness_prop(snake : Snake<HexVector>, dir : HexDir) -> bool {
+    fn step_preserves_connectedness_prop(snake : Snake<HexagonVector>, dir : HexagonDir) -> bool {
         let mut snake = snake.clone();
         snake.step_in_direction(dir);
         return snake_is_connected_prop(snake);
@@ -81,19 +81,19 @@ mod tests {
 
     #[test]
     fn step_preserves_connectedness() {
-        quickcheck(step_preserves_connectedness_prop as fn(Snake<HexVector>, HexDir) -> bool);
+        quickcheck(step_preserves_connectedness_prop as fn(Snake<HexagonVector>, HexagonDir) -> bool);
     }
 
-    fn head_is_at_head_prop(snake : Snake<HexVector>) -> bool {
+    fn head_is_at_head_prop(snake : Snake<HexagonVector>) -> bool {
         snake.segments.len() == 0 || snake.is_head_at(&snake.segments[0])
     }
 
     #[test]
     fn head_is_at_head() {
-        quickcheck(head_is_at_head_prop as fn(Snake<HexVector>) -> bool);
+        quickcheck(head_is_at_head_prop as fn(Snake<HexagonVector>) -> bool);
     }
 
-    fn only_head_is_at_head_prop(snake : Snake<HexVector>) -> bool {
+    fn only_head_is_at_head_prop(snake : Snake<HexagonVector>) -> bool {
         if snake.segments.len() == 0 {
             return true;
         }
@@ -108,6 +108,6 @@ mod tests {
 
     #[test]
     fn only_head_is_at_head() {
-        quickcheck(only_head_is_at_head_prop as fn(Snake<HexVector>) -> bool);
+        quickcheck(only_head_is_at_head_prop as fn(Snake<HexagonVector>) -> bool);
     }
 }
