@@ -55,29 +55,25 @@ impl Vector for HexagonVector {
 }
 
 pub struct HexagonGrid {
-    width : isize,
-    height : isize,
-    view : usize,
+    radius : usize,
 }
 
 impl Grid for HexagonGrid {
     type Vector = HexagonVector;
 
     fn dimensions(&self) -> Vec<isize> {
-        vec![self.width, self.height]
+        vec![self.radius as isize]
     }
 
     fn is_within_bounds(&self, v : HexagonVector) -> bool {
-        v.x >= 0 && v.x < self.width && v.y >= 0 && v.y < self.height
+        // @TODO: Calculate a more efficient bounding rule.
+        HexagonVector{x : 0, y : 0}.distance(&v) <= self.radius
     }
 }
 
 impl HexagonGrid {
-    fn new(radius : isize) -> HexagonGrid {
-        let width = 2 * radius;
-        let height = width;
-        let view = 5;
-        return HexagonGrid{width : width, height : height, view : view};
+    fn new(radius : usize) -> HexagonGrid {
+        HexagonGrid{radius : radius}
     }
 }
 

@@ -1,4 +1,3 @@
-use std::cmp::max;
 use grid::*;
 
 #[derive(Clone, Debug)]
@@ -70,6 +69,7 @@ impl Grid for TriangleGrid {
     }
 
     fn is_within_bounds(&self, v : TriangleVector) -> bool {
+        // @TODO: Calculate a more efficient bounding rule.
         TriangleVector{u : 0, v : 0, r: false}.distance(&v) <= self.radius
     }
 }

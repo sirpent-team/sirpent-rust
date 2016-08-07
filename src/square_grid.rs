@@ -1,4 +1,3 @@
-use std::cmp::max;
 use grid::*;
 
 #[derive(Clone, Debug)]

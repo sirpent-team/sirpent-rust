@@ -1,6 +1,7 @@
 extern crate uuid;
 extern crate rand;
-#[cfg(test)] extern crate quickcheck;
+#[cfg(test)]
+extern crate quickcheck;
 
 pub mod grid;
 pub mod hexagon_grid;
