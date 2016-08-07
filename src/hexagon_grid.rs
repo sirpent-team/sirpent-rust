@@ -85,6 +85,7 @@ impl HexagonGrid {
 mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
+    use grid::Direction;
     use grid::Vector;
 
     impl Arbitrary for HexagonVector {
@@ -96,16 +97,8 @@ mod tests {
 
     impl Arbitrary for HexagonDir {
         fn arbitrary<G : Gen>(g : &mut G) -> HexagonDir {
-            let i : u32 = g.gen_range(0, 6);
-            match i {
-                0 => HexagonDir::North,
-                1 => HexagonDir::NorthEast,
-                2 => HexagonDir::SouthEast,
-                3 => HexagonDir::South,
-                4 => HexagonDir::SouthWest,
-                5 => HexagonDir::NorthWest,
-                _ => unreachable!()
-            }
+            let i : usize = g.gen_range(0, 6);
+            HexagonDir::variants()[i].clone()
         }
     }
 
