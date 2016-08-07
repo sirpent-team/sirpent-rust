@@ -20,7 +20,7 @@ pub trait Vector : Eq + Copy {
     fn ball_around(&self, radius : usize) -> Vec<Self>;
     fn rand_within<R : Rng>(rng : &mut R, radius : usize) -> Self;
 }
-    
+
 pub trait Grid {
     type Vector : Vector;
     fn new(radius : usize) -> Self;

@@ -1,10 +1,11 @@
 [package]
 name = "sirpent"
 version = "0.1.0"
-authors = ["Nathan van Doorn <nvd1234@gmail.com>"]
+authors = ["Nathan van Doorn <nvd1234@gmail.com>", "Michael Mokrysz <hi@46b.it>"]
 
 [dependencies]
-uuid = {version = "0.2.*", features = ["v4"]}
+ansi_term = "0.8.0"
+uuid = { version = "0.2", features = ["v4"] }
 rand = "0.3.*"
 
 [dev-dependencies]
