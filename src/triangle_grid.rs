@@ -57,8 +57,9 @@ impl Vector for TriangleVector {
     }
 }
 
+#[derive(RustcEncodable, RustcDecodable)]
 pub struct TriangleGrid {
-    radius : usize,
+    pub radius : usize,
 }
 
 impl Grid for TriangleGrid {
@@ -71,6 +72,10 @@ impl Grid for TriangleGrid {
     fn is_within_bounds(&self, v : TriangleVector) -> bool {
         // @TODO: Calculate a more efficient bounding rule.
         TriangleVector{u : 0, v : 0, r: false}.distance(&v) <= self.radius
+    }
+
+    fn name(&self) -> String {
+        "triangle_grid".to_string()
     }
 }
 

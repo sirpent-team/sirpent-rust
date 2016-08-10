@@ -54,8 +54,9 @@ impl Vector for HexagonVector {
     }
 }
 
+#[derive(RustcEncodable, RustcDecodable)]
 pub struct HexagonGrid {
-    radius : usize,
+    pub radius : usize,
 }
 
 impl Grid for HexagonGrid {
@@ -68,6 +69,10 @@ impl Grid for HexagonGrid {
     fn is_within_bounds(&self, v : HexagonVector) -> bool {
         // @TODO: Calculate a more efficient bounding rule.
         HexagonVector{x : 0, y : 0}.distance(&v) <= self.radius
+    }
+
+    fn name(&self) -> String {
+        "hexagon_grid".to_string()
     }
 }
 

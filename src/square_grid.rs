@@ -48,9 +48,10 @@ impl Vector for SquareVector {
     }
 }
 
+#[derive(RustcEncodable, RustcDecodable)]
 pub struct SquareGrid {
-    width : isize,
-    height : isize,
+    pub width : isize,
+    pub height : isize,
 }
 
 impl Grid for SquareGrid {
@@ -62,6 +63,10 @@ impl Grid for SquareGrid {
 
     fn is_within_bounds(&self, v : SquareVector) -> bool {
         v.x >= 0 && v.x < self.width && v.y >= 0 && v.y < self.height
+    }
+
+    fn name(&self) -> String {
+        "square_grid".to_string()
     }
 }
 

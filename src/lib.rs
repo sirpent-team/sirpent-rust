@@ -1,5 +1,6 @@
 extern crate uuid;
 extern crate rand;
+extern crate rustc_serialize;
 #[cfg(test)]
 extern crate quickcheck;
 
