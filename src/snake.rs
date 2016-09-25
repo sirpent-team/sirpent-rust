@@ -3,39 +3,39 @@ use uuid::Uuid;
 use grid::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Snake<V : Vector> {
-    pub dead : bool,
-    pub uuid : Uuid,
-    pub segments : Vec<V>
+pub struct Snake<V: Vector> {
+    pub dead: bool,
+    pub uuid: Uuid,
+    pub segments: Vec<V>,
 }
 
-impl<V : Vector> Snake<V> {
+impl<V: Vector> Snake<V> {
     pub fn new(segments: Vec<V>) -> Snake<V> {
-        Snake::<V>{
+        Snake::<V> {
             dead: true,
             uuid: Uuid::new_v4(),
             segments: segments,
         }
     }
 
-    pub fn is_head_at(&self, v : &V) -> bool {
+    pub fn is_head_at(&self, v: &V) -> bool {
         self.segments.len() > 0 && self.segments[0] == *v
     }
 
-    pub fn has_segment_at(&self, v : &V) -> bool {
+    pub fn has_segment_at(&self, v: &V) -> bool {
         self.segments.iter().any(|x| x == v)
     }
 
-    pub fn has_collided_into(&self, other : &Snake<V>) -> bool {
+    pub fn has_collided_into(&self, other: &Snake<V>) -> bool {
         self.segments.len() > 0 && other.has_segment_at(&self.segments[0])
     }
 
-    pub fn step_in_direction(&mut self, dir : V::Direction) {
+    pub fn step_in_direction(&mut self, dir: V::Direction) {
         if self.segments.len() == 0 {
             return;
         }
         for i in (1..self.segments.len()).rev() {
-            self.segments[i] = self.segments[i-1];
+            self.segments[i] = self.segments[i - 1];
         }
         self.segments[0] = self.segments[0].neighbour(&dir);
     }
@@ -50,28 +50,41 @@ mod tests {
     use uuid::Uuid;
 
     impl Arbitrary for Snake<HexagonVector> {
-        fn arbitrary<G : Gen>(g : &mut G) -> Snake<HexagonVector> {
+        fn arbitrary<G: Gen>(g: &mut G) -> Snake<HexagonVector> {
             let dead = Arbitrary::arbitrary(g);
-            let size = {let s = g.size(); g.gen_range(0, s)};
-            let head : HexagonVector = Arbitrary::arbitrary(g);
-            let segments = (0..size).scan(head, |state, _| {
-                let dir = Arbitrary::arbitrary(g);
-                *state = (*state).neighbour(&dir);
-                Some(*state)
-            }).collect();
-            return Snake{dead : dead, segments : segments, uuid : Uuid::nil()};
+            let size = {
+                let s = g.size();
+                g.gen_range(0, s)
+            };
+            let head: HexagonVector = Arbitrary::arbitrary(g);
+            let segments = (0..size)
+                .scan(head, |state, _| {
+                    let dir = Arbitrary::arbitrary(g);
+                    *state = (*state).neighbour(&dir);
+                    Some(*state)
+                })
+                .collect();
+            return Snake {
+                dead: dead,
+                segments: segments,
+                uuid: Uuid::nil(),
+            };
         }
 
-        fn shrink(&self) -> Box<Iterator<Item=Snake<HexagonVector>>> {
+        fn shrink(&self) -> Box<Iterator<Item = Snake<HexagonVector>>> {
             let mut shrinks = Vec::new();
             for i in 0..self.segments.len() {
-                shrinks.push(Snake{dead : self.dead, segments : self.segments[..i].to_vec(), uuid : Uuid::nil()})
+                shrinks.push(Snake {
+                    dead: self.dead,
+                    segments: self.segments[..i].to_vec(),
+                    uuid: Uuid::nil(),
+                })
             }
             return Box::new(shrinks.into_iter());
         }
     }
 
-    fn snake_is_connected_prop(snake : Snake<HexagonVector>) -> bool {
+    fn snake_is_connected_prop(snake: Snake<HexagonVector>) -> bool {
         snake.segments.windows(2).all(|x| x[0].distance(&x[1]) == 1)
     }
 
@@ -81,7 +94,7 @@ mod tests {
         quickcheck(snake_is_connected_prop as fn(Snake<HexagonVector>) -> bool);
     }
 
-    fn step_preserves_connectedness_prop(snake : Snake<HexagonVector>, dir : HexagonDir) -> bool {
+    fn step_preserves_connectedness_prop(snake: Snake<HexagonVector>, dir: HexagonDir) -> bool {
         let mut snake = snake.clone();
         snake.step_in_direction(dir);
         return snake_is_connected_prop(snake);
@@ -92,7 +105,7 @@ mod tests {
         quickcheck(step_preserves_connectedness_prop as fn(Snake<HexagonVector>, HexagonDir) -> bool);
     }
 
-    fn head_is_at_head_prop(snake : Snake<HexagonVector>) -> bool {
+    fn head_is_at_head_prop(snake: Snake<HexagonVector>) -> bool {
         snake.segments.len() == 0 || snake.is_head_at(&snake.segments[0])
     }
 
@@ -101,7 +114,7 @@ mod tests {
         quickcheck(head_is_at_head_prop as fn(Snake<HexagonVector>) -> bool);
     }
 
-    fn only_head_is_at_head_prop(snake : Snake<HexagonVector>) -> bool {
+    fn only_head_is_at_head_prop(snake: Snake<HexagonVector>) -> bool {
         if snake.segments.len() == 0 {
             return true;
         }

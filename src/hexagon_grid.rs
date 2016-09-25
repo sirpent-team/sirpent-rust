@@ -10,40 +10,75 @@ pub enum HexagonDir {
     SouthEast,
     South,
     SouthWest,
-    NorthWest
+    NorthWest,
 }
 
 impl Direction for HexagonDir {
     fn variants() -> &'static [HexagonDir] {
-        static VARIANTS: &'static [HexagonDir] = &[HexagonDir::North, HexagonDir::NorthEast, HexagonDir::SouthEast, HexagonDir::South, HexagonDir::SouthWest, HexagonDir::NorthWest];
+        static VARIANTS: &'static [HexagonDir] = &[HexagonDir::North,
+                                                   HexagonDir::NorthEast,
+                                                   HexagonDir::SouthEast,
+                                                   HexagonDir::South,
+                                                   HexagonDir::SouthWest,
+                                                   HexagonDir::NorthWest];
         VARIANTS
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct HexagonVector {
-    pub x : isize,
-    pub y : isize
+    pub x: isize,
+    pub y: isize,
 }
 
 impl Vector for HexagonVector {
     type Direction = HexagonDir;
 
-    fn distance(&self, other : &HexagonVector) -> usize {
+    fn distance(&self, other: &HexagonVector) -> usize {
         let xdist = (self.x - other.x).abs();
         let ydist = (self.y - other.y).abs();
         let zdist = ((self.x + self.y) - (other.x + other.y)).abs();
         return max(max(xdist, ydist), zdist) as usize;
     }
 
-    fn neighbour(&self, direction : &HexagonDir) -> HexagonVector {
+    fn neighbour(&self, direction: &HexagonDir) -> HexagonVector {
         match *direction {
-            HexagonDir::North     => HexagonVector {x : self.x    , y : self.y - 1},
-            HexagonDir::NorthEast => HexagonVector {x : self.x + 1, y : self.y - 1},
-            HexagonDir::SouthEast => HexagonVector {x : self.x + 1, y : self.y    },
-            HexagonDir::South     => HexagonVector {x : self.x    , y : self.y + 1},
-            HexagonDir::SouthWest => HexagonVector {x : self.x - 1, y : self.y + 1},
-            HexagonDir::NorthWest => HexagonVector {x : self.x - 1, y : self.y    }
+            HexagonDir::North => {
+                HexagonVector {
+                    x: self.x,
+                    y: self.y - 1,
+                }
+            }
+            HexagonDir::NorthEast => {
+                HexagonVector {
+                    x: self.x + 1,
+                    y: self.y - 1,
+                }
+            }
+            HexagonDir::SouthEast => {
+                HexagonVector {
+                    x: self.x + 1,
+                    y: self.y,
+                }
+            }
+            HexagonDir::South => {
+                HexagonVector {
+                    x: self.x,
+                    y: self.y + 1,
+                }
+            }
+            HexagonDir::SouthWest => {
+                HexagonVector {
+                    x: self.x - 1,
+                    y: self.y + 1,
+                }
+            }
+            HexagonDir::NorthWest => {
+                HexagonVector {
+                    x: self.x - 1,
+                    y: self.y,
+                }
+            }
         }
     }
 
@@ -58,12 +93,12 @@ impl Vector for HexagonVector {
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct HexagonGrid {
-    pub radius : usize,
+    pub radius: usize,
 }
 
 impl HexagonGrid {
-    pub fn new(radius : usize) -> HexagonGrid {
-        HexagonGrid{radius : radius}
+    pub fn new(radius: usize) -> HexagonGrid {
+        HexagonGrid { radius: radius }
     }
 }
 
@@ -74,16 +109,16 @@ impl Grid for HexagonGrid {
         vec![self.radius as isize]
     }
 
-    fn is_within_bounds(&self, v : HexagonVector) -> bool {
+    fn is_within_bounds(&self, v: HexagonVector) -> bool {
         // @TODO: Calculate a more efficient bounding rule.
-        HexagonVector{x : 0, y : 0}.distance(&v) <= self.radius
+        HexagonVector { x: 0, y: 0 }.distance(&v) <= self.radius
     }
 
     fn cells(&self) -> Vec<HexagonVector> {
         unimplemented!();
     }
 
-    fn random_cell<R : Rng>(&self) -> HexagonVector {
+    fn random_cell<R: Rng>(&self) -> HexagonVector {
         unimplemented!();
     }
 }
@@ -96,20 +131,20 @@ mod tests {
     use grid::Vector;
 
     impl Arbitrary for HexagonVector {
-        fn arbitrary<G : Gen>(g : &mut G) -> HexagonVector {
+        fn arbitrary<G: Gen>(g: &mut G) -> HexagonVector {
             let (x, y) = Arbitrary::arbitrary(g);
-            return HexagonVector{x : x, y : y};
+            return HexagonVector { x: x, y: y };
         }
     }
 
     impl Arbitrary for HexagonDir {
-        fn arbitrary<G : Gen>(g : &mut G) -> HexagonDir {
-            let i : usize = g.gen_range(0, 6);
+        fn arbitrary<G: Gen>(g: &mut G) -> HexagonDir {
+            let i: usize = g.gen_range(0, 6);
             HexagonDir::variants()[i].clone()
         }
     }
 
-    fn identity_of_indescernibles_prop(v : HexagonVector) -> bool {
+    fn identity_of_indescernibles_prop(v: HexagonVector) -> bool {
         v.distance(&v) == 0
     }
 
@@ -118,16 +153,17 @@ mod tests {
         quickcheck(identity_of_indescernibles_prop as fn(HexagonVector) -> bool);
     }
 
-    fn triangle_inequality_prop(u : HexagonVector, v : HexagonVector, w : HexagonVector) -> bool {
+    fn triangle_inequality_prop(u: HexagonVector, v: HexagonVector, w: HexagonVector) -> bool {
         u.distance(&w) <= u.distance(&v) + v.distance(&w)
     }
 
     #[test]
     fn triangle_inequality() {
-        quickcheck(triangle_inequality_prop as fn(HexagonVector, HexagonVector, HexagonVector) -> bool);
+        quickcheck(triangle_inequality_prop as fn(HexagonVector, HexagonVector, HexagonVector)
+                                                  -> bool);
     }
 
-    fn symmetry_prop(v : HexagonVector, w : HexagonVector) -> bool {
+    fn symmetry_prop(v: HexagonVector, w: HexagonVector) -> bool {
         v.distance(&w) == w.distance(&v)
     }
 
@@ -136,7 +172,7 @@ mod tests {
         quickcheck(symmetry_prop as fn(HexagonVector, HexagonVector) -> bool);
     }
 
-    fn neighbour_adjacency_prop(v : HexagonVector, d : HexagonDir) -> bool {
+    fn neighbour_adjacency_prop(v: HexagonVector, d: HexagonDir) -> bool {
         v.distance(&v.neighbour(&d)) == 1
     }
 

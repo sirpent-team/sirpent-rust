@@ -7,8 +7,8 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(name: String, snake_uuid: Uuid) -> Player {
-        Player{
+    pub fn new(name: String, secret: String, snake_uuid: Uuid) -> Player {
+        Player {
             name: name,
             snake_uuid: snake_uuid,
         }
