@@ -1,16 +1,43 @@
-use grid::*;
+use std::net::{SocketAddr, TcpStream};
+use std::io::Result;
+use std::time;
+use uuid::Uuid;
 
-use std::collections::hash_map::{HashMap, RandomState};
-use std::marker::PhantomData;
-
-pub struct Player<G : Grid> {
-    phantom : PhantomData<G>
-
+#[derive(Serialize, Deserialize)]
+pub struct Player {
+    pub name: String,
+    #[serde(skip_serializing)]
+    pub server_address: Option<SocketAddr>,
+    pub snake_uuid: Uuid,
 }
 
-impl <G : Grid> Player<G> {
-    pub fn get_move(&mut self, locale : HashMap<G::Vector, Cell, RandomState>) -> <G::Vector as Vector>::Direction{
-        unimplemented!();
+impl Player {
+    pub fn new(name: String, server_address: SocketAddr, snake_uuid: Uuid) -> Player {
+        Player{
+            name: name,
+            server_address: Some(server_address),
+            snake_uuid: snake_uuid,
+        }
     }
-    //fn signal_defeat(&mut self);
+}
+
+pub struct PlayerConnection {
+    pub socket: TcpStream,
+    pub timeout: Option<time::Duration>,
+}
+
+impl PlayerConnection {
+    pub fn open(server_address: SocketAddr, timeout: Option<time::Duration>) -> Result<PlayerConnection> {
+        Ok(PlayerConnection{
+            socket: try!(Self::connect(server_address, timeout)),
+            timeout: timeout
+        })
+    }
+
+    fn connect(server_address: SocketAddr, timeout: Option<time::Duration>) -> Result<TcpStream> {
+        let socket = try!(TcpStream::connect(server_address));
+        try!(socket.set_read_timeout(timeout));
+        try!(socket.set_write_timeout(timeout));
+        Ok(socket)
+    }
 }
