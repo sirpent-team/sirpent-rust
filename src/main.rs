@@ -36,8 +36,9 @@ impl SirpentLabel {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Game<V: Vector> {
+    pub uuid: Uuid,
     pub world: World,
     pub players: HashMap<String, Player>,
     pub state: GameState<V>,
@@ -52,27 +53,26 @@ struct GameState<V: Vector> {
 #[derive(Serialize, Deserialize)]
 struct RequestMove<V: Vector> {
     pub sirpent: SirpentLabel,
-    pub world: World,
     pub player: Player,
-    pub state: GameState<V>,
+    pub game: Game<V>,
 }
 
 impl<V: Vector> RequestMove<V> {
-    pub fn new(world: World, player: Player, game_state: GameState<V>) -> RequestMove<V> {
+    pub fn new(player: Player, game: Game<V>) -> RequestMove<V> {
         RequestMove::<V> {
             sirpent: SirpentLabel::new("request_move".to_string()),
-            world: world,
             player: player,
-            state: game_state,
+            game: game,
         }
     }
 }
 
 fn tick<V: Vector>(game: Game<V>) {
-    for (player_name, player) in game.players {
+    // @TODO: Use lifetimes to avoid looping over Clone-d game.players, and cloning in general.
+    for (player_name, player) in game.clone().players {
         println!("Ticking on Player name={}", player_name);
 
-        let request_move = RequestMove::<V>::new(game.world, player, game.state.clone());
+        let request_move = RequestMove::new(player, game.clone());
         println!("request_move json={}",
                  serde_json::to_string_pretty(&request_move).unwrap());
         // player.send(request_move);
@@ -84,11 +84,12 @@ fn main() {
     println!("{}", Yellow.bold().paint("Sirpent"));
 
     let world = World::HexagonGrid(HexagonGrid { radius: 5 });
-    let state = GameState::<HexagonVector> {
+    let state = GameState {
         food: HexagonVector { x: 9, y: 13 },
         snakes: HashMap::new(),
     };
     let mut game = Game {
+        uuid: Uuid::new_v4(),
         world: world,
         players: HashMap::new(),
         state: state,
