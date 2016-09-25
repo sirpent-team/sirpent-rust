@@ -96,7 +96,7 @@ fn main() {
 
     let segments = vec![HexagonVector { x: 3, y: 8 }];
     let snake = Snake::new(segments);
-    let player = Player::new("abserde".to_string(), snake.uuid.clone());
+    let player = Player::new("abserde".to_string(), None, snake.uuid.clone());
 
     game.players.insert(player.name.clone(), player);
     game.state.snakes.insert(snake.uuid.clone(), snake);
