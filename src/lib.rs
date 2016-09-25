@@ -1,6 +1,9 @@
+#![feature(custom_derive, plugin)]
+#![plugin(serde_macros)]
+
 extern crate uuid;
 extern crate rand;
-extern crate rustc_serialize;
+extern crate serde;
 #[cfg(test)]
 extern crate quickcheck;
 

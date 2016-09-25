@@ -2,7 +2,7 @@ use uuid::Uuid;
 
 use grid::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snake<V : Vector> {
     pub dead : bool,
     pub uuid : Uuid,
@@ -10,6 +10,14 @@ pub struct Snake<V : Vector> {
 }
 
 impl<V : Vector> Snake<V> {
+    pub fn new(segments: Vec<V>) -> Snake<V> {
+        Snake::<V>{
+            dead: true,
+            uuid: Uuid::new_v4(),
+            segments: segments,
+        }
+    }
+
     pub fn is_head_at(&self, v : &V) -> bool {
         self.segments.len() > 0 && self.segments[0] == *v
     }

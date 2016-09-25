@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use grid::*;
 
 #[derive(Clone, Debug)]
@@ -14,7 +16,7 @@ impl Direction for TriangleDir {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct TriangleVector {
     pub u : isize,
     pub v : isize,
@@ -57,9 +59,15 @@ impl Vector for TriangleVector {
     }
 }
 
-#[derive(RustcEncodable, RustcDecodable)]
+#[derive(Serialize, Deserialize)]
 pub struct TriangleGrid {
     pub radius : usize,
+}
+
+impl TriangleGrid {
+    pub fn new(radius : usize) -> TriangleGrid {
+        TriangleGrid{radius : radius}
+    }
 }
 
 impl Grid for TriangleGrid {
@@ -74,14 +82,12 @@ impl Grid for TriangleGrid {
         TriangleVector{u : 0, v : 0, r: false}.distance(&v) <= self.radius
     }
 
-    fn name(&self) -> String {
-        "triangle_grid".to_string()
+    fn cells(&self) -> Vec<TriangleVector> {
+        unimplemented!();
     }
-}
 
-impl TriangleGrid {
-    fn new(radius : usize) -> TriangleGrid {
-        TriangleGrid{radius : radius}
+    fn random_cell<R : Rng>(&self) -> TriangleVector {
+        unimplemented!();
     }
 }
 

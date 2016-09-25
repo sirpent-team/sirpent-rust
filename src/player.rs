@@ -1,38 +1,43 @@
-use std::net;
-use std::io;
+use std::net::{SocketAddr, TcpStream};
+use std::io::Result;
 use std::time;
 use uuid::Uuid;
 
+#[derive(Serialize, Deserialize)]
 pub struct Player {
     pub name: String,
-    pub alive: bool,
+    #[serde(skip_serializing)]
+    pub server_address: Option<SocketAddr>,
     pub snake_uuid: Uuid,
-    server_address: net::SocketAddr,
-    socket: Option<net::TcpStream>,
 }
 
 impl Player {
-    pub fn new(name: String, server_address: net::SocketAddr) -> Player {
+    pub fn new(name: String, server_address: SocketAddr, snake_uuid: Uuid) -> Player {
         Player{
             name: name,
-            alive: true,
-            snake_uuid: Uuid::new_v4(),
-            server_address: server_address,
-            socket: None,
+            server_address: Some(server_address),
+            snake_uuid: snake_uuid,
         }
     }
+}
 
-    pub fn connect(&mut self, timeout: Option<time::Duration>) -> io::Result<()> {
-        let socket = try!(net::TcpStream::connect(self.server_address));
-        try!(socket.set_read_timeout(timeout));
-        try!(socket.set_write_timeout(timeout));
-        self.socket = Some(socket);
-        Ok(())
+pub struct PlayerConnection {
+    pub socket: TcpStream,
+    pub timeout: Option<time::Duration>,
+}
+
+impl PlayerConnection {
+    pub fn open(server_address: SocketAddr, timeout: Option<time::Duration>) -> Result<PlayerConnection> {
+        Ok(PlayerConnection{
+            socket: try!(Self::connect(server_address, timeout)),
+            timeout: timeout
+        })
     }
 
-    pub fn close(&mut self) -> io::Result<()> {
-        // @TODO: if socket open, send a closing message
-        self.socket = None;
-        Ok(())
+    fn connect(server_address: SocketAddr, timeout: Option<time::Duration>) -> Result<TcpStream> {
+        let socket = try!(TcpStream::connect(server_address));
+        try!(socket.set_read_timeout(timeout));
+        try!(socket.set_write_timeout(timeout));
+        Ok(socket)
     }
 }

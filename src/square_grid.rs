@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use grid::*;
 
 #[derive(Clone, Debug)]
@@ -15,7 +17,7 @@ impl Direction for SquareDir {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct SquareVector {
     pub x : isize,
     pub y : isize
@@ -48,10 +50,16 @@ impl Vector for SquareVector {
     }
 }
 
-#[derive(RustcEncodable, RustcDecodable)]
+#[derive(Serialize, Deserialize)]
 pub struct SquareGrid {
     pub width : isize,
     pub height : isize,
+}
+
+impl SquareGrid {
+    pub fn new(width : isize, height : isize) -> SquareGrid {
+        SquareGrid{width : width, height : height}
+    }
 }
 
 impl Grid for SquareGrid {
@@ -65,14 +73,12 @@ impl Grid for SquareGrid {
         v.x >= 0 && v.x < self.width && v.y >= 0 && v.y < self.height
     }
 
-    fn name(&self) -> String {
-        "square_grid".to_string()
+    fn cells(&self) -> Vec<SquareVector> {
+        unimplemented!();
     }
-}
 
-impl SquareGrid {
-    fn new(width : isize, height : isize) -> SquareGrid {
-        SquareGrid{width : width, height : height}
+    fn random_cell<R : Rng>(&self) -> SquareVector {
+        unimplemented!();
     }
 }
 

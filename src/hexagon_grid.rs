@@ -1,4 +1,6 @@
 use std::cmp::max;
+use rand::Rng;
+
 use grid::*;
 
 #[derive(Clone, Debug)]
@@ -18,7 +20,7 @@ impl Direction for HexagonDir {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct HexagonVector {
     pub x : isize,
     pub y : isize
@@ -54,9 +56,15 @@ impl Vector for HexagonVector {
     }
 }
 
-#[derive(RustcEncodable, RustcDecodable)]
+#[derive(Serialize, Deserialize)]
 pub struct HexagonGrid {
     pub radius : usize,
+}
+
+impl HexagonGrid {
+    pub fn new(radius : usize) -> HexagonGrid {
+        HexagonGrid{radius : radius}
+    }
 }
 
 impl Grid for HexagonGrid {
@@ -71,14 +79,12 @@ impl Grid for HexagonGrid {
         HexagonVector{x : 0, y : 0}.distance(&v) <= self.radius
     }
 
-    fn name(&self) -> String {
-        "hexagon_grid".to_string()
+    fn cells(&self) -> Vec<HexagonVector> {
+        unimplemented!();
     }
-}
 
-impl HexagonGrid {
-    fn new(radius : usize) -> HexagonGrid {
-        HexagonGrid{radius : radius}
+    fn random_cell<R : Rng>(&self) -> HexagonVector {
+        unimplemented!();
     }
 }
 
