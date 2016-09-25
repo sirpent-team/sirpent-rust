@@ -13,6 +13,10 @@ extern crate quickcheck;
 use ansi_term::Colour::*;
 use uuid::Uuid;
 use std::collections::HashMap;
+use std::net::{TcpListener, TcpStream};
+use std::thread;
+use std::io::{Read, BufRead, BufReader};
+use std::str;
 
 use sirpent::grid::*;
 use sirpent::hexagon_grid::*;
@@ -103,4 +107,50 @@ fn main() {
     game.state.snakes.insert(snake.uuid.clone(), snake);
 
     tick::<HexagonVector>(game);
+
+    // -----------------------------------------------------------------------
+
+    // @TODO: Nicer error for if port already in use.
+    let listener = TcpListener::bind("0.0.0.0:5514").unwrap();
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                thread::spawn(move || player_connection_handler(stream));
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+// @TODO: Get a competent review of the decoding code, and move into a type-parametric
+// read function.
+fn player_connection_handler(stream: TcpStream) {
+    // Prevent memory exhaustion: stop reading from string after 1MiB.
+    // @TODO @DEBUG: Need to reset this for each new message communication.
+    let mut take = BufReader::new(stream.take(0xfffff));
+
+    // Read ASCII-encoded length of JSON string to follow.
+    let mut msg_len_buf = Vec::new();
+    // @TODO: Don't panic.
+    take.read_until(b' ', &mut msg_len_buf).unwrap();
+    // Remove trailing space.
+    msg_len_buf.pop();
+    // Convert to slice.
+    let msg_len_buf = &msg_len_buf[..];
+    // Decode nubmer.
+    // @TODO: Don't panic.
+    let msg_len = u64::from_str_radix(str::from_utf8(msg_len_buf).unwrap(), 10).unwrap();
+    println!("{:?}", msg_len);
+
+    if msg_len == 0 {
+        return;
+    }
+
+    // Decode JSON into a Player.
+    let mut json_str = String::new();
+    // @TODO: Ensure correct number of chars read.
+    let read_json_str_chars = take.read_to_string(&mut json_str);
+    // @TODO: Don't panic.
+    let json: Player = serde_json::from_str(&*json_str).unwrap();
+    println!("{:?}", json);
 }

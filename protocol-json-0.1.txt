@@ -1,14 +1,13 @@
 > player client connects to sirpent-rust server
 
 > client sends name of player and the secret value to store to authenticate that player connecting
-84 {
-  "player": {
-    "name": "drogon",
-    "secret": "D50gOmol310982laskhdasdj"
-  }
+62 {
+  "name": "drogon",
+  "secret": "D50gOmol310982laskhdasdj"
 }
 
-> server sends details of current game being played
+> server sends match specification (how these matches are configured) so that client can confirm
+  they support the game features in-use
   (N.B. in time many games will be played at once?)
 139 {
   "sirpent": {

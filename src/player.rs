@@ -5,7 +5,9 @@ pub struct Player {
     pub name: String,
     #[serde(skip_serializing)]
     pub secret: Option<String>,
-    pub snake_uuid: Uuid,
+    // @TODO: Semantically GameState should have a field to map Player->Snake, as it isn't
+    // part of a Player except during a game.
+    pub snake_uuid: Option<Uuid>,
 }
 
 impl Player {
@@ -13,7 +15,7 @@ impl Player {
         Player {
             name: name,
             secret: secret,
-            snake_uuid: snake_uuid,
+            snake_uuid: Some(snake_uuid),
         }
     }
 }
