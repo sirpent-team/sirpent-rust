@@ -10,26 +10,24 @@
 
 > server sends details of current game being played
   (N.B. in time many games will be played at once?)
-220 {
+139 {
   "sirpent": {
-    "version": "0.1",
-    "msg_type": "current-games-specification"
+    "version": "0.1.0",
+    "msg_type": "match_spec"
   },
   "world": {
-    "grid": "hexagonal",
-    "shape": {
-      "type": "hexagonal",
-      "rings": 30
+    "hexagon_grid": {
+      "radius": 5
     }
   }
 }
 
 > player closes socket to refuse game
-> or player accepts game with this reply
-68 {
+  XOR player accepts game with this reply
+72 {
   "sirpent": {
     "version": "0.1",
-    "msg": "player-ack"
+    "msg": "player_accepts"
   }
 }
 
@@ -37,14 +35,12 @@
   N.B. starting value of moved should be empty?
 1036 {
   "sirpent": {
-    "version": "0.1",
-    "msg_type": "request-move"
+    "version": "0.1.0",
+    "msg_type": "request_move"
   },
   "world": {
-    "grid": "hexagonal",
-    "shape": {
-      "type": "hexagonal",
-      "rings": 30
+    "hexagon_grid": {
+      "radius": 5
     }
   },
   "player": {

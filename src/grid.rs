@@ -8,8 +8,11 @@ use triangle_grid::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub enum World {
+    #[serde(rename = "hexagon_grid")]
     HexagonGrid(HexagonGrid),
+    #[serde(rename = "square_grid")]
     SquareGrid(SquareGrid),
+    #[serde(rename = "triangle_grid")]
     TriangleGrid(TriangleGrid),
 }
 
