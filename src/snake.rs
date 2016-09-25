@@ -4,7 +4,7 @@ use grid::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snake<V: Vector> {
-    pub dead: bool,
+    pub alive: bool,
     pub uuid: Uuid,
     pub segments: Vec<V>,
 }
@@ -12,7 +12,7 @@ pub struct Snake<V: Vector> {
 impl<V: Vector> Snake<V> {
     pub fn new(segments: Vec<V>) -> Snake<V> {
         Snake::<V> {
-            dead: true,
+            alive: true,
             uuid: Uuid::new_v4(),
             segments: segments,
         }
@@ -51,7 +51,7 @@ mod tests {
 
     impl Arbitrary for Snake<HexagonVector> {
         fn arbitrary<G: Gen>(g: &mut G) -> Snake<HexagonVector> {
-            let dead = Arbitrary::arbitrary(g);
+            let alive = Arbitrary::arbitrary(g);
             let size = {
                 let s = g.size();
                 g.gen_range(0, s)
@@ -65,7 +65,7 @@ mod tests {
                 })
                 .collect();
             return Snake {
-                dead: dead,
+                alive: alive,
                 segments: segments,
                 uuid: Uuid::nil(),
             };
@@ -75,7 +75,7 @@ mod tests {
             let mut shrinks = Vec::new();
             for i in 0..self.segments.len() {
                 shrinks.push(Snake {
-                    dead: self.dead,
+                    alive: self.alive,
                     segments: self.segments[..i].to_vec(),
                     uuid: Uuid::nil(),
                 })
