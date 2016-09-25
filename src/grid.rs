@@ -6,7 +6,7 @@ use hexagon_grid::*;
 use square_grid::*;
 use triangle_grid::*;
 
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub enum World {
     HexagonGrid(HexagonGrid),
     SquareGrid(SquareGrid),

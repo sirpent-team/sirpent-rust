@@ -50,7 +50,7 @@ impl Vector for SquareVector {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct SquareGrid {
     pub width : isize,
     pub height : isize,

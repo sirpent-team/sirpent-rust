@@ -1,8 +1,19 @@
-> server connects to server run by player
+> player client connects to sirpent-rust server
+
+> client sends name of player and the secret value to store to authenticate that player connecting
+84 {
+  "player": {
+    "name": "drogon",
+    "secret": "D50gOmol310982laskhdasdj"
+  }
+}
+
+> server sends details of current game being played
+  (N.B. in time many games will be played at once?)
 220 {
   "sirpent": {
     "version": "0.1",
-    "msg_type": "new-game"
+    "msg_type": "current-games-specification"
   },
   "world": {
     "grid": "hexagonal",
@@ -10,9 +21,6 @@
       "type": "hexagonal",
       "rings": 30
     }
-  },
-  "player": {
-    "name": "drogon"
   }
 }
 

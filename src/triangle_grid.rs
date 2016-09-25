@@ -59,7 +59,7 @@ impl Vector for TriangleVector {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct TriangleGrid {
     pub radius : usize,
 }
