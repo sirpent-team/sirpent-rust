@@ -2,9 +2,9 @@ use std::marker;
 use serde::{Serialize, Deserialize};
 use rand::Rng;
 
-use hexagon_grid::*;
-use square_grid::*;
-use triangle_grid::*;
+pub use hexagon_grid::*;
+pub use square_grid::*;
+pub use triangle_grid::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub enum World {

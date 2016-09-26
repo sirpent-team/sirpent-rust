@@ -8,11 +8,15 @@ extern crate serde;
 extern crate quickcheck;
 
 pub mod grid;
-pub mod hexagon_grid;
-pub mod square_grid;
-pub mod triangle_grid;
+mod hexagon_grid;
+mod square_grid;
+mod triangle_grid;
 pub mod snake;
 pub mod player;
+
+pub use grid::*;
+pub use snake::*;
+pub use player::*;
 
 #[cfg(test)]
 mod tests {

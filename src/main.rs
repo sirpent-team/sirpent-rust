@@ -18,12 +18,7 @@ use std::thread;
 use std::io::{Read, BufRead, BufReader};
 use std::str;
 
-use sirpent::grid::*;
-use sirpent::hexagon_grid::*;
-// use sirpent::square_grid::*;
-// use sirpent::triangle_grid::*;
-use sirpent::snake::*;
-use sirpent::player::*;
+use sirpent::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 struct SirpentLabel {
