@@ -27,7 +27,15 @@ impl<V: Vector> Snake<V> {
     }
 
     pub fn has_collided_into(&self, other: &Snake<V>) -> bool {
-        self.segments.len() > 0 && other.has_segment_at(&self.segments[0])
+        let my_head = self.segments[0];
+        let mut next_candidate = my_head.distance(&other.segments[0]);
+        while let Some(here) = other.segments.get(next_candidate){
+            if my_head == *here {
+                return true;
+            }
+            next_candidate += my_head.distance(&here);
+        }
+        return false;
     }
 
     pub fn step_in_direction(&mut self, dir: V::Direction) {
