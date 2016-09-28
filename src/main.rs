@@ -111,83 +111,20 @@ fn main() {
     // -----------------------------------------------------------------------
 
     thread::spawn(move || {
-        let s = SirpentServer {
-            addr: None,
-            transport: None,
-        };
-        s.plain("0.0.0.0:5513", &player_connection_handler)
+        let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
+        plain_server.listen(&player_connection_handler, None)
     });
 
     // -----------------------------------------------------------------------
 
-    let cert = PathBuf::from("/tmp/cert.pem");
-    let key = PathBuf::from("/tmp/key.pem");
+    let cert = PathBuf::from("cert.pem");
+    let key = PathBuf::from("key.pem");
     thread::spawn(move || {
-        let s = SirpentServer {
-            addr: None,
-            transport: None,
-        };
-        s.tls("0.0.0.0:5514", &player_connection_handler, cert, key)
+        let tls_server = SirpentServer::tls(cert, key, "0.0.0.0:5514").unwrap();
+        tls_server.listen(&player_connection_handler, None)
     });
 
     // -----------------------------------------------------------------------
-
-    // @TODO: Nicer error for if port already in use.
-    // let listener = TcpListener::bind("0.0.0.0:5513").unwrap();
-    // for stream in listener.incoming() {
-    // match stream {
-    // Ok(stream) => {
-    // let (mut stream0, mut stream1) = NetStream::new_unsecured(stream).unwrap();
-    // let mut reader = BufReader::new(stream0);
-    // let mut writer = BufWriter::new(stream1);
-    // thread::spawn(move || player_connection_handler(&mut reader, &mut writer));
-    // }
-    // Err(_) => {}
-    // }
-    // }
-
-    // thread::spawn(move || {
-    // let listener = TcpListener::bind("0.0.0.0:5513").unwrap();
-    // for stream in listener.incoming() {
-    // match stream {
-    // Ok(stream) => {
-    // println!("unsecured");
-    // let (mut stream0, mut stream1) = NetStream::new_unsecured(stream).unwrap();
-    // let mut reader = BufReader::new(stream0);
-    // let mut writer = BufWriter::new(stream1);
-    // thread::spawn(move || player_connection_handler(&mut reader, &mut writer));
-    // }
-    // Err(_) => {}
-    // }
-    // }
-    // });
-    //
-    // -----------------------------------------------------------------------
-    //
-    // @TODO: Nicer error for if port already in use.
-    // thread::spawn(move || {
-    //
-    //
-    // let mut ctx = SslContext::new(SslMethod::Sslv23).unwrap();
-    // ctx.set_cipher_list("ALL!EXPORT!EXPORT40!EXPORT56!aNULL!LOW!RC4@STRENGTH").unwrap();
-    // ctx.set_certificate_file(cert, X509FileType::PEM).unwrap();
-    // ctx.set_private_key_file(key, X509FileType::PEM).unwrap();
-    //
-    // let listener = TcpListener::bind("0.0.0.0:5514").unwrap();
-    // for stream in listener.incoming() {
-    // match stream {
-    // Ok(stream) => {
-    // println!("ssl");
-    // let (mut ssl_stream0, mut ssl_stream1) = NetStream::new_ssl(&ctx, stream)
-    // .unwrap();
-    // let mut reader = BufReader::new(ssl_stream0);
-    // let mut writer = BufWriter::new(ssl_stream1);
-    // thread::spawn(move || player_connection_handler(&mut reader, &mut writer));
-    // }
-    // Err(_) => {}
-    // }
-    // }
-    // });
 
     thread::sleep(time::Duration::from_millis(500));
     thread::spawn(move || tell_player_to_unsecured());

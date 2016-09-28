@@ -4,11 +4,11 @@
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
 use std::path::PathBuf;
-use openssl::ssl::{SslContext, SslMethod, SslStream, IntoSsl, MaybeSslStream};
+use openssl::ssl::{SslContext, SslMethod, SslStream, MaybeSslStream};
 use openssl::ssl::error::SslError;
 use openssl::x509::X509FileType;
 use std::result::Result as StdResult;
-use std::io::{self, Result, Error, ErrorKind, BufReader, BufWriter, BufRead};
+use std::io::{Result, Error, ErrorKind, BufReader, BufWriter};
 use std::error::Error as StdError;
 
 #[derive(Clone)]
@@ -49,12 +49,6 @@ pub fn ssl_to_io<T>(res: StdResult<T, SslError>) -> Result<T> {
     }
 }
 
-impl Default for Transport {
-    fn default() -> Self {
-        Transport::Normal
-    }
-}
-
 /// A settings struct containing a set of timeouts which can be applied to a server.
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Timeouts {
@@ -86,7 +80,7 @@ pub struct SirpentServer {
     pub addr: Option<SocketAddr>,
 
     /// Once listening, the protocol used to serve content.
-    pub transport: Option<Transport>,
+    pub transport: Transport,
 }
 
 impl SirpentServer {
@@ -105,12 +99,16 @@ impl SirpentServer {
     ///
     /// Panics if the provided address does not parse. To avoid this
     /// call `to_socket_addrs` yourself and pass a parsed `SocketAddr`.
-    pub fn plain<A: ToSocketAddrs, F>(self, addr: A, mut f: F)
-        where F: FnMut(MaybeSslStream<TcpStream>,
-                       BufReader<MaybeSslStream<TcpStream>>,
-                       BufWriter<MaybeSslStream<TcpStream>>)
-    {
-        self.listen_with(addr, f, Transport::Normal, None);
+    pub fn plain<A: ToSocketAddrs>(addr: A) -> Result<SirpentServer> {
+        let sock_addr = addr.to_socket_addrs()
+            .ok()
+            .and_then(|mut addrs| addrs.next())
+            .expect("Could not parse socket address.");
+
+        Ok(SirpentServer {
+            addr: Some(sock_addr),
+            transport: Transport::Normal,
+        })
     }
 
     /// Kick off the server process using the HTTPS protocol.
@@ -128,18 +126,22 @@ impl SirpentServer {
     ///
     /// Panics if the provided address does not parse. To avoid this
     /// call `to_socket_addrs` yourself and pass a parsed `SocketAddr`.
-    pub fn tls<A: ToSocketAddrs, F>(self, addr: A, mut f: F, certificate: PathBuf, key: PathBuf)
-        where F: FnMut(MaybeSslStream<TcpStream>,
-                       BufReader<MaybeSslStream<TcpStream>>,
-                       BufWriter<MaybeSslStream<TcpStream>>)
-    {
-        self.listen_with(addr,
-                         f,
-                         Transport::Ssl {
-                             certificate: certificate,
-                             key: key,
-                         },
-                         None);
+    pub fn tls<A: ToSocketAddrs>(certificate: PathBuf,
+                                 key: PathBuf,
+                                 addr: A)
+                                 -> Result<SirpentServer> {
+        let sock_addr = addr.to_socket_addrs()
+            .ok()
+            .and_then(|mut addrs| addrs.next())
+            .expect("Could not parse socket address.");
+
+        Ok(SirpentServer {
+            addr: Some(sock_addr),
+            transport: Transport::Ssl {
+                certificate: certificate,
+                key: key,
+            },
+        })
     }
 
     /// Kick off the server process with X threads.
@@ -148,30 +150,19 @@ impl SirpentServer {
     ///
     /// Panics if the provided address does not parse. To avoid this
     /// call `to_socket_addrs` yourself and pass a parsed `SocketAddr`.
-    pub fn listen_with<A: ToSocketAddrs, F>(mut self,
-                                            addr: A,
-                                            mut f: F,
-                                            transport: Transport,
-                                            timeouts: Option<Timeouts>)
+    pub fn listen<F>(&self, mut f: F, timeouts: Option<Timeouts>)
         where F: FnMut(MaybeSslStream<TcpStream>,
                        BufReader<MaybeSslStream<TcpStream>>,
                        BufWriter<MaybeSslStream<TcpStream>>)
     {
-        let sock_addr = addr.to_socket_addrs()
-            .ok()
-            .and_then(|mut addrs| addrs.next())
-            .expect("Could not parse socket address.");
-
-        self.addr = Some(sock_addr);
-        self.transport = Some(transport.clone());
-
-        let listener = TcpListener::bind(addr).unwrap();
+        let transport = self.transport.clone();
+        let listener = TcpListener::bind(self.addr.unwrap()).unwrap();
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
                     let encapsulated_stream = transport.encapsulate(stream).unwrap();
-                    let mut reader = BufReader::new(encapsulated_stream.try_clone().unwrap());
-                    let mut writer = BufWriter::new(encapsulated_stream.try_clone().unwrap());
+                    let reader = BufReader::new(encapsulated_stream.try_clone().unwrap());
+                    let writer = BufWriter::new(encapsulated_stream.try_clone().unwrap());
 
                     f(encapsulated_stream, reader, writer);
                 }
