@@ -28,7 +28,8 @@ impl Transport {
             Transport::Normal => Ok(MaybeSslStream::Normal(stream)),
             Transport::Ssl { ref certificate, ref key } => {
                 let mut context = SslContext::new(SslMethod::Sslv23).unwrap();
-                ssl_to_io(context.set_cipher_list("ALL!EXPORT!EXPORT40!EXPORT56!aNULL!LOW!RC4@STRENGTH"))?;
+                let cipher_list = "ALL!EXPORT!EXPORT40!EXPORT56!aNULL!LOW!RC4@STRENGTH";
+                ssl_to_io(context.set_cipher_list(cipher_list))?;
                 ssl_to_io(context.set_certificate_file(certificate, X509FileType::PEM))?;
                 ssl_to_io(context.set_private_key_file(key, X509FileType::PEM))?;
                 Ok(MaybeSslStream::Ssl(ssl_to_io(SslStream::accept(&context, stream))?))
