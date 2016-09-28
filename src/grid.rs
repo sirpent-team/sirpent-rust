@@ -1,6 +1,7 @@
-use std::marker;
-use serde::{Serialize, Deserialize};
 use rand::Rng;
+use std::marker;
+use std::fmt::Debug;
+use serde::{Serialize, Deserialize};
 
 pub use hexagon_grid::*;
 pub use square_grid::*;
@@ -16,14 +17,14 @@ pub enum World {
     TriangleGrid(TriangleGrid),
 }
 
-pub trait Direction
+pub trait Direction: Serialize + Deserialize + Clone + Debug
     where Self: marker::Sized
 {
     fn variants() -> &'static [Self];
 }
 
 pub trait Vector: Eq + Copy + Serialize + Deserialize {
-    type Direction;// : Direction;
+    type Direction: Direction + Serialize + Deserialize + Clone + Debug;
     fn distance(&self, other: &Self) -> usize;
     fn neighbour(&self, direction: &Self::Direction) -> Self;
     fn neighbours(&self) -> Vec<Self>;

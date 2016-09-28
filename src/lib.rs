@@ -16,11 +16,15 @@ mod triangle_grid;
 pub mod snake;
 pub mod player;
 pub mod net;
+pub mod commands;
+pub mod game;
 
 pub use grid::*;
 pub use snake::*;
 pub use player::*;
 pub use net::*;
+pub use commands::*;
+pub use game::*;
 
 #[cfg(test)]
 mod tests {

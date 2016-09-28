@@ -2,7 +2,7 @@ use rand::Rng;
 
 use grid::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SquareDir {
     North,
     East,
