@@ -1,9 +1,11 @@
+#![feature(question_mark)]
 #![feature(custom_derive, plugin)]
 #![plugin(serde_macros)]
 
 extern crate uuid;
 extern crate rand;
 extern crate serde;
+extern crate openssl;
 #[cfg(test)]
 extern crate quickcheck;
 
@@ -13,10 +15,12 @@ mod square_grid;
 mod triangle_grid;
 pub mod snake;
 pub mod player;
+pub mod net;
 
 pub use grid::*;
 pub use snake::*;
 pub use player::*;
+pub use net::*;
 
 #[cfg(test)]
 mod tests {

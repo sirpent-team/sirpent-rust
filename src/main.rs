@@ -7,6 +7,7 @@ extern crate rand;
 extern crate uuid;
 extern crate serde;
 extern crate serde_json;
+extern crate openssl;
 #[cfg(test)]
 extern crate quickcheck;
 
@@ -15,8 +16,12 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
-use std::io::{Read, BufRead, BufReader};
+use std::io::{Write, Read, BufRead, BufReader, BufWriter};
+use openssl::ssl::{SslContext, SslMethod, SslStream, SSL_VERIFY_NONE, Ssl, MaybeSslStream};
+use openssl::x509::X509FileType;
 use std::str;
+use std::time;
+use std::path::PathBuf;
 
 use sirpent::*;
 
@@ -105,29 +110,114 @@ fn main() {
 
     // -----------------------------------------------------------------------
 
+    thread::spawn(move || {
+        let s = SirpentServer {
+            addr: None,
+            transport: None,
+        };
+        s.plain("0.0.0.0:5513", &player_connection_handler)
+    });
+
+    // -----------------------------------------------------------------------
+
+    let cert = PathBuf::from("/tmp/cert.pem");
+    let key = PathBuf::from("/tmp/key.pem");
+    thread::spawn(move || {
+        let s = SirpentServer {
+            addr: None,
+            transport: None,
+        };
+        s.tls("0.0.0.0:5514", &player_connection_handler, cert, key)
+    });
+
+    // -----------------------------------------------------------------------
+
     // @TODO: Nicer error for if port already in use.
-    let listener = TcpListener::bind("0.0.0.0:5514").unwrap();
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                thread::spawn(move || player_connection_handler(stream));
-            }
-            Err(_) => {}
-        }
+    // let listener = TcpListener::bind("0.0.0.0:5513").unwrap();
+    // for stream in listener.incoming() {
+    // match stream {
+    // Ok(stream) => {
+    // let (mut stream0, mut stream1) = NetStream::new_unsecured(stream).unwrap();
+    // let mut reader = BufReader::new(stream0);
+    // let mut writer = BufWriter::new(stream1);
+    // thread::spawn(move || player_connection_handler(&mut reader, &mut writer));
+    // }
+    // Err(_) => {}
+    // }
+    // }
+
+    // thread::spawn(move || {
+    // let listener = TcpListener::bind("0.0.0.0:5513").unwrap();
+    // for stream in listener.incoming() {
+    // match stream {
+    // Ok(stream) => {
+    // println!("unsecured");
+    // let (mut stream0, mut stream1) = NetStream::new_unsecured(stream).unwrap();
+    // let mut reader = BufReader::new(stream0);
+    // let mut writer = BufWriter::new(stream1);
+    // thread::spawn(move || player_connection_handler(&mut reader, &mut writer));
+    // }
+    // Err(_) => {}
+    // }
+    // }
+    // });
+    //
+    // -----------------------------------------------------------------------
+    //
+    // @TODO: Nicer error for if port already in use.
+    // thread::spawn(move || {
+    //
+    //
+    // let mut ctx = SslContext::new(SslMethod::Sslv23).unwrap();
+    // ctx.set_cipher_list("ALL!EXPORT!EXPORT40!EXPORT56!aNULL!LOW!RC4@STRENGTH").unwrap();
+    // ctx.set_certificate_file(cert, X509FileType::PEM).unwrap();
+    // ctx.set_private_key_file(key, X509FileType::PEM).unwrap();
+    //
+    // let listener = TcpListener::bind("0.0.0.0:5514").unwrap();
+    // for stream in listener.incoming() {
+    // match stream {
+    // Ok(stream) => {
+    // println!("ssl");
+    // let (mut ssl_stream0, mut ssl_stream1) = NetStream::new_ssl(&ctx, stream)
+    // .unwrap();
+    // let mut reader = BufReader::new(ssl_stream0);
+    // let mut writer = BufWriter::new(ssl_stream1);
+    // thread::spawn(move || player_connection_handler(&mut reader, &mut writer));
+    // }
+    // Err(_) => {}
+    // }
+    // }
+    // });
+
+    thread::sleep(time::Duration::from_millis(500));
+    thread::spawn(move || tell_player_to_unsecured());
+    thread::sleep(time::Duration::from_millis(500));
+    thread::spawn(move || tell_player_to_ssl());
+
+    loop {
+        thread::sleep(time::Duration::from_millis(500));
     }
 }
 
 // @TODO: Get a competent review of the decoding code, and move into a type-parametric
 // read function.
-fn player_connection_handler(stream: TcpStream) {
+fn player_connection_handler(mut stream: MaybeSslStream<TcpStream>,
+                             mut reader: BufReader<MaybeSslStream<TcpStream>>,
+                             mut writer: BufWriter<MaybeSslStream<TcpStream>>) {
     // Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
-    let mut take = BufReader::new(stream.take(0xfffff));
+    // let mut take = reader.clone().take(0xfffff);
+    //
+    // let json: Player = serde_json::from_reader(reader).unwrap();
+    // println!("{:?}", json);
+    // writer.write_fmt(format_args!("abc")).unwrap();
+    // writer.flush().unwrap();
+
 
     // Read ASCII-encoded length of JSON string to follow.
     let mut msg_len_buf = Vec::new();
     // @TODO: Don't panic.
-    take.read_until(b' ', &mut msg_len_buf).unwrap();
+    reader.read_until(b' ', &mut msg_len_buf).unwrap();
     // Remove trailing space.
     msg_len_buf.pop();
     // Convert to slice.
@@ -141,11 +231,36 @@ fn player_connection_handler(stream: TcpStream) {
         return;
     }
 
-    // Decode JSON into a Player.
-    let mut json_str = String::new();
-    // @TODO: Ensure correct number of chars read.
-    let read_json_str_chars = take.read_to_string(&mut json_str);
-    // @TODO: Don't panic.
-    let json: Player = serde_json::from_str(&*json_str).unwrap();
+    let mut take = reader.take(msg_len & 0xfffff);
+
+    let json: Player = serde_json::from_reader(take).unwrap();
     println!("{:?}", json);
+
+    // // Decode JSON into a Player.
+    // let mut json_str = Vec::with_capacity((msg_len + 1) as usize);
+    // let mut json_str_buf = &mut json_str[..];
+    // @TODO: Ensure correct number of chars read.
+    // let read_json_str_chars = reader.read_exact(&mut json_str_buf).unwrap();
+    // println!("{:?}", json_str_buf);
+    // @TODO: Don't panic.
+    // let json: Player = serde_json::from_str(str::from_utf8(json_str_buf).unwrap()).unwrap();
+    // println!("{:?}", json);
+}
+
+pub fn tell_player_to_unsecured() {
+    let mut stream = TcpStream::connect("127.0.0.1:5513").unwrap();
+    let s = b"56 {\"name\": \"drogon\", \"secret\": \"D50gOmol310982laskhdasdj\"}";
+    let mut bw = BufWriter::new(stream);
+    bw.write(s);
+    bw.flush();
+}
+
+pub fn tell_player_to_ssl() {
+    let mut stream = TcpStream::connect("127.0.0.1:5514").unwrap();
+    let ssl = ssl_to_io(SslContext::new(SslMethod::Tlsv1)).unwrap();
+    let mut ssl_stream = ssl_to_io(SslStream::connect(&ssl, stream)).unwrap();
+    let s = b"56 {\"name\": \"drogon\", \"secret\": \"D50gOmol310982laskhdasdj\"}";
+    let mut bw = BufWriter::new(ssl_stream);
+    bw.write(s);
+    bw.flush();
 }
