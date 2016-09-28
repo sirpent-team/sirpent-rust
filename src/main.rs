@@ -1,4 +1,4 @@
-#![feature(custom_derive, plugin)]
+#![feature(custom_derive, plugin, question_mark)]
 #![plugin(serde_macros)]
 
 extern crate ansi_term;
@@ -16,11 +16,13 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::net::TcpStream;
 use std::thread;
-use std::io::{Read, BufReader, BufWriter};
+use std::io::{Result, Read, Write, BufReader, BufWriter, Bytes, Error, ErrorKind};
 use openssl::ssl::{SslContext, SslMethod, SslStream, MaybeSslStream};
 use std::str;
 use std::time;
 use std::path::PathBuf;
+use std::result::Result as StdResult;
+use std::error::Error as StdError;
 
 use sirpent::*;
 
@@ -89,45 +91,87 @@ fn main() {
     }
 }
 
+pub trait TryCloneableExt: Sized {
+    fn try_clone(&self) -> Result<Self>;
+}
+
+// http://stackoverflow.com/a/34961073 indicates this can never work.
+impl<S> TryCloneableExt for MaybeSslStream<S> where S: Read + Write {
+}
+
+/// Converts a Result<T, serde_json::Error> into an Result<T>.
+pub fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> Result<T> {
+    match res {
+        Ok(x) => Ok(x),
+        Err(e) => {
+            Err(Error::new(ErrorKind::Other,
+                           &format!("A serde_json error occurred. ({})", e.description())[..]))
+        }
+    }
+}
+
+pub struct PlayerConnection<V: Vector, S: Read + Write + TryCloneableExt> {
+    pub stream: S,
+    reader: serde_json::StreamDeserializer<Command<V>, Bytes<S>>,
+    writer: BufWriter<S>,
+}
+
+impl<V: Vector, S: Read + Write + TryCloneableExt> PlayerConnection<V, S> {
+    pub fn new(stream: S) -> Result<PlayerConnection<V, S>> {
+        Ok(PlayerConnection {
+            stream: stream.try_clone()?,
+            reader: serde_json::StreamDeserializer::new(stream.try_clone()?.bytes()),
+            writer: BufWriter::new(stream.try_clone()?),
+        })
+    }
+
+    pub fn read(&mut self) -> Result<Command<V>> {
+        match serde_to_io(self.reader.next().unwrap()) {
+            Ok(command) => Ok(command),
+            Err(e) => {
+                // @TODO: It seems irrelevant whether writing ERROR succeeded or not. If it
+                // succeeds then wonderful; the other end might get to know something went wrong.
+                // If it fails then we're much better off returning the Read error than the
+                // extra-level-of-indirection Write error.
+                self.write(&Command::Error).unwrap_or(());
+                Err(e)
+            }
+        }
+    }
+
+    pub fn write(&mut self, command: &Command<V>) -> Result<()> {
+        serde_to_io(serde_json::to_writer(&mut self.writer, command))
+    }
+}
+
 // @TODO: Get a competent review of the decoding code, and move into a type-parametric
 // read function.
-fn player_connection_handler<V: Vector>(_: MaybeSslStream<TcpStream>,
-                                        reader: BufReader<MaybeSslStream<TcpStream>>,
-                                        mut writer: BufWriter<MaybeSslStream<TcpStream>>) {
-
+fn player_connection_handler<V: Vector>(stream: MaybeSslStream<TcpStream>,
+                                        _: BufReader<MaybeSslStream<TcpStream>>,
+                                        _: BufWriter<MaybeSslStream<TcpStream>>) {
     // Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
     // let mut take = reader.clone().take(0xfffff);
 
-    let mut command_reader = serde_json::StreamDeserializer::new(reader.bytes());
-    let mut command: Command<V>;
+    let mut player_connection = PlayerConnection::<V, MaybeSslStream<TcpStream>>::new(stream).unwrap();
 
-    command = Command::version();
-    serde_json::to_writer(&mut writer, &command).unwrap();
+    player_connection.write(&Command::version()).unwrap();
 
-    command = Command::Server {
+    player_connection.write(&Command::Server {
         world: None,
         timeout: None,
-    };
-    serde_json::to_writer(&mut writer, &command).unwrap();
+    }).unwrap();
 
-    command = command_reader.next().unwrap().unwrap_or_else(|e| {
-        command = Command::Error;
-        serde_json::to_writer(&mut writer, &command).unwrap();
-        panic!(e);
-    });
-    match command {
+    match player_connection.read().unwrap() {
         Command::Hello { player } => println!("{:?}", player),
         Command::Quit => println!("QUIT"),
-        _ => {
-            command = Command::Error;
-            serde_json::to_writer(&mut writer, &command).unwrap();
+        command => {
+            player_connection.write(&Command::Error);
             panic!(format!("Unexpected {:?}.", command));
         }
-    };
+    }
 
-    command = Command::NewGame;
-    serde_json::to_writer(&mut writer, &command).unwrap();
+    player_connection.write(&Command::NewGame).unwrap();
 }
 
 pub fn tell_player_to_unsecured() {

@@ -1,5 +1,4 @@
-#![feature(question_mark)]
-#![feature(custom_derive, plugin)]
+#![feature(custom_derive, plugin, question_mark)]
 #![plugin(serde_macros)]
 
 extern crate uuid;
