@@ -24,15 +24,16 @@ pub trait Direction
     fn variants() -> &'static [Self];
 }
 
-pub trait Vector: Eq + Copy + Serialize + Deserialize {
-    type Direction: Direction + Serialize + Deserialize + Clone + Debug;
+pub trait Vector
+    : PartialEq + Eq + Copy + Serialize + Deserialize + Clone + Debug {
+    type Direction: Direction;
     fn distance(&self, other: &Self) -> usize;
     fn neighbour(&self, direction: &Self::Direction) -> Self;
     fn neighbours(&self) -> Vec<Self>;
 }
 
-pub trait Grid: Serialize + Deserialize {
-    type Vector;// : Vector;
+pub trait Grid: PartialEq + Eq + Copy + Serialize + Deserialize + Clone + Debug {
+    type Vector: Vector;
     fn dimensions(&self) -> Vec<isize>;
     fn is_within_bounds(&self, v: Self::Vector) -> bool;
     fn cells(&self) -> Vec<Self::Vector>;
