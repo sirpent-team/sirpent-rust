@@ -16,7 +16,7 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::net::TcpStream;
 use std::thread;
-use std::io::{Write, Read, BufReader, BufWriter};
+use std::io::{Read, BufReader, BufWriter};
 use openssl::ssl::{SslContext, SslMethod, SslStream, MaybeSslStream};
 use std::str;
 use std::time;
@@ -93,56 +93,57 @@ fn main() {
 // read function.
 fn player_connection_handler(_: MaybeSslStream<TcpStream>,
                              reader: BufReader<MaybeSslStream<TcpStream>>,
-                             _: BufWriter<MaybeSslStream<TcpStream>>) {
+                             mut writer: BufWriter<MaybeSslStream<TcpStream>>) {
 
     // Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
     // let mut take = reader.clone().take(0xfffff);
 
-    let mut message_iter = serde_json::StreamDeserializer::new(reader.bytes());
-    let player: Command<HexagonVector>;
-    player = message_iter.next().unwrap().ok().unwrap();
-    println!("{:?}", player);
+    let mut command_reader = serde_json::StreamDeserializer::new(reader.bytes());
+
+    let version: Command<HexagonVector> = Command::version();
+    serde_json::to_writer(&mut writer, &version).unwrap();
+
+    let server: Command<HexagonVector> = Command::Server {
+        world: None,
+        timeout: None
+    };
+    serde_json::to_writer(&mut writer, &server).unwrap();
+
+    let hello: Option<Command<HexagonVector>> = command_reader.next().unwrap().ok();
+    match hello {
+        Some(Command::Hello{player}) => println!("{:?}", player),
+        Some(Command::Quit) => println!("QUIT"),
+        Some(Command::Error) => println!("ERROR"),
+        _ => panic!("Unrecognised command."),
+    };
+
+    let new_game: Command<HexagonVector> = Command::NewGame;
+    serde_json::to_writer(&mut writer, &new_game).unwrap();
 }
 
 pub fn tell_player_to_unsecured() {
     let stream = TcpStream::connect("127.0.0.1:5513").unwrap();
+    let mut writer = BufWriter::new(stream);
 
-    let player = Player {
+    let message: Command<HexagonVector> = Command::Hello{player: Player{
         name: "daenerys".to_string(),
         secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
         snake_uuid: None,
-    };
-    let message: Command<HexagonVector> = Command::Hello { player: player };
-
-    println!("{}", serde_json::to_string_pretty(&message).unwrap());
-
-    let mut bw = BufWriter::new(stream);
-    bw.write(serde_json::to_string(&message).unwrap().as_bytes()).unwrap();
-    bw.flush().unwrap();
+    }};
+    serde_json::to_writer(&mut writer, &message).unwrap();
 }
 
 pub fn tell_player_to_ssl() {
     let stream = TcpStream::connect("127.0.0.1:5514").unwrap();
     let ssl = ssl_to_io(SslContext::new(SslMethod::Tlsv1)).unwrap();
     let ssl_stream = ssl_to_io(SslStream::connect(&ssl, stream)).unwrap();
+    let mut writer = BufWriter::new(ssl_stream);
 
-    let player = Player {
+    let message: Command<HexagonVector> = Command::Hello{player: Player{
         name: "daenerys".to_string(),
         secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
         snake_uuid: None,
-    };
-    let message: Command<HexagonVector> = Command::Hello { player: player };
-
-    println!("{}", serde_json::to_string_pretty(&message).unwrap());
-
-    let mut bw = BufWriter::new(ssl_stream);
-    bw.write(serde_json::to_string(&message).unwrap().as_bytes()).unwrap();
-    bw.flush().unwrap();
-
-    let message: Command<HexagonVector> = Command::Join;
-    println!("{}", serde_json::to_string_pretty(&message).unwrap());
-
-    let message: Command<HexagonVector> = Command::Move { direction: HexagonDir::SouthEast };
-    println!("{}", serde_json::to_string_pretty(&message).unwrap());
+    }};
+    serde_json::to_writer(&mut writer, &message).unwrap();
 }

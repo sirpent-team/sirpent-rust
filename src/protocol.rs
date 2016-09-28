@@ -11,19 +11,17 @@ pub enum Command<V: Vector> {
     // Upon connect, the server must send a VERSION message.
     #[serde(rename = "VERSION")]
     Version { sirpent: String, protocol: String },
-    // Then the client must send a HELLO message.
-    #[serde(rename = "HELLO")]
-    Hello { player: Player },
-    // The server must reply with a SERVER message.
+    // The server must then send a SERVER message.
     #[serde(rename = "SERVER")]
     Server {
         world: Option<World>,
         timeout: Option<Duration>,
     },
-    // If the client supports that STATUS and wants to play, they must send a JOIN message.
-    #[serde(rename = "JOIN")]
-    Join,
-    // Otherwise or at any time, the client can send a QUIT message before closing the socket.
+    // The client should decide whether it is compatible with this protocol and server setup.
+    // If the client wishes to continue it must send a HELLO message.
+    #[serde(rename = "HELLO")]
+    Hello { player: Player },
+    // Otherwise or at any time, the client can send a QUIT message or just close the socket.
     #[serde(rename = "QUIT")]
     Quit,
     // In case of a problem on either side, an ERROR message can be sent.
