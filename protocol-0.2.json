@@ -1,0 +1,82 @@
+// A single Commentary needs forming. These example messages go along with commentary in src/commands.rs
+
+{
+  "VERSION": {
+    "sirpent": "0.0.1",
+    "protocol": "0.2"
+  }
+}
+
+{
+  "HELLO": {
+    "player": {
+      "name": "daenerys",
+      "snake_uuid": null
+    }
+  }
+}
+
+{
+  "SERVER": {
+    "world": {
+      "hexagon_grid": {
+        "radius": 10
+      }
+    }
+  }
+}
+
+"JOIN" or "QUIT" or "ERROR"
+
+"NEW_GAME"
+
+{
+  "TURN": {
+    "game": {
+        "uuid": "4afc3d14-b547-453d-a622-acf2ad945535",
+        "world": {
+            "hexagon_grid": {
+                "radius": 5
+            }
+        },
+        "players": {
+            "abserde": {
+                "name": "abserde",
+                "snake_uuid": "ab5e00e0-3cea-409d-84f1-b1416fbc8e14"
+            },
+            [...]
+        },
+        "state": {
+            "food": {
+                "x": 9,
+                "y": 13
+            },
+            "snakes": {
+                "ab5e00e0-3cea-409d-84f1-b1416fbc8e14": {
+                    "alive": true,
+                    "uuid": "ab5e00e0-3cea-409d-84f1-b1416fbc8e14",
+                    "segments": [
+                        {
+                            "x": 3,
+                            "y": 8
+                        }
+                    ]
+                },
+                [...]
+            }
+        }
+    }
+  }
+}
+
+"MAKE_A_MOVE"
+
+{
+  "MOVE": {
+    "direction": "SouthEast"
+  }
+}
+
+"TIMEDOUT" or "DIED" or "WON" or continue
+
+"GAMEOVER"

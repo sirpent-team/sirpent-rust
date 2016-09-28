@@ -2,7 +2,7 @@ use rand::Rng;
 
 use grid::*;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub enum TriangleDir {
     East,
     South,

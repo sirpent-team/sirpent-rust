@@ -17,7 +17,8 @@ pub enum World {
     TriangleGrid(TriangleGrid),
 }
 
-pub trait Direction: Serialize + Deserialize + Clone + Debug
+pub trait Direction
+    : PartialEq + Eq + Copy + Serialize + Deserialize + Clone + Debug
     where Self: marker::Sized
 {
     fn variants() -> &'static [Self];

@@ -100,7 +100,7 @@ fn player_connection_handler(_: MaybeSslStream<TcpStream>,
     // let mut take = reader.clone().take(0xfffff);
 
     let mut message_iter = serde_json::StreamDeserializer::new(reader.bytes());
-    let player: Message<HexagonVector>;
+    let player: Command<HexagonVector>;
     player = message_iter.next().unwrap().ok().unwrap();
     println!("{:?}", player);
 }
@@ -113,9 +113,9 @@ pub fn tell_player_to_unsecured() {
         secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
         snake_uuid: None,
     };
-    let message: Message<HexagonVector> = Message::new(Command::HELLO { player: player });
+    let message: Command<HexagonVector> = Command::Hello { player: player };
 
-    println!("{:?}", serde_json::to_string(&message).unwrap());
+    println!("{}", serde_json::to_string_pretty(&message).unwrap());
 
     let mut bw = BufWriter::new(stream);
     bw.write(serde_json::to_string(&message).unwrap().as_bytes()).unwrap();
@@ -132,11 +132,17 @@ pub fn tell_player_to_ssl() {
         secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
         snake_uuid: None,
     };
-    let message: Message<HexagonVector> = Message::new(Command::HELLO { player: player });
+    let message: Command<HexagonVector> = Command::Hello { player: player };
 
-    println!("{:?}", serde_json::to_string(&message).unwrap());
+    println!("{}", serde_json::to_string_pretty(&message).unwrap());
 
     let mut bw = BufWriter::new(ssl_stream);
     bw.write(serde_json::to_string(&message).unwrap().as_bytes()).unwrap();
     bw.flush().unwrap();
+
+    let message: Command<HexagonVector> = Command::Join;
+    println!("{}", serde_json::to_string_pretty(&message).unwrap());
+
+    let message: Command<HexagonVector> = Command::Move { direction: HexagonDir::SouthEast };
+    println!("{}", serde_json::to_string_pretty(&message).unwrap());
 }
