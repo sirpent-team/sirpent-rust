@@ -1,5 +1,4 @@
-#![feature(custom_derive, plugin, question_mark)]
-#![plugin(serde_macros)]
+#![feature(question_mark)]
 
 extern crate ansi_term;
 extern crate sirpent;

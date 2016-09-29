@@ -1,9 +1,10 @@
-#![feature(custom_derive, plugin, question_mark)]
-#![plugin(serde_macros)]
+#![feature(question_mark, rustc_macro, structural_match, rustc_attrs)]
 
 extern crate uuid;
 extern crate rand;
 extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 extern crate serde_json;
 #[cfg(test)]
 extern crate quickcheck;
