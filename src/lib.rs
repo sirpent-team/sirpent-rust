@@ -4,7 +4,6 @@
 extern crate uuid;
 extern crate rand;
 extern crate serde;
-extern crate openssl;
 #[cfg(test)]
 extern crate quickcheck;
 

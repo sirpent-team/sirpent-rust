@@ -7,7 +7,6 @@ extern crate rand;
 extern crate uuid;
 extern crate serde;
 extern crate serde_json;
-extern crate openssl;
 #[cfg(test)]
 extern crate quickcheck;
 
@@ -17,10 +16,8 @@ use std::collections::HashMap;
 use std::net::TcpStream;
 use std::thread;
 use std::io::{Result, Read, Write, BufReader, BufWriter, Bytes, Error, ErrorKind};
-use openssl::ssl::{SslContext, SslMethod, SslStream, MaybeSslStream};
 use std::str;
 use std::time;
-use std::path::PathBuf;
 use std::result::Result as StdResult;
 use std::error::Error as StdError;
 
@@ -67,40 +64,24 @@ fn main() {
 
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
-        plain_server.listen(&player_connection_handler::<HexagonVector>, None)
-    });
-
-    // -----------------------------------------------------------------------
-
-    let cert = PathBuf::from("cert.pem");
-    let key = PathBuf::from("key.pem");
-    thread::spawn(move || {
-        let tls_server = SirpentServer::tls(cert, key, "0.0.0.0:5514").unwrap();
-        tls_server.listen(&player_connection_handler::<HexagonVector>, None)
+        //plain_server.listen(&player_connection_handler::<HexagonVector>, None)
+        plain_server.listen(move |stream: TcpStream| {
+            player_connection_handler::<HexagonVector>(stream, game.clone())
+        }, None)
     });
 
     // -----------------------------------------------------------------------
 
     thread::sleep(time::Duration::from_millis(500));
-    thread::spawn(move || tell_player_to_unsecured());
-    thread::sleep(time::Duration::from_millis(500));
-    thread::spawn(move || tell_player_to_ssl());
+    thread::spawn(move || tell_player_to_unsecured::<HexagonVector>());
 
     loop {
         thread::sleep(time::Duration::from_millis(500));
     }
 }
 
-pub trait TryCloneableExt: Sized {
-    fn try_clone(&self) -> Result<Self>;
-}
-
-// http://stackoverflow.com/a/34961073 indicates this can never work.
-impl<S> TryCloneableExt for MaybeSslStream<S> where S: Read + Write {
-}
-
 /// Converts a Result<T, serde_json::Error> into an Result<T>.
-pub fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> Result<T> {
+fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> Result<T> {
     match res {
         Ok(x) => Ok(x),
         Err(e) => {
@@ -110,18 +91,20 @@ pub fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> Result<T> {
     }
 }
 
-pub struct PlayerConnection<V: Vector, S: Read + Write + TryCloneableExt> {
-    pub stream: S,
-    reader: serde_json::StreamDeserializer<Command<V>, Bytes<S>>,
-    writer: BufWriter<S>,
+// @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
+pub struct PlayerConnection<V: Vector> {
+    stream: TcpStream,
+    reader: serde_json::StreamDeserializer<Command<V>, Bytes<BufReader<TcpStream>>>,
+    writer: BufWriter<TcpStream>,
 }
 
-impl<V: Vector, S: Read + Write + TryCloneableExt> PlayerConnection<V, S> {
-    pub fn new(stream: S) -> Result<PlayerConnection<V, S>> {
+impl<V: Vector> PlayerConnection<V> {
+    pub fn new(stream: TcpStream) -> Result<PlayerConnection<V>> {
         Ok(PlayerConnection {
             stream: stream.try_clone()?,
-            reader: serde_json::StreamDeserializer::new(stream.try_clone()?.bytes()),
-            writer: BufWriter::new(stream.try_clone()?),
+            reader: serde_json::StreamDeserializer::new(BufReader::new(stream.try_clone()?)
+                .bytes()),
+            writer: BufWriter::new(stream),
         })
     }
 
@@ -140,66 +123,159 @@ impl<V: Vector, S: Read + Write + TryCloneableExt> PlayerConnection<V, S> {
     }
 
     pub fn write(&mut self, command: &Command<V>) -> Result<()> {
-        serde_to_io(serde_json::to_writer(&mut self.writer, command))
+        self.writer.write_all(serde_to_io(serde_json::to_string(command))?.as_bytes())?;
+        self.writer.flush()?;
+        Ok(())
     }
 }
 
 // @TODO: Get a competent review of the decoding code, and move into a type-parametric
 // read function.
-fn player_connection_handler<V: Vector>(stream: MaybeSslStream<TcpStream>,
-                                        _: BufReader<MaybeSslStream<TcpStream>>,
-                                        _: BufWriter<MaybeSslStream<TcpStream>>) {
+fn player_connection_handler<V: Vector>(stream: TcpStream, game: Game<V>) {
     // Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
     // let mut take = reader.clone().take(0xfffff);
 
-    let mut player_connection = PlayerConnection::<V, MaybeSslStream<TcpStream>>::new(stream).unwrap();
+    let mut player_connection = PlayerConnection::<V>::new(stream).unwrap();
 
     player_connection.write(&Command::version()).unwrap();
 
     player_connection.write(&Command::Server {
-        world: None,
-        timeout: None,
-    }).unwrap();
+            world: None,
+            timeout: None,
+        })
+        .unwrap();
 
     match player_connection.read().unwrap() {
         Command::Hello { player } => println!("{:?}", player),
-        Command::Quit => println!("QUIT"),
+        Command::Quit => {
+            println!("QUIT");
+            return
+        },
         command => {
-            player_connection.write(&Command::Error);
+            player_connection.write(&Command::Error).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     }
 
     player_connection.write(&Command::NewGame).unwrap();
+
+    player_connection.write(&Command::Turn {
+        game: game
+    }).unwrap();
+
+    player_connection.write(&Command::MakeAMove).unwrap();
+
+    match player_connection.read().unwrap() {
+        Command::Move { direction } => println!("{:?}", Command::Move::<V> { direction: direction }),
+        Command::Quit => {
+            println!("QUIT");
+            return
+        },
+        command => {
+            player_connection.write(&Command::Error).unwrap_or(());
+            panic!(format!("Unexpected {:?}.", command));
+        }
+    }
 }
 
-pub fn tell_player_to_unsecured() {
+pub fn tell_player_to_unsecured<V: Vector>()
+    where <V as sirpent::Vector>::Direction: 'static
+{
     let stream = TcpStream::connect("127.0.0.1:5513").unwrap();
-    let mut writer = BufWriter::new(stream);
+    let mut player_connection = PlayerConnection::<V>::new(stream).unwrap();
 
-    let message: Command<HexagonVector> = Command::Hello {
-        player: Player {
-            name: "daenerys".to_string(),
-            secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
-            snake_uuid: None,
+    let r = player_connection.read().unwrap();
+    match r {
+        Command::Version { sirpent, protocol } => {
+            println!("{:?}",
+                     Command::Version::<V> {
+                         sirpent: sirpent,
+                         protocol: protocol,
+                     })
+        }
+        command => {
+            player_connection.write(&Command::Error).unwrap_or(());
+            panic!(format!("Unexpected {:?}.", command));
+        }
+    }
+
+    let r = player_connection.read().unwrap();
+    match r {
+        Command::Server { world, timeout } => {
+            println!("{:?}",
+                     Command::Server::<V> {
+                         world: world,
+                         timeout: timeout,
+                     })
+        }
+        command => {
+            player_connection.write(&Command::Error).unwrap_or(());
+            panic!(format!("Unexpected {:?}.", command));
+        }
+    }
+
+    player_connection.write(&Command::Hello {
+            player: Player {
+                name: "daenerys".to_string(),
+                secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
+                snake_uuid: None,
+            },
+        })
+        .unwrap();
+
+    match player_connection.read().unwrap() {
+        Command::NewGame => println!("{:?}", Command::NewGame::<V>),
+        command => {
+            player_connection.write(&Command::Error).unwrap_or(());
+            panic!(format!("Unexpected {:?}.", command));
+        }
+    }
+
+    let mut turn_game: Game<V> = match player_connection.read().unwrap() {
+        Command::Turn { game } => {
+            println!("{:?}", Command::Turn::<V> { game: game.clone() });
+            game
         },
+        command => {
+            player_connection.write(&Command::Error).unwrap_or(());
+            panic!(format!("Unexpected {:?}.", command));
+        }
     };
-    serde_json::to_writer(&mut writer, &message).unwrap();
-}
+    loop {
+        match player_connection.read().unwrap() {
+            Command::MakeAMove => println!("{:?}", Command::MakeAMove::<V>),
+            command => {
+                player_connection.write(&Command::Error).unwrap_or(());
+                panic!(format!("Unexpected {:?}.", command));
+            }
+        }
 
-pub fn tell_player_to_ssl() {
-    let stream = TcpStream::connect("127.0.0.1:5514").unwrap();
-    let ssl = ssl_to_io(SslContext::new(SslMethod::Tlsv1)).unwrap();
-    let ssl_stream = ssl_to_io(SslStream::connect(&ssl, stream)).unwrap();
-    let mut writer = BufWriter::new(ssl_stream);
+        player_connection.write(&Command::Move { direction: V::Direction::variants()[0] })
+            .unwrap();
 
-    let message: Command<HexagonVector> = Command::Hello {
-        player: Player {
-            name: "daenerys".to_string(),
-            secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
-            snake_uuid: None,
-        },
-    };
-    serde_json::to_writer(&mut writer, &message).unwrap();
+        match player_connection.read().unwrap() {
+            Command::TimedOut => {
+                println!("{:?}", Command::TimedOut::<V>);
+                return
+            }
+            Command::Died => {
+                println!("{:?}", Command::Died::<V>);
+                return
+            },
+            Command::Won => {
+                println!("{:?}", Command::Won::<V>);
+                return
+            },
+            Command::Turn { game } => {
+                println!("{:?}", Command::Turn::<V> { game: game.clone() });
+                turn_game = game;
+                continue
+            },
+            command => {
+                player_connection.write(&Command::Error).unwrap_or(());
+                panic!(format!("Unexpected {:?}.", command));
+            }
+        }
+    }
 }

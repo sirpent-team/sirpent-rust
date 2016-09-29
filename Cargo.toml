@@ -10,7 +10,6 @@ rand = "0.3.*"
 serde = "0.8"
 serde_json = "0.8"
 serde_macros = "0.8"
-openssl = "0.7"
 
 [dev-dependencies]
 quickcheck = "0.2.*"
