@@ -9,15 +9,15 @@ extern crate serde_json;
 #[cfg(test)]
 extern crate quickcheck;
 
-pub mod grid;
+mod net;
+mod game;
+mod grid;
 mod hexagon_grid;
 mod square_grid;
 mod triangle_grid;
-pub mod snake;
-pub mod player;
-pub mod net;
-pub mod protocol;
-pub mod game;
+mod snake;
+mod player;
+mod protocol;
 
 pub use net::*;
 pub use game::*;

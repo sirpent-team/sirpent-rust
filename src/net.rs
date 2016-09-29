@@ -1,5 +1,5 @@
 // @TODO: Why is this necessary here? It's in lib.rs.
-extern crate serde_json;
+//extern crate serde_json;
 
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
@@ -7,6 +7,7 @@ use std::marker::Send;
 use std::io::{Result, Read, Write, BufReader, BufWriter, Bytes, Error, ErrorKind};
 use std::result::Result as StdResult;
 use std::error::Error as StdError;
+use serde_json;
 
 use grid::*;
 use protocol::*;
@@ -43,6 +44,7 @@ impl<V: Vector> PlayerConnection<V> {
     }
 
     pub fn write(&mut self, command: &Command<V>) -> Result<()> {
+        // serde_json also has a to_writer method, but it seems to do more than just writing bytes.
         self.writer.write_all(serde_to_io(serde_json::to_string(command))?.as_bytes())?;
         self.writer.flush()?;
         Ok(())
