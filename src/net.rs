@@ -1,10 +1,64 @@
-//! Exposes the `Iron` type, the main entrance point of the
-//! `Iron` library.
+// @TODO: Why is this necessary here? It's in lib.rs.
+extern crate serde_json;
 
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
-use std::io::Result;
 use std::marker::Send;
+use std::io::{Result, Read, Write, BufReader, BufWriter, Bytes, Error, ErrorKind};
+use std::result::Result as StdResult;
+use std::error::Error as StdError;
+
+use grid::*;
+use protocol::*;
+
+// @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
+pub struct PlayerConnection<V: Vector> {
+    stream: TcpStream,
+    reader: serde_json::StreamDeserializer<Command<V>, Bytes<BufReader<TcpStream>>>,
+    writer: BufWriter<TcpStream>,
+}
+
+impl<V: Vector> PlayerConnection<V> {
+    pub fn new(stream: TcpStream) -> Result<PlayerConnection<V>> {
+        Ok(PlayerConnection {
+            stream: stream.try_clone()?,
+            reader: serde_json::StreamDeserializer::new(BufReader::new(stream.try_clone()?)
+                .bytes()),
+            writer: BufWriter::new(stream),
+        })
+    }
+
+    pub fn read(&mut self) -> Result<Command<V>> {
+        match serde_to_io(self.reader.next().unwrap()) {
+            Ok(command) => Ok(command),
+            Err(e) => {
+                // @TODO: It seems irrelevant whether writing ERROR succeeded or not. If it
+                // succeeds then wonderful; the other end might get to know something went wrong.
+                // If it fails then we're much better off returning the Read error than the
+                // extra-level-of-indirection Write error.
+                self.write(&Command::Error).unwrap_or(());
+                Err(e)
+            }
+        }
+    }
+
+    pub fn write(&mut self, command: &Command<V>) -> Result<()> {
+        self.writer.write_all(serde_to_io(serde_json::to_string(command))?.as_bytes())?;
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
+/// Converts a Result<T, serde_json::Error> into an Result<T>.
+fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> Result<T> {
+    match res {
+        Ok(x) => Ok(x),
+        Err(e) => {
+            Err(Error::new(ErrorKind::Other,
+                           &format!("A serde_json error occurred. ({})", e.description())[..]))
+        }
+    }
+}
 
 /// A settings struct containing a set of timeouts which can be applied to a server.
 #[derive(Debug, PartialEq, Clone, Copy)]

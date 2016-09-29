@@ -4,6 +4,7 @@
 extern crate uuid;
 extern crate rand;
 extern crate serde;
+extern crate serde_json;
 #[cfg(test)]
 extern crate quickcheck;
 
