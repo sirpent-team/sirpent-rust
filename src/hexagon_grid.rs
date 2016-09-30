@@ -13,7 +13,7 @@ pub enum HexagonDir {
     NorthWest,
 }
 
-impl Direction for HexagonDir {
+impl DirectionTrait for HexagonDir {
     fn variants() -> &'static [HexagonDir] {
         static VARIANTS: &'static [HexagonDir] = &[HexagonDir::North,
                                                    HexagonDir::NorthEast,
@@ -31,7 +31,7 @@ pub struct HexagonVector {
     pub y: isize,
 }
 
-impl Vector for HexagonVector {
+impl VectorTrait for HexagonVector {
     type Direction = HexagonDir;
 
     fn distance(&self, other: &HexagonVector) -> usize {
@@ -102,7 +102,7 @@ impl HexagonGrid {
     }
 }
 
-impl Grid for HexagonGrid {
+impl GridTrait for HexagonGrid {
     type Vector = HexagonVector;
 
     fn dimensions(&self) -> Vec<isize> {

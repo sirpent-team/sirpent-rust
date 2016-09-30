@@ -3,30 +3,30 @@ use uuid::Uuid;
 use grid::*;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Snake<V: Vector> {
+pub struct Snake {
     pub alive: bool,
     pub uuid: Uuid,
-    pub segments: Vec<V>,
+    pub segments: Vec<Vector>,
 }
 
-impl<V: Vector> Snake<V> {
-    pub fn new(segments: Vec<V>) -> Snake<V> {
-        Snake::<V> {
+impl Snake {
+    pub fn new(segments: Vec<Vector>) -> Snake {
+        Snake {
             alive: true,
             uuid: Uuid::new_v4(),
             segments: segments,
         }
     }
 
-    pub fn is_head_at(&self, v: &V) -> bool {
+    pub fn is_head_at(&self, v: &Vector) -> bool {
         self.segments.len() > 0 && self.segments[0] == *v
     }
 
-    pub fn has_segment_at(&self, v: &V) -> bool {
+    pub fn has_segment_at(&self, v: &Vector) -> bool {
         self.segments.iter().any(|x| x == v)
     }
 
-    pub fn has_collided_into(&self, other: &Snake<V>) -> bool {
+    pub fn has_collided_into(&self, other: &Snake) -> bool {
         let my_head = self.segments[0];
         let mut next_candidate = my_head.distance(&other.segments[0]);
         while let Some(here) = other.segments.get(next_candidate) {
@@ -38,7 +38,7 @@ impl<V: Vector> Snake<V> {
         return false;
     }
 
-    pub fn step_in_direction(&mut self, dir: V::Direction) {
+    pub fn step_in_direction(&mut self, dir: Direction) {
         if self.segments.len() == 0 {
             return;
         }

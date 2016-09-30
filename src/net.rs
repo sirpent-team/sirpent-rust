@@ -9,18 +9,17 @@ use std::result::Result as StdResult;
 use std::error::Error as StdError;
 use serde_json;
 
-use grid::*;
 use protocol::*;
 
 // @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
-pub struct PlayerConnection<G: Grid> {
+pub struct PlayerConnection {
     stream: TcpStream,
-    reader: serde_json::StreamDeserializer<Command<G>, Bytes<BufReader<TcpStream>>>,
+    reader: serde_json::StreamDeserializer<Command, Bytes<BufReader<TcpStream>>>,
     writer: BufWriter<TcpStream>,
 }
 
-impl<G: Grid> PlayerConnection<G> {
-    pub fn new(stream: TcpStream) -> Result<PlayerConnection<G>> {
+impl PlayerConnection {
+    pub fn new(stream: TcpStream) -> Result<PlayerConnection> {
         Ok(PlayerConnection {
             stream: stream.try_clone()?,
             reader: serde_json::StreamDeserializer::new(BufReader::new(stream.try_clone()?)
@@ -29,21 +28,19 @@ impl<G: Grid> PlayerConnection<G> {
         })
     }
 
-    pub fn read(&mut self) -> Result<Command<G>> {
-        match serde_to_io(self.reader.next().unwrap()) {
-            Ok(command) => Ok(command),
-            Err(e) => {
-                // @TODO: It seems irrelevant whether writing ERROR succeeded or not. If it
-                // succeeds then wonderful; the other end might get to know something went wrong.
-                // If it fails then we're much better off returning the Read error than the
-                // extra-level-of-indirection Write error.
-                self.write(&Command::Error).unwrap_or(());
-                Err(e)
-            }
-        }
+    pub fn read(&mut self) -> Result<Command> {
+        let command_result = self.reader.next().ok_or(Error::new(ErrorKind::Other, "Nothing read."))?;
+        serde_to_io(command_result).or_else(|e| {
+            // @TODO: It seems irrelevant whether writing ERROR succeeded or not. If it
+            // succeeds then wonderful; the other end might get to know something went wrong.
+            // If it fails then we're much better off returning the Read error than the
+            // extra-level-of-indirection Write error.
+            self.write(&Command::Error).unwrap_or(());
+            Err(e)
+        })
     }
 
-    pub fn write(&mut self, command: &Command<G>) -> Result<()> {
+    pub fn write(&mut self, command: &Command) -> Result<()> {
         // serde_json also has a to_writer method, but it seems to do more than just writing bytes.
         self.writer.write_all(serde_to_io(serde_json::to_string(command))?.as_bytes())?;
         self.writer.flush()?;

@@ -7,7 +7,6 @@ extern crate rand;
 use ansi_term::Colour::*;
 use std::net::TcpStream;
 use std::str;
-use std::time::Duration;
 
 use sirpent::*;
 
@@ -17,11 +16,10 @@ fn main() {
 }
 
 pub fn client_detect_vector() {
-    let stream = TcpStream::connect("127.0.0.1:5513").unwrap();
-    let mut player_connection = PlayerConnection::new(stream).unwrap();
+    let stream = TcpStream::connect("127.0.0.1:5513").expect("Could not connect to server.");
+    let mut player_connection = PlayerConnection::new(stream).expect("Could not produce new PlayerConnection.");
 
-    let r = player_connection.read().unwrap();
-    match r {
+    match player_connection.read().expect("Could not read anything; expected Command::Version.") {
         Command::Version { sirpent, protocol } => {
             println!("{:?}",
                      Command::Version {
@@ -35,42 +33,21 @@ pub fn client_detect_vector() {
         }
     };
 
-    let r = player_connection.read().unwrap();
-    match r {
-        Command::Server { world, timeout } => {
+    let (grid, timeout) = match player_connection.read().expect("Could not read anything; expected Command::Server.") {
+        Command::Server { grid, timeout } => {
             println!("{:?}",
                      Command::Server {
-                         world: world,
+                         grid: grid,
                          timeout: timeout,
                      });
-            let w = world.unwrap();
-            let t = timeout;
-            match w {
-                World::HexagonGrid(hg) => {
-                    client::<HexagonGrid>(player_connection as PlayerConnection<HexagonGrid>, w, t)
-                }
-                World::SquareGrid(sg) => {
-                    client::<SquareGrid>(player_connection as PlayerConnection<SquareGrid>, w, t)
-                }
-                World::TriangleGrid(tg) => {
-                    client::<TriangleGrid>(player_connection as PlayerConnection<TriangleGrid>,
-                                           w,
-                                           t)
-                }
-            };
+            (grid.expect("No grid provided."), timeout)
         }
         command => {
             player_connection.write(&Command::Error).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     };
-}
 
-pub fn client<G: Grid>(player_connection: PlayerConnection<G>,
-                       world: World,
-                       timeout: Option<Duration>)
-    where <<G as Grid>::Vector as Vector>::Direction: 'static
-{
     player_connection.write(&Command::Hello {
             player: Player {
                 name: "daenerys".to_string(),
@@ -78,19 +55,19 @@ pub fn client<G: Grid>(player_connection: PlayerConnection<G>,
                 snake_uuid: None,
             },
         })
-        .unwrap();
+        .expect("Could not write Command::Hello.");
 
-    match player_connection.read().unwrap() {
-        Command::NewGame => println!("{:?}", Command::NewGame::<G>),
+    match player_connection.read().expect("Could not read anything; expected Command::NewGame.") {
+        Command::NewGame => println!("{:?}", Command::NewGame),
         command => {
             player_connection.write(&Command::Error).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     }
 
-    let mut turn_game: Game<G::Vector> = match player_connection.read().unwrap() {
+    let mut turn_game: Game = match player_connection.read().expect("Could not read anything; expected Command::Turn.") {
         Command::Turn { game } => {
-            println!("{:?}", Command::Turn::<G> { game: game.clone() });
+            println!("{:?}", Command::Turn { game: game.clone() });
             game
         }
         command => {
@@ -100,32 +77,34 @@ pub fn client<G: Grid>(player_connection: PlayerConnection<G>,
     };
 
     loop {
-        match player_connection.read().unwrap() {
-            Command::MakeAMove => println!("{:?}", Command::MakeAMove::<G>),
+        println!("{:?}", turn_game);
+
+        match player_connection.read().expect("Could not read anything; expected Command::MakeAMove.") {
+            Command::MakeAMove => println!("{:?}", Command::MakeAMove),
             command => {
                 player_connection.write(&Command::Error).unwrap_or(());
                 panic!(format!("Unexpected {:?}.", command));
             }
         }
 
-        player_connection.write(&Command::Move { direction: <<G as sirpent::Grid>::Vector as Vector>::Direction::variants()[0] })
-            .unwrap();
+        player_connection.write(&Command::Move { direction: Direction::variants()[0] })
+            .expect("Could not write Command::Move.");
 
-        match player_connection.read().unwrap() {
+        match player_connection.read().expect("Could not read anything; expected Command::Timedout/Died/Won/Turn.") {
             Command::TimedOut => {
-                println!("{:?}", Command::TimedOut::<G>);
+                println!("{:?}", Command::TimedOut);
                 return;
             }
             Command::Died => {
-                println!("{:?}", Command::Died::<G>);
+                println!("{:?}", Command::Died);
                 return;
             }
             Command::Won => {
-                println!("{:?}", Command::Won::<G>);
+                println!("{:?}", Command::Won);
                 return;
             }
             Command::Turn { game } => {
-                println!("{:?}", Command::Turn::<G> { game: game.clone() });
+                println!("{:?}", Command::Turn { game: game.clone() });
                 turn_game = game;
                 continue;
             }

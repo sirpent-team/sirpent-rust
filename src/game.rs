@@ -6,15 +6,15 @@ use snake::*;
 use player::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Game<V: Vector> {
+pub struct Game {
     pub uuid: Uuid,
-    pub world: World,
+    pub grid: Grid,
     pub players: HashMap<String, Player>,
-    pub state: GameState<V>,
+    pub state: GameState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GameState<V: Vector> {
-    pub food: V,
-    pub snakes: HashMap<Uuid, Snake<V>>,
+pub struct GameState {
+    pub food: Vector,
+    pub snakes: HashMap<Uuid, Snake>,
 }

@@ -18,19 +18,18 @@ use sirpent::*;
 fn main() {
     println!("{}", Yellow.bold().paint("Sirpent"));
 
-    let world = World::HexagonGrid(HexagonGrid { radius: 5 });
     let state = GameState {
-        food: HexagonVector { x: 9, y: 13 },
+        food: Vector { x: 9, y: 13 },
         snakes: HashMap::new(),
     };
     let mut game = Game {
         uuid: Uuid::new_v4(),
-        world: world,
+        grid: Grid { radius: 5 },
         players: HashMap::new(),
         state: state,
     };
 
-    let segments = vec![HexagonVector { x: 3, y: 8 }];
+    let segments = vec![Vector { x: 3, y: 8 }];
     let snake = Snake::new(segments);
     let player = Player::new("abserde".to_string(), None, snake.uuid.clone());
 
@@ -42,7 +41,7 @@ fn main() {
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
         plain_server.listen(move |stream: TcpStream| {
-                                server_handler::<HexagonVector>(stream, game.clone())
+                                server_handler(stream, game.clone())
                             },
                             None)
     });
@@ -54,22 +53,22 @@ fn main() {
     }
 }
 
-fn server_handler<V: Vector>(stream: TcpStream, game: Game<V>) {
+fn server_handler(stream: TcpStream, game: Game) {
     // Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
     // let mut take = reader.clone().take(0xfffff);
 
-    let mut player_connection = PlayerConnection::<V>::new(stream).unwrap();
+    let mut player_connection = PlayerConnection::new(stream).expect("Could not produce new PlayerConnection.");
 
-    player_connection.write(&Command::version()).unwrap();
+    player_connection.write(&Command::version()).expect("Could not write Command::version().");
 
     player_connection.write(&Command::Server {
-            world: None,
+            grid: None,
             timeout: None,
         })
-        .unwrap();
+        .expect("Could not write Command::Server.");
 
-    match player_connection.read().unwrap() {
+    match player_connection.read().expect("Could not read anything; expected Command::Hello.") {
         Command::Hello { player } => println!("{:?}", player),
         Command::Quit => {
             println!("QUIT");
@@ -81,16 +80,16 @@ fn server_handler<V: Vector>(stream: TcpStream, game: Game<V>) {
         }
     }
 
-    player_connection.write(&Command::NewGame).unwrap();
+    player_connection.write(&Command::NewGame).expect("Could not write Command::NewGame.");
 
     player_connection.write(&Command::Turn { game: game })
-        .unwrap();
+        .expect("Could not write Command::Turn.");
 
-    player_connection.write(&Command::MakeAMove).unwrap();
+    player_connection.write(&Command::MakeAMove).expect("Could not write Command::MakeAMove.");
 
-    match player_connection.read().unwrap() {
+    match player_connection.read().expect("Could not read anything; expected Command::Move.") {
         Command::Move { direction } => {
-            println!("{:?}", Command::Move::<V> { direction: direction })
+            println!("{:?}", Command::Move { direction: direction })
         }
         Command::Quit => {
             println!("QUIT");
