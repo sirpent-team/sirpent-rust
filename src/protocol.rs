@@ -7,7 +7,7 @@ use player::*;
 pub static PROTOCOL_VERSION: &'static str = "0.2";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Command<V: Vector> {
+pub enum Command<G: Grid> {
     // Upon connect, the server must send a VERSION message.
     #[serde(rename = "VERSION")]
     Version { sirpent: String, protocol: String },
@@ -32,14 +32,14 @@ pub enum Command<V: Vector> {
     NewGame,
     // The server must send a TURN message with the initial state of the Game.
     #[serde(rename = "TURN")]
-    Turn { game: Game<V> },
+    Turn { game: Game<G::Vector> },
     // The server must send a MAKE_A_MOVE message to request the player's next move.
     #[serde(rename = "MAKE_A_MOVE")]
     MakeAMove,
     // The client must reply with a MOVE message to indicate their next action.
     // The server must then send a new TURN message to start the next TURN.
     #[serde(rename = "MOVE")]
-    Move { direction: V::Direction },
+    Move { direction: <<G as Grid>::Vector as Vector>::Direction, },
     // The server may kill players who do not reply within a certain time. The server must send a
     // TIMEDOUT message to such players.
     #[serde(rename = "TIMED_OUT")]
@@ -57,8 +57,8 @@ pub enum Command<V: Vector> {
     GameOver,
 }
 
-impl<V: Vector> Command<V> {
-    pub fn version() -> Command<V> {
+impl<G: Grid> Command<G> {
+    pub fn version() -> Command<G> {
         Command::Version {
             sirpent: env!("CARGO_PKG_VERSION").to_string(),
             protocol: PROTOCOL_VERSION.to_string(),

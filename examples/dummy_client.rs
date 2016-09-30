@@ -13,20 +13,18 @@ use sirpent::*;
 
 fn main() {
     println!("{}", Yellow.bold().paint("Sirpent dummy-client example"));
-    client_detect_vector::<HexagonVector>();
+    client_detect_vector();
 }
 
-pub fn client_detect_vector<V: Vector>()
-    where <V as sirpent::Vector>::Direction: 'static
-{
+pub fn client_detect_vector() {
     let stream = TcpStream::connect("127.0.0.1:5513").unwrap();
-    let mut player_connection = PlayerConnection::<V>::new(stream).unwrap();
+    let mut player_connection = PlayerConnection::new(stream).unwrap();
 
     let r = player_connection.read().unwrap();
     match r {
         Command::Version { sirpent, protocol } => {
             println!("{:?}",
-                     Command::Version::<V> {
+                     Command::Version {
                          sirpent: sirpent,
                          protocol: protocol,
                      })
@@ -41,13 +39,25 @@ pub fn client_detect_vector<V: Vector>()
     match r {
         Command::Server { world, timeout } => {
             println!("{:?}",
-                     Command::Server::<V> {
+                     Command::Server {
                          world: world,
                          timeout: timeout,
                      });
-            let g = world.unwrap().0;
+            let w = world.unwrap();
             let t = timeout;
-            client::<g::Vector>(player_connection, g, t);
+            match w {
+                World::HexagonGrid(hg) => {
+                    client::<HexagonGrid>(player_connection as PlayerConnection<HexagonGrid>, w, t)
+                }
+                World::SquareGrid(sg) => {
+                    client::<SquareGrid>(player_connection as PlayerConnection<SquareGrid>, w, t)
+                }
+                World::TriangleGrid(tg) => {
+                    client::<TriangleGrid>(player_connection as PlayerConnection<TriangleGrid>,
+                                           w,
+                                           t)
+                }
+            };
         }
         command => {
             player_connection.write(&Command::Error).unwrap_or(());
@@ -56,8 +66,10 @@ pub fn client_detect_vector<V: Vector>()
     };
 }
 
-pub fn client<V: Vector>(player_connection: PlayerConnection<V>, world: World, timeout: Option<Duration>)
-    where <V as sirpent::Vector>::Direction: 'static
+pub fn client<G: Grid>(player_connection: PlayerConnection<G>,
+                       world: World,
+                       timeout: Option<Duration>)
+    where <<G as Grid>::Vector as Vector>::Direction: 'static
 {
     player_connection.write(&Command::Hello {
             player: Player {
@@ -69,16 +81,16 @@ pub fn client<V: Vector>(player_connection: PlayerConnection<V>, world: World, t
         .unwrap();
 
     match player_connection.read().unwrap() {
-        Command::NewGame => println!("{:?}", Command::NewGame::<V>),
+        Command::NewGame => println!("{:?}", Command::NewGame::<G>),
         command => {
             player_connection.write(&Command::Error).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     }
 
-    let mut turn_game: Game<V> = match player_connection.read().unwrap() {
+    let mut turn_game: Game<G::Vector> = match player_connection.read().unwrap() {
         Command::Turn { game } => {
-            println!("{:?}", Command::Turn::<V> { game: game.clone() });
+            println!("{:?}", Command::Turn::<G> { game: game.clone() });
             game
         }
         command => {
@@ -89,31 +101,31 @@ pub fn client<V: Vector>(player_connection: PlayerConnection<V>, world: World, t
 
     loop {
         match player_connection.read().unwrap() {
-            Command::MakeAMove => println!("{:?}", Command::MakeAMove::<V>),
+            Command::MakeAMove => println!("{:?}", Command::MakeAMove::<G>),
             command => {
                 player_connection.write(&Command::Error).unwrap_or(());
                 panic!(format!("Unexpected {:?}.", command));
             }
         }
 
-        player_connection.write(&Command::Move { direction: V::Direction::variants()[0] })
+        player_connection.write(&Command::Move { direction: <<G as sirpent::Grid>::Vector as Vector>::Direction::variants()[0] })
             .unwrap();
 
         match player_connection.read().unwrap() {
             Command::TimedOut => {
-                println!("{:?}", Command::TimedOut::<V>);
+                println!("{:?}", Command::TimedOut::<G>);
                 return;
             }
             Command::Died => {
-                println!("{:?}", Command::Died::<V>);
+                println!("{:?}", Command::Died::<G>);
                 return;
             }
             Command::Won => {
-                println!("{:?}", Command::Won::<V>);
+                println!("{:?}", Command::Won::<G>);
                 return;
             }
             Command::Turn { game } => {
-                println!("{:?}", Command::Turn::<V> { game: game.clone() });
+                println!("{:?}", Command::Turn::<G> { game: game.clone() });
                 turn_game = game;
                 continue;
             }

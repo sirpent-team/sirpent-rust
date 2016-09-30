@@ -1,5 +1,5 @@
 // @TODO: Why is this necessary here? It's in lib.rs.
-//extern crate serde_json;
+// extern crate serde_json;
 
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
@@ -13,14 +13,14 @@ use grid::*;
 use protocol::*;
 
 // @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
-pub struct PlayerConnection<V: Vector> {
+pub struct PlayerConnection<G: Grid> {
     stream: TcpStream,
-    reader: serde_json::StreamDeserializer<Command<V>, Bytes<BufReader<TcpStream>>>,
+    reader: serde_json::StreamDeserializer<Command<G>, Bytes<BufReader<TcpStream>>>,
     writer: BufWriter<TcpStream>,
 }
 
-impl<V: Vector> PlayerConnection<V> {
-    pub fn new(stream: TcpStream) -> Result<PlayerConnection<V>> {
+impl<G: Grid> PlayerConnection<G> {
+    pub fn new(stream: TcpStream) -> Result<PlayerConnection<G>> {
         Ok(PlayerConnection {
             stream: stream.try_clone()?,
             reader: serde_json::StreamDeserializer::new(BufReader::new(stream.try_clone()?)
@@ -29,7 +29,7 @@ impl<V: Vector> PlayerConnection<V> {
         })
     }
 
-    pub fn read(&mut self) -> Result<Command<V>> {
+    pub fn read(&mut self) -> Result<Command<G>> {
         match serde_to_io(self.reader.next().unwrap()) {
             Ok(command) => Ok(command),
             Err(e) => {
@@ -43,7 +43,7 @@ impl<V: Vector> PlayerConnection<V> {
         }
     }
 
-    pub fn write(&mut self, command: &Command<V>) -> Result<()> {
+    pub fn write(&mut self, command: &Command<G>) -> Result<()> {
         // serde_json also has a to_writer method, but it seems to do more than just writing bytes.
         self.writer.write_all(serde_to_io(serde_json::to_string(command))?.as_bytes())?;
         self.writer.flush()?;
