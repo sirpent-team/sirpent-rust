@@ -39,7 +39,7 @@ pub enum Command {
     // The client must reply with a MOVE message to indicate their next action.
     // The server must then send a new TURN message to start the next TURN.
     #[serde(rename = "MOVE")]
-    Move { direction: Direction, },
+    Move { direction: Direction },
     // The server may kill players who do not reply within a certain time. The server must send a
     // TIMEDOUT message to such players.
     #[serde(rename = "TIMED_OUT")]

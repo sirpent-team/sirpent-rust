@@ -29,7 +29,8 @@ impl PlayerConnection {
     }
 
     pub fn read(&mut self) -> Result<Command> {
-        let command_result = self.reader.next().ok_or(Error::new(ErrorKind::Other, "Nothing read."))?;
+        let command_result =
+            self.reader.next().ok_or(Error::new(ErrorKind::Other, "Nothing read."))?;
         serde_to_io(command_result).or_else(|e| {
             // @TODO: It seems irrelevant whether writing ERROR succeeded or not. If it
             // succeeds then wonderful; the other end might get to know something went wrong.

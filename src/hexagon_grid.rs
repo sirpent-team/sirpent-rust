@@ -1,5 +1,5 @@
 use std::cmp::max;
-use rand::Rng;
+use rand::OsRng;
 
 use grid::*;
 
@@ -120,6 +120,12 @@ impl GridTrait for HexagonGrid {
 
     fn random_cell<R: Rng>(&self) -> HexagonVector {
         unimplemented!();
+
+v := Vector{0, 0, 0}
+    v[0] = crypto_int(-g.Rings, g.Rings)
+    v[1] = crypto_int(max(0-g.Rings, 0-g.Rings-v[0]), min(g.Rings, g.Rings-v[0]))
+    v[2] = 0 - v[0] - v[1]
+    return v, nil
     }
 }
 

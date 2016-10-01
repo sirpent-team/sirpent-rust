@@ -9,7 +9,7 @@ pub enum TriangleDir {
     West,
 }
 
-impl Direction for TriangleDir {
+impl DirectionTrait for TriangleDir {
     fn variants() -> &'static [TriangleDir] {
         static VARIANTS: &'static [TriangleDir] =
             &[TriangleDir::East, TriangleDir::South, TriangleDir::West];
@@ -24,7 +24,7 @@ pub struct TriangleVector {
     pub r: bool,
 }
 
-impl Vector for TriangleVector {
+impl VectorTrait for TriangleVector {
     type Direction = TriangleDir;
 
     fn distance(&self, other: &TriangleVector) -> usize {
@@ -113,7 +113,7 @@ impl TriangleGrid {
     }
 }
 
-impl Grid for TriangleGrid {
+impl GridTrait for TriangleGrid {
     type Vector = TriangleVector;
 
     fn dimensions(&self) -> Vec<isize> {

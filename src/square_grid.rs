@@ -10,7 +10,7 @@ pub enum SquareDir {
     West,
 }
 
-impl Direction for SquareDir {
+impl DirectionTrait for SquareDir {
     fn variants() -> &'static [SquareDir] {
         static VARIANTS: &'static [SquareDir] =
             &[SquareDir::North, SquareDir::East, SquareDir::South, SquareDir::West];
@@ -24,7 +24,7 @@ pub struct SquareVector {
     pub y: isize,
 }
 
-impl Vector for SquareVector {
+impl VectorTrait for SquareVector {
     type Direction = SquareDir;
 
     fn distance(&self, other: &SquareVector) -> usize {
@@ -78,15 +78,15 @@ pub struct SquareGrid {
 }
 
 impl SquareGrid {
-    pub fn new(width: isize, height: isize) -> SquareGrid {
+    pub fn new(radius: isize) -> SquareGrid {
         SquareGrid {
-            width: width,
-            height: height,
+            width: radius,
+            height: radius,
         }
     }
 }
 
-impl Grid for SquareGrid {
+impl GridTrait for SquareGrid {
     type Vector = SquareVector;
 
     fn dimensions(&self) -> Vec<isize> {

@@ -3,6 +3,15 @@ name = "sirpent"
 version = "0.1.0"
 authors = ["Nathan van Doorn <nvd1234@gmail.com>", "Michael Mokrysz <hi@46b.it>"]
 
+[package.metadata.sirpent]
+protocol_version = "0.2"
+
+[features]
+default = ["hexagon"]
+square = []
+hexagon = []
+triangle = []
+
 [dependencies]
 ansi_term = "0.8.0"
 uuid = { version = "0.3", features = ["v4", "serde"] }

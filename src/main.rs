@@ -24,7 +24,7 @@ fn main() {
     };
     let mut game = Game {
         uuid: Uuid::new_v4(),
-        grid: Grid { radius: 5 },
+        grid: Grid::new(5),
         players: HashMap::new(),
         state: state,
     };
@@ -40,9 +40,7 @@ fn main() {
 
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
-        plain_server.listen(move |stream: TcpStream| {
-                                server_handler(stream, game.clone())
-                            },
+        plain_server.listen(move |stream: TcpStream| server_handler(stream, game.clone()),
                             None)
     });
 
@@ -58,12 +56,13 @@ fn server_handler(stream: TcpStream, game: Game) {
     // @TODO @DEBUG: Need to reset this for each new message communication.
     // let mut take = reader.clone().take(0xfffff);
 
-    let mut player_connection = PlayerConnection::new(stream).expect("Could not produce new PlayerConnection.");
+    let mut player_connection = PlayerConnection::new(stream)
+        .expect("Could not produce new PlayerConnection.");
 
     player_connection.write(&Command::version()).expect("Could not write Command::version().");
 
     player_connection.write(&Command::Server {
-            grid: None,
+            grid: Some(game.grid),
             timeout: None,
         })
         .expect("Could not write Command::Server.");
@@ -88,9 +87,7 @@ fn server_handler(stream: TcpStream, game: Game) {
     player_connection.write(&Command::MakeAMove).expect("Could not write Command::MakeAMove.");
 
     match player_connection.read().expect("Could not read anything; expected Command::Move.") {
-        Command::Move { direction } => {
-            println!("{:?}", Command::Move { direction: direction })
-        }
+        Command::Move { direction } => println!("{:?}", Command::Move { direction: direction }),
         Command::Quit => {
             println!("QUIT");
             return;
