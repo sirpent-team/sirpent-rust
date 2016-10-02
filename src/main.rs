@@ -18,23 +18,16 @@ use sirpent::*;
 fn main() {
     println!("{}", Yellow.bold().paint("Sirpent"));
 
-    let state = GameState {
-        food: Vector { x: 9, y: 13 },
-        snakes: HashMap::new(),
-    };
     let mut game = Game {
         uuid: Uuid::new_v4(),
-        grid: Grid::new(5),
+        grid: Grid::hexagon(15),
         players: HashMap::new(),
-        state: state,
+        food: Vector::hexagon(9, 13),
     };
 
-    let segments = vec![Vector { x: 3, y: 8 }];
-    let snake = Snake::new(segments);
-    let player = Player::new("abserde".to_string(), None, snake.uuid.clone());
-
-    game.players.insert(player.name.clone(), player);
-    game.state.snakes.insert(snake.uuid.clone(), snake);
+    let snake = Snake::new(vec![Vector::hexagon(3, 8)]);
+    let player = Player::new("abserde".to_string(), None, Some(snake));
+    game.players.insert(player.clone().name, player.clone());
 
     // -----------------------------------------------------------------------
 

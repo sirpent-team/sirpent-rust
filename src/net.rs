@@ -42,7 +42,7 @@ impl PlayerConnection {
     }
 
     pub fn write(&mut self, command: &Command) -> Result<()> {
-        // serde_json also has a to_writer method, but it seems to do more than just writing bytes.
+        // serde_json:: to_writer seems to never return when using a BufWriter<TcpStream>.
         self.writer.write_all(serde_to_io(serde_json::to_string(command))?.as_bytes())?;
         self.writer.flush()?;
         Ok(())

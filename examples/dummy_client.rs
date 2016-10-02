@@ -17,7 +17,8 @@ fn main() {
 
 pub fn client_detect_vector() {
     let stream = TcpStream::connect("127.0.0.1:5513").expect("Could not connect to server.");
-    let mut player_connection = PlayerConnection::new(stream).expect("Could not produce new PlayerConnection.");
+    let mut player_connection = PlayerConnection::new(stream)
+        .expect("Could not produce new PlayerConnection.");
 
     match player_connection.read().expect("Could not read anything; expected Command::Version.") {
         Command::Version { sirpent, protocol } => {
@@ -33,7 +34,8 @@ pub fn client_detect_vector() {
         }
     };
 
-    let (grid, timeout) = match player_connection.read().expect("Could not read anything; expected Command::Server.") {
+    let (grid, timeout) = match player_connection.read()
+        .expect("Could not read anything; expected Command::Server.") {
         Command::Server { grid, timeout } => {
             println!("{:?}",
                      Command::Server {
@@ -52,7 +54,7 @@ pub fn client_detect_vector() {
             player: Player {
                 name: "daenerys".to_string(),
                 secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
-                snake_uuid: None,
+                snake: None,
             },
         })
         .expect("Could not write Command::Hello.");
@@ -65,7 +67,8 @@ pub fn client_detect_vector() {
         }
     }
 
-    let mut turn_game: Game = match player_connection.read().expect("Could not read anything; expected Command::Turn.") {
+    let mut turn_game: Game = match player_connection.read()
+        .expect("Could not read anything; expected Command::Turn.") {
         Command::Turn { game } => {
             println!("{:?}", Command::Turn { game: game.clone() });
             game
@@ -79,7 +82,8 @@ pub fn client_detect_vector() {
     loop {
         println!("{:?}", turn_game);
 
-        match player_connection.read().expect("Could not read anything; expected Command::MakeAMove.") {
+        match player_connection.read()
+            .expect("Could not read anything; expected Command::MakeAMove.") {
             Command::MakeAMove => println!("{:?}", Command::MakeAMove),
             command => {
                 player_connection.write(&Command::Error).unwrap_or(());
@@ -87,10 +91,11 @@ pub fn client_detect_vector() {
             }
         }
 
-        player_connection.write(&Command::Move { direction: Direction::variants()[0] })
+        player_connection.write(&Command::Move { direction: grid.directions()[0] })
             .expect("Could not write Command::Move.");
 
-        match player_connection.read().expect("Could not read anything; expected Command::Timedout/Died/Won/Turn.") {
+        match player_connection.read()
+            .expect("Could not read anything; expected Command::Timedout/Died/Won/Turn.") {
             Command::TimedOut => {
                 println!("{:?}", Command::TimedOut);
                 return;
