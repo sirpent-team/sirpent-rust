@@ -11,3 +11,9 @@ pub struct Game {
     pub players: HashMap<PlayerName, Player>,
     pub food: Vector,
 }
+
+impl Game {
+    pub fn add_player(&mut self, player: Player) {
+        self.players.insert(player.clone().name, player);
+    }
+}
