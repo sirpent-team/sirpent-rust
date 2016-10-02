@@ -26,7 +26,7 @@ fn main() {
     };
 
     let snake = Snake::new(vec![Vector::hexagon(3, 8)]);
-    let player = Player::new("abserde".to_string(), None, Some(snake));
+    let player = Player::new("abserde".to_string(), Some(snake));
     game.players.insert(player.clone().name, player.clone());
 
     // -----------------------------------------------------------------------
@@ -61,7 +61,9 @@ fn server_handler(stream: TcpStream, game: Game) {
         .expect("Could not write Command::Server.");
 
     match player_connection.read().expect("Could not read anything; expected Command::Hello.") {
-        Command::Hello { player } => println!("{:?}", player),
+        Command::Hello { player, secret } => {
+            println!("Player {:?} with secret {:?}", player, secret);
+        },
         Command::Quit => {
             println!("QUIT");
             return;

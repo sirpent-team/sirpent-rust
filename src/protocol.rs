@@ -20,7 +20,11 @@ pub enum Command {
     // The client should decide whether it is compatible with this protocol and server setup.
     // If the client wishes to continue it must send a HELLO message.
     #[serde(rename = "HELLO")]
-    Hello { player: Player },
+    Hello {
+        player: Player,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        secret: Option<String>,
+    },
     // Otherwise or at any time, the client can send a QUIT message or just close the socket.
     #[serde(rename = "QUIT")]
     Quit,

@@ -21,9 +21,9 @@
 {
   "HELLO": {
     "player": {
-      "name": "daenerys",
-      "secret": "DeagOLmol3105764438410301265454621913800982laskhdasdj"
-    }
+      "name": "daenerys"
+    },
+    "secret": "DeagOLmol3105764438410301265454621913800982laskhdasdj"
   }
 }
 
