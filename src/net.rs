@@ -1,12 +1,10 @@
-// @TODO: Why is this necessary here? It's in lib.rs.
-// extern crate serde_json;
-
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
 use std::marker::Send;
 use std::io::{Result, Read, Write, BufReader, BufWriter, Bytes, Error, ErrorKind};
 use std::result::Result as StdResult;
 use std::error::Error as StdError;
+use std::collections::BTreeMap;
 use serde_json;
 
 use protocol::*;
@@ -14,7 +12,7 @@ use protocol::*;
 // @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
 pub struct PlayerConnection {
     stream: TcpStream,
-    reader: serde_json::StreamDeserializer<Command, Bytes<BufReader<TcpStream>>>,
+    reader: serde_json::StreamDeserializer<serde_json::Value, Bytes<BufReader<TcpStream>>>,
     writer: BufWriter<TcpStream>,
 }
 
@@ -29,24 +27,85 @@ impl PlayerConnection {
     }
 
     pub fn read(&mut self) -> Result<Command> {
-        let command_result =
+        let next_recieved_value =
             self.reader.next().ok_or(Error::new(ErrorKind::Other, "Nothing read."))?;
-        serde_to_io(command_result).or_else(|e| {
-            // @TODO: It seems irrelevant whether writing ERROR succeeded or not. If it
-            // succeeds then wonderful; the other end might get to know something went wrong.
-            // If it fails then we're much better off returning the Read error than the
-            // extra-level-of-indirection Write error.
-            self.write(&Command::Error).unwrap_or(());
-            Err(e)
-        })
+        let mut command_value = serde_to_io(next_recieved_value)?;
+
+        //println!("~~~ {}",
+        //         serde_to_io(serde_json::to_string(&command_value))?);
+
+        let obj = command_value.as_object_mut()
+            .ok_or(Error::new(ErrorKind::Other, "The msg was not a dictionary."))?;
+        let msg = obj.remove("msg")
+            .ok_or(Error::new(ErrorKind::Other, "No msg field provided."))?
+            .as_str()
+            .ok_or(Error::new(ErrorKind::Other, "The msg field was not a string."))?
+            .to_string();
+        let data = obj.remove("data")
+            .ok_or(Error::new(ErrorKind::Other, "No data field provided."))?;
+
+        let mut command_map: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+        command_map.insert(msg, data);
+        let command_map = serde_json::Value::Object(command_map);
+
+        //println!("~~~ {}", serde_to_io(serde_json::to_string(&command_map))?);
+
+        let command: Command = serde_to_io(serde_json::from_value(command_map))?;
+        Ok(command)
     }
 
     pub fn write(&mut self, command: &Command) -> Result<()> {
+        let command_value = serde_json::to_value(command);
+        // let command_map = command_value.as_object_mut()
+        //     .unwrap_or({
+        //         let mut map = BTreeMap::new();
+        //         map.insert(command_value.as_str()
+        //                        .ok_or(Error::new(ErrorKind::Other,
+        //                                          "Serialised Command was not an object and not \
+        //                                           a string."))?
+        //                        .to_string(),
+        //                    serde_json::Value::Object(BTreeMap::new()));
+        //         &mut map
+        //     });
+
+        let mut data = BTreeMap::new();
+
+        let msg = match command_value {
+            serde_json::Value::Object(command_map) => {
+                let (msg_, data_) = command_map.iter()
+                    .next()
+                    .ok_or(Error::new(ErrorKind::Other, "The outer Command object was empty."))?;
+                data.append(data_.clone()
+                    .as_object_mut()
+                    .ok_or(Error::new(ErrorKind::Other, "Command data was not an object."))?);
+                msg_.clone()
+            }
+            serde_json::Value::String(command_msg) => command_msg,
+            _ => {
+                return Err(Error::new(ErrorKind::Other,
+                                      "Serialised Command was not an object or string."))
+            }
+        };
+
+        // Using a Map here was putting data before msg in output JSON. For developers it is easier to
+        // keep things the sane way around even though for clients it probably won't be a big deal unless
+        // our payloads got big. Thus an order-preserving struct is used.
+        let message = Message {
+            msg: msg,
+            data: serde_json::Value::Object(data),
+        };
+
         // serde_json:: to_writer seems to never return when using a BufWriter<TcpStream>.
-        self.writer.write_all(serde_to_io(serde_json::to_string(command))?.as_bytes())?;
+        self.writer.write_all(serde_to_io(serde_json::to_string(&message))?.as_bytes())?;
         self.writer.flush()?;
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Message {
+    msg: String,
+    data: serde_json::Value,
 }
 
 /// Converts a Result<T, serde_json::Error> into an Result<T>.
