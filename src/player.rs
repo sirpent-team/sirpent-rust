@@ -5,7 +5,7 @@ pub type PlayerName = String;
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct Player {
     pub name: PlayerName,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snake: Option<Snake>,
 }
 
