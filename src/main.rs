@@ -35,25 +35,49 @@ fn main() {
 
     let (game_tx, game_rx) = chan::async();
     let (direction_tx, direction_rx) = chan::async();
+    let (new_player_tx, new_player_rx) = chan::async();
 
     let game_grid = game.grid.clone();
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
         plain_server.listen(move |stream: TcpStream| {
-                                server_handler(stream,
-                                               game_grid.clone(),
-                                               game_rx.clone(),
-                                               direction_tx.clone());
-                            },
-                            None);
+            player_handshake_handler(stream, game_grid.clone(), new_player_tx.clone());
+        });
     });
 
     thread::spawn(move || {
-        loop {
-            game_tx.send(game.clone());
+        let mut game = game.clone();
 
-            let (player, direction) = direction_rx.recv().unwrap();
-            println!("direction_rx: {:?} {:?}", player, direction);
+        while game.players.len() < 3 {
+            let (mut player, player_connection) = new_player_rx.recv().unwrap();
+            player.snake = Some(Snake::new(vec![Vector::hexagon(game.players.len() as isize,
+                                                                game.players.len() as isize)]));
+            let final_player_name = game.add_player(player);
+            player_game_handler(player_connection,
+                                final_player_name,
+                                game_rx.clone(),
+                                direction_tx.clone());
+        }
+
+        loop {
+            for _ in 0..game.players.len() {
+                game_tx.send(game.clone());
+
+                let (player_name, direction) = direction_rx.recv()
+                    .expect("Did not recieve (PlayerName,Option<Direction>) across direction_rx.");
+                if direction.is_none() {
+                    panic!("No direction!");
+                }
+                let mut p = game.players.get_mut(&player_name);
+                let mut player = p.as_mut().expect("direction_rx specified unknown player.");
+                let mut snake = player.snake
+                    .as_mut()
+                    .expect("direction_rx specified player with no snake.")
+                    .clone();
+                snake.step_in_direction(direction.expect("direction_rx specified None direction."));
+                player.snake = Some(snake);
+                println!("player.name={} snake={:?}", player.name, player.snake);
+            }
         }
     });
 
@@ -64,16 +88,15 @@ fn main() {
     }
 }
 
-fn server_handler(stream: TcpStream,
-                  grid: Grid,
-                  game_rx: Receiver<Game>,
-                  direction_tx: Sender<(Player, Direction)>) {
+fn player_handshake_handler(stream: TcpStream,
+                            grid: Grid,
+                            new_player_tx: Sender<(Player, PlayerConnection)>) {
     thread::spawn(move || {
         // Prevent memory exhaustion: stop reading from string after 1MiB.
         // @TODO @DEBUG: Need to reset this for each new message communication.
         // let mut take = reader.clone().take(0xfffff);
 
-        let mut player_connection = PlayerConnection::new(stream)
+        let mut player_connection = PlayerConnection::new(stream, None)
             .expect("Could not produce new PlayerConnection.");
 
         player_connection.write(&Command::version()).expect("Could not write Command::version().");
@@ -99,7 +122,15 @@ fn server_handler(stream: TcpStream,
                 panic!(format!("Unexpected {:?}.", command));
             }
         };
+        new_player_tx.send((player.clone(), player_connection));
+    });
+}
 
+fn player_game_handler(mut player_connection: PlayerConnection,
+                       player_name: PlayerName,
+                       game_rx: Receiver<Game>,
+                       direction_tx: Sender<(PlayerName, Option<Direction>)>) {
+    thread::spawn(move || {
         player_connection.write(&Command::NewGame).expect("Could not write Command::NewGame.");
 
         loop {
@@ -115,7 +146,7 @@ fn server_handler(stream: TcpStream,
                 .expect("Could not read anything; expected Command::Move.") {
                 Command::Move { direction } => {
                     println!("{:?}", Command::Move { direction: direction });
-                    direction_tx.send((player.clone(), direction));
+                    direction_tx.send((player_name.clone(), Some(direction)));
                 }
                 Command::Quit => {
                     println!("QUIT");
