@@ -1,7 +1,7 @@
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
 use std::marker::Send;
-use std::io::{Result, Read, Write, BufReader, BufWriter, Bytes, Error, ErrorKind};
+use std::io::{Result, Write, BufReader, BufWriter, BufRead, Lines, Error, ErrorKind};
 use std::result::Result as StdResult;
 use std::error::Error as StdError;
 use std::collections::BTreeMap;
@@ -9,30 +9,32 @@ use serde_json;
 
 use protocol::*;
 
+static LF: &'static [u8] = b"\n";
+
 // @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
 pub struct PlayerConnection {
+    timeouts: Timeouts,
     stream: TcpStream,
-    reader: serde_json::StreamDeserializer<serde_json::Value, Bytes<BufReader<TcpStream>>>,
+    reader: Lines<BufReader<TcpStream>>,
     writer: BufWriter<TcpStream>,
 }
 
 impl PlayerConnection {
-    pub fn new(stream: TcpStream) -> Result<PlayerConnection> {
+    pub fn new(stream: TcpStream, timeouts: Option<Timeouts>) -> Result<PlayerConnection> {
         Ok(PlayerConnection {
+            timeouts: timeouts.unwrap_or(Default::default()),
             stream: stream.try_clone()?,
-            reader: serde_json::StreamDeserializer::new(BufReader::new(stream.try_clone()?)
-                .bytes()),
+            reader: BufReader::new(stream.try_clone()?).lines(),
             writer: BufWriter::new(stream),
         })
     }
 
     pub fn read(&mut self) -> Result<Command> {
-        let next_recieved_value =
-            self.reader.next().ok_or(Error::new(ErrorKind::Other, "Nothing read."))?;
-        let mut command_value = serde_to_io(next_recieved_value)?;
+        self.stream.set_read_timeout(self.timeouts.read)?;
 
-        //println!("~~~ {}",
-        //         serde_to_io(serde_json::to_string(&command_value))?);
+        let line =
+            self.reader.next().ok_or(Error::new(ErrorKind::Other, "None read from stream."))??;
+        let mut command_value: serde_json::Value = serde_to_io(serde_json::from_str(&line))?;
 
         let obj = command_value.as_object_mut()
             .ok_or(Error::new(ErrorKind::Other, "The msg was not a dictionary."))?;
@@ -48,25 +50,14 @@ impl PlayerConnection {
         command_map.insert(msg, data);
         let command_map = serde_json::Value::Object(command_map);
 
-        //println!("~~~ {}", serde_to_io(serde_json::to_string(&command_map))?);
-
         let command: Command = serde_to_io(serde_json::from_value(command_map))?;
         Ok(command)
     }
 
     pub fn write(&mut self, command: &Command) -> Result<()> {
+        self.stream.set_write_timeout(self.timeouts.write)?;
+
         let command_value = serde_json::to_value(command);
-        // let command_map = command_value.as_object_mut()
-        //     .unwrap_or({
-        //         let mut map = BTreeMap::new();
-        //         map.insert(command_value.as_str()
-        //                        .ok_or(Error::new(ErrorKind::Other,
-        //                                          "Serialised Command was not an object and not \
-        //                                           a string."))?
-        //                        .to_string(),
-        //                    serde_json::Value::Object(BTreeMap::new()));
-        //         &mut map
-        //     });
 
         let mut data = BTreeMap::new();
 
@@ -97,6 +88,7 @@ impl PlayerConnection {
 
         // serde_json:: to_writer seems to never return when using a BufWriter<TcpStream>.
         self.writer.write_all(serde_to_io(serde_json::to_string(&message))?.as_bytes())?;
+        self.writer.write_all(LF)?;
         self.writer.flush()?;
         Ok(())
     }
@@ -181,7 +173,7 @@ impl SirpentServer {
     ///
     /// Panics if the provided address does not parse. To avoid this
     /// call `to_socket_addrs` yourself and pass a parsed `SocketAddr`.
-    pub fn listen<F>(&self, mut f: F, timeouts: Option<Timeouts>)
+    pub fn listen<F>(&self, mut f: F)
         where F: FnMut(TcpStream) + Send
     {
         let listener = TcpListener::bind(self.addr.unwrap()).unwrap();
