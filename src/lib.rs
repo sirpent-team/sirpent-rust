@@ -12,12 +12,7 @@ extern crate quickcheck;
 mod net;
 mod game;
 mod grid;
-#[cfg(feature = "hexagon")]
-mod hexagon_grid;
-#[cfg(feature = "square")]
-mod square_grid;
-#[cfg(feature = "triangle")]
-mod triangle_grid;
+mod grids;
 mod snake;
 mod player;
 mod protocol;

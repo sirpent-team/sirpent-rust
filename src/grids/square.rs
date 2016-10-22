@@ -1,19 +1,25 @@
 use rand::Rng;
 
-use grid::*;
+use grids::traits::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
-pub enum SquareDir {
+pub enum SquareDirection {
+    #[serde(rename = "north")]
     North,
+    #[serde(rename = "east")]
     East,
+    #[serde(rename = "south")]
     South,
+    #[serde(rename = "west")]
     West,
 }
 
-impl DirectionTrait for SquareDir {
-    fn variants() -> &'static [SquareDir] {
-        static VARIANTS: &'static [SquareDir] =
-            &[SquareDir::North, SquareDir::East, SquareDir::South, SquareDir::West];
+impl DirectionTrait for SquareDirection {
+    fn variants() -> &'static [SquareDirection] {
+        static VARIANTS: &'static [SquareDirection] = &[SquareDirection::North,
+                                                        SquareDirection::East,
+                                                        SquareDirection::South,
+                                                        SquareDirection::West];
         VARIANTS
     }
 }
@@ -25,7 +31,7 @@ pub struct SquareVector {
 }
 
 impl VectorTrait for SquareVector {
-    type Direction = SquareDir;
+    type Direction = SquareDirection;
 
     fn distance(&self, other: &SquareVector) -> usize {
         let xdist = (self.x - other.x).abs();
@@ -33,27 +39,27 @@ impl VectorTrait for SquareVector {
         (xdist + ydist) as usize
     }
 
-    fn neighbour(&self, direction: &SquareDir) -> SquareVector {
+    fn neighbour(&self, direction: &SquareDirection) -> SquareVector {
         match *direction {
-            SquareDir::North => {
+            SquareDirection::North => {
                 SquareVector {
                     x: self.x,
                     y: self.y - 1,
                 }
             }
-            SquareDir::East => {
+            SquareDirection::East => {
                 SquareVector {
                     x: self.x + 1,
                     y: self.y,
                 }
             }
-            SquareDir::South => {
+            SquareDirection::South => {
                 SquareVector {
                     x: self.x,
                     y: self.y + 1,
                 }
             }
-            SquareDir::West => {
+            SquareDirection::West => {
                 SquareVector {
                     x: self.x - 1,
                     y: self.y,
@@ -64,7 +70,7 @@ impl VectorTrait for SquareVector {
 
     fn neighbours(&self) -> Vec<Self> {
         let mut neighbours = vec![];
-        for variant in SquareDir::variants() {
+        for variant in SquareDirection::variants() {
             neighbours.push(self.neighbour(variant));
         }
         neighbours
@@ -78,10 +84,11 @@ pub struct SquareGrid {
 }
 
 impl SquareGrid {
-    pub fn new(radius: isize) -> SquareGrid {
+    #[allow(dead_code)]
+    pub fn new(width: isize, height: isize) -> SquareGrid {
         SquareGrid {
-            width: radius,
-            height: radius,
+            width: width,
+            height: height,
         }
     }
 }
@@ -110,8 +117,7 @@ impl GridTrait for SquareGrid {
 mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
-    use grid::Vector;
-    use grid::Direction;
+    pub use grids::traits::*;
 
     impl Arbitrary for SquareVector {
         fn arbitrary<G: Gen>(g: &mut G) -> SquareVector {
@@ -120,10 +126,10 @@ mod tests {
         }
     }
 
-    impl Arbitrary for SquareDir {
-        fn arbitrary<G: Gen>(g: &mut G) -> SquareDir {
+    impl Arbitrary for SquareDirection {
+        fn arbitrary<G: Gen>(g: &mut G) -> SquareDirection {
             let i: usize = g.gen_range(0, 4);
-            SquareDir::variants()[i].clone()
+            SquareDirection::variants()[i].clone()
         }
     }
 
@@ -154,12 +160,12 @@ mod tests {
         quickcheck(symmetry_prop as fn(SquareVector, SquareVector) -> bool);
     }
 
-    fn neighbour_adjacency_prop(v: SquareVector, d: SquareDir) -> bool {
+    fn neighbour_adjacency_prop(v: SquareVector, d: SquareDirection) -> bool {
         v.distance(&v.neighbour(&d)) == 1
     }
 
     #[test]
     fn neighbour_adjacency() {
-        quickcheck(neighbour_adjacency_prop as fn(SquareVector, SquareDir) -> bool);
+        quickcheck(neighbour_adjacency_prop as fn(SquareVector, SquareDirection) -> bool);
     }
 }

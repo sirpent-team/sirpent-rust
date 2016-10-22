@@ -1,18 +1,21 @@
 use rand::Rng;
 
-use grid::*;
+use grids::traits::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
-pub enum TriangleDir {
+pub enum TriangleDirection {
+    #[serde(rename = "east")]
     East,
+    #[serde(rename = "south")]
     South,
+    #[serde(rename = "west")]
     West,
 }
 
-impl DirectionTrait for TriangleDir {
-    fn variants() -> &'static [TriangleDir] {
-        static VARIANTS: &'static [TriangleDir] =
-            &[TriangleDir::East, TriangleDir::South, TriangleDir::West];
+impl DirectionTrait for TriangleDirection {
+    fn variants() -> &'static [TriangleDirection] {
+        static VARIANTS: &'static [TriangleDirection] =
+            &[TriangleDirection::East, TriangleDirection::South, TriangleDirection::West];
         VARIANTS
     }
 }
@@ -25,7 +28,7 @@ pub struct TriangleVector {
 }
 
 impl VectorTrait for TriangleVector {
-    type Direction = TriangleDir;
+    type Direction = TriangleDirection;
 
     fn distance(&self, other: &TriangleVector) -> usize {
         // http://simblob.blogspot.co.uk/2007/06/distances-on-triangular-grid.html
@@ -38,25 +41,25 @@ impl VectorTrait for TriangleVector {
         (du + dv + d3) as usize
     }
 
-    fn neighbour(&self, direction: &TriangleDir) -> TriangleVector {
+    fn neighbour(&self, direction: &TriangleDirection) -> TriangleVector {
         match self.r {
             true => {
                 match *direction {
-                    TriangleDir::East => {
+                    TriangleDirection::East => {
                         TriangleVector {
                             u: self.u + 1,
                             v: self.v,
                             r: false,
                         }
                     }
-                    TriangleDir::South => {
+                    TriangleDirection::South => {
                         TriangleVector {
                             u: self.u,
                             v: self.v + 1,
                             r: false,
                         }
                     }
-                    TriangleDir::West => {
+                    TriangleDirection::West => {
                         TriangleVector {
                             u: self.u,
                             v: self.v,
@@ -67,21 +70,21 @@ impl VectorTrait for TriangleVector {
             }
             false => {
                 match *direction {
-                    TriangleDir::East => {
+                    TriangleDirection::East => {
                         TriangleVector {
                             u: self.u,
                             v: self.v,
                             r: true,
                         }
                     }
-                    TriangleDir::South => {
+                    TriangleDirection::South => {
                         TriangleVector {
                             u: self.u,
                             v: self.v - 1,
                             r: true,
                         }
                     }
-                    TriangleDir::West => {
+                    TriangleDirection::West => {
                         TriangleVector {
                             u: self.u - 1,
                             v: self.v,
@@ -95,7 +98,7 @@ impl VectorTrait for TriangleVector {
 
     fn neighbours(&self) -> Vec<Self> {
         let mut neighbours = vec![];
-        for variant in TriangleDir::variants() {
+        for variant in TriangleDirection::variants() {
             neighbours.push(self.neighbour(variant));
         }
         neighbours
@@ -108,6 +111,7 @@ pub struct TriangleGrid {
 }
 
 impl TriangleGrid {
+    #[allow(dead_code)]
     pub fn new(radius: usize) -> TriangleGrid {
         TriangleGrid { radius: radius }
     }
@@ -143,8 +147,7 @@ impl GridTrait for TriangleGrid {
 mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
-    use grid::Vector;
-    use grid::Direction;
+    pub use grids::traits::*;
 
     impl Arbitrary for TriangleVector {
         fn arbitrary<G: Gen>(g: &mut G) -> TriangleVector {
@@ -153,10 +156,10 @@ mod tests {
         }
     }
 
-    impl Arbitrary for TriangleDir {
-        fn arbitrary<G: Gen>(g: &mut G) -> TriangleDir {
+    impl Arbitrary for TriangleDirection {
+        fn arbitrary<G: Gen>(g: &mut G) -> TriangleDirection {
             let i: usize = g.gen_range(0, 3);
-            TriangleDir::variants()[i].clone()
+            TriangleDirection::variants()[i].clone()
         }
     }
 
@@ -188,12 +191,12 @@ mod tests {
         quickcheck(symmetry_prop as fn(TriangleVector, TriangleVector) -> bool);
     }
 
-    fn neighbour_adjacency_prop(v: TriangleVector, d: TriangleDir) -> bool {
+    fn neighbour_adjacency_prop(v: TriangleVector, d: TriangleDirection) -> bool {
         v.distance(&v.neighbour(&d)) == 1
     }
 
     #[test]
     fn neighbour_adjacency() {
-        quickcheck(neighbour_adjacency_prop as fn(TriangleVector, TriangleDir) -> bool);
+        quickcheck(neighbour_adjacency_prop as fn(TriangleVector, TriangleDirection) -> bool);
     }
 }

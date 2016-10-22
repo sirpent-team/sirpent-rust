@@ -2,69 +2,64 @@
 
 {
   "VERSION": {
-    "sirpent": "0.0.1",
+    "sirpent": "0.1.0",
     "protocol": "0.2"
+  }
+}
+
+{
+  "SERVER": {
+    "grid": {
+      "hexagon": {
+        "radius": 15
+      }
+    },
+    "timeout": null
   }
 }
 
 {
   "HELLO": {
     "player": {
-      "name": "daenerys",
-      "snake_uuid": null
-    }
+      "name": "daenerys"
+    },
+    "secret": "DeagOLmol3105764438410301265454621913800982laskhdasdj"
   }
 }
-
-{
-  "SERVER": {
-    "world": {
-      "hexagon_grid": {
-        "radius": 10
-      }
-    }
-  }
-}
-
-"JOIN" or "QUIT" or "ERROR"
 
 "NEW_GAME"
 
 {
   "TURN": {
     "game": {
-        "uuid": "4afc3d14-b547-453d-a622-acf2ad945535",
-        "world": {
-            "hexagon_grid": {
-                "radius": 5
-            }
-        },
-        "players": {
-            "abserde": {
-                "name": "abserde",
-                "snake_uuid": "ab5e00e0-3cea-409d-84f1-b1416fbc8e14"
-            },
-            [...]
-        },
-        "state": {
-            "food": {
-                "x": 9,
-                "y": 13
-            },
-            "snakes": {
-                "ab5e00e0-3cea-409d-84f1-b1416fbc8e14": {
-                    "alive": true,
-                    "uuid": "ab5e00e0-3cea-409d-84f1-b1416fbc8e14",
-                    "segments": [
-                        {
-                            "x": 3,
-                            "y": 8
-                        }
-                    ]
-                },
-                [...]
-            }
+      "uuid": "e6a1995d-9f1d-47f1-bd65-5bf5c7a0b1b8",
+      "grid": {
+        "hexagon": {
+          "radius": 15
         }
+      },
+      "players": {
+        "abserde": {
+          "name": "abserde",
+          "snake": {
+            "alive": true,
+            "segments": [
+              {
+                "hexagon": {
+                  "x": 3,
+                  "y": 8
+                }
+              }
+            ]
+          }
+        }
+      },
+      "food": {
+        "hexagon": {
+          "x": 9,
+          "y": 13
+        }
+      }
     }
   }
 }
@@ -73,7 +68,9 @@
 
 {
   "MOVE": {
-    "direction": "SouthEast"
+    "direction": {
+      "hexagon": "southeast"
+    }
   }
 }
 
