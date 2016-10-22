@@ -89,11 +89,7 @@ impl VectorTrait for HexagonVector {
     }
 
     fn neighbours(&self) -> Vec<Self> {
-        let mut neighbours = vec![];
-        for variant in HexagonDirection::variants() {
-            neighbours.push(self.neighbour(variant));
-        }
-        neighbours
+        HexagonDirection::variants().into_iter().map(|d| self.neighbour(d)).collect()
     }
 }
 

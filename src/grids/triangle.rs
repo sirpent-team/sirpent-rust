@@ -42,66 +42,54 @@ impl VectorTrait for TriangleVector {
     }
 
     fn neighbour(&self, direction: &TriangleDirection) -> TriangleVector {
-        match self.r {
-            true => {
-                match *direction {
-                    TriangleDirection::East => {
-                        TriangleVector {
-                            u: self.u + 1,
-                            v: self.v,
-                            r: false,
-                        }
-                    }
-                    TriangleDirection::South => {
-                        TriangleVector {
-                            u: self.u,
-                            v: self.v + 1,
-                            r: false,
-                        }
-                    }
-                    TriangleDirection::West => {
-                        TriangleVector {
-                            u: self.u,
-                            v: self.v,
-                            r: false,
-                        }
-                    }
+        match (self.r, *direction) {
+            (true, TriangleDirection::East) => {
+                TriangleVector {
+                    u: self.u + 1,
+                    v: self.v,
+                    r: false,
                 }
             }
-            false => {
-                match *direction {
-                    TriangleDirection::East => {
-                        TriangleVector {
-                            u: self.u,
-                            v: self.v,
-                            r: true,
-                        }
-                    }
-                    TriangleDirection::South => {
-                        TriangleVector {
-                            u: self.u,
-                            v: self.v - 1,
-                            r: true,
-                        }
-                    }
-                    TriangleDirection::West => {
-                        TriangleVector {
-                            u: self.u - 1,
-                            v: self.v,
-                            r: true,
-                        }
-                    }
+            (true, TriangleDirection::South) => {
+                TriangleVector {
+                    u: self.u,
+                    v: self.v + 1,
+                    r: false,
+                }
+            }
+            (true, TriangleDirection::West) => {
+                TriangleVector {
+                    u: self.u,
+                    v: self.v,
+                    r: false,
+                }
+            }
+            (false, TriangleDirection::East) => {
+                TriangleVector {
+                    u: self.u,
+                    v: self.v,
+                    r: true,
+                }
+            }
+            (false, TriangleDirection::South) => {
+                TriangleVector {
+                    u: self.u,
+                    v: self.v - 1,
+                    r: true,
+                }
+            }
+            (false, TriangleDirection::West) => {
+                TriangleVector {
+                    u: self.u - 1,
+                    v: self.v,
+                    r: true,
                 }
             }
         }
     }
 
     fn neighbours(&self) -> Vec<Self> {
-        let mut neighbours = vec![];
-        for variant in TriangleDirection::variants() {
-            neighbours.push(self.neighbour(variant));
-        }
-        neighbours
+        TriangleDirection::variants().into_iter().map(|d| self.neighbour(d)).collect()
     }
 }
 

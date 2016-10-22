@@ -69,11 +69,7 @@ impl VectorTrait for SquareVector {
     }
 
     fn neighbours(&self) -> Vec<Self> {
-        let mut neighbours = vec![];
-        for variant in SquareDirection::variants() {
-            neighbours.push(self.neighbour(variant));
-        }
-        neighbours
+        SquareDirection::variants().into_iter().map(|d| self.neighbour(d)).collect()
     }
 }
 
