@@ -13,7 +13,13 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn add_player(&mut self, player: Player) {
-        self.players.insert(player.clone().name, player);
+    pub fn add_player(&mut self, mut player: Player) -> PlayerName {
+        let mut player_name = player.clone().name;
+        while self.players.contains_key(&player_name) {
+            player_name.push('_');
+        }
+        player.name = player_name.clone();
+        self.players.insert(player_name.clone(), player);
+        player_name
     }
 }
