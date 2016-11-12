@@ -1,20 +1,24 @@
-#![feature(question_mark)]
-
 extern crate ansi_term;
 extern crate sirpent;
 extern crate rand;
 extern crate uuid;
 #[macro_use(chan_select)]
 extern crate chan;
+extern crate rayon;
 
 use ansi_term::Colour::*;
 use uuid::Uuid;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::TcpStream;
 use std::thread;
 use std::str;
 use std::time;
 use chan::{Receiver, Sender};
+use std::io::{Error, ErrorKind};
+use std::sync::Arc;
+use std::iter::FromIterator;
+use rayon::prelude::*;
+use std::cell::RefCell;
 
 use sirpent::*;
 
@@ -33,61 +37,161 @@ fn main() {
 
     // -----------------------------------------------------------------------
 
-    let (game_tx, game_rx) = chan::async();
-    let (direction_tx, direction_rx) = chan::async();
-    let (new_player_tx, new_player_rx) = chan::async();
-
-    let game_grid = game.grid.clone();
-    thread::spawn(move || {
-        let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
-        plain_server.listen(move |stream: TcpStream| {
-            player_handshake_handler(stream, game_grid.clone(), new_player_tx.clone());
-        });
-    });
-
-    thread::spawn(move || {
-        let mut game = game.clone();
-
-        while game.players.len() < 3 {
-            let (mut player, player_connection) = new_player_rx.recv().unwrap();
-            player.snake = Some(Snake::new(vec![Vector {
-                                                    x: game.players.len() as isize,
-                                                    y: game.players.len() as isize,
-                                                }]));
-            let final_player_name = game.add_player(player);
-            player_game_handler(player_connection,
-                                final_player_name,
-                                game_rx.clone(),
-                                direction_tx.clone());
-        }
-
-        loop {
-            for _ in 0..game.players.len() {
-                game_tx.send(game.clone());
-
-                let (player_name, direction) = direction_rx.recv()
-                    .expect("Did not recieve (PlayerName,Option<Direction>) across direction_rx.");
-                if direction.is_none() {
-                    panic!("No direction!");
-                }
-                let mut p = game.players.get_mut(&player_name);
-                let mut player = p.as_mut().expect("direction_rx specified unknown player.");
-                let mut snake = player.snake
-                    .as_mut()
-                    .expect("direction_rx specified player with no snake.")
-                    .clone();
-                snake.step_in_direction(direction.expect("direction_rx specified None direction."));
-                player.snake = Some(snake);
-                println!("player.name={} snake={:?}", player.name, player.snake);
-            }
-        }
-    });
-
     // -----------------------------------------------------------------------
 
     loop {
         thread::sleep(time::Duration::from_millis(500));
     }
+}
+
+type PlayerBox = Box<Player>;
+pub struct GameContext {
+    food: HashSet<Vector>,
+    snakes: HashMap<PlayerName, Snake>,
+}
+pub struct GameState {
+    uuid: Uuid,
+    grid: Grid,
+    players: HashMap<PlayerName, PlayerBox>,
+
+    context: GameContext,
+    snakes_to_create: HashSet<PlayerName>,
+    snake_plans: HashMap<PlayerName, Direction>,
+    snakes_to_remove: HashSet<PlayerName>,
+
+    turn_number: u32,
+    debug: bool,
+}
+
+impl GameState {
+    fn new(grid: Grid, debug: bool) -> GameState {
+        GameState{
+            uuid: Uuid::new_v4(),
+            grid: grid,
+            players: HashMap::new(),
+            context: GameContext{
+                food: HashSet::new(),
+                snakes: HashMap::new()
+            },
+            snakes_to_create: HashSet::new(),
+            snake_plans: HashMap::new(),
+            snakes_to_remove: HashSet::new(),
+            turn_number: 0,
+            debug: debug
+        }
+    }
+
+    fn add_player(&mut self, player: Player) {
+        let player_box = Box::new(player.clone());
+        self.snakes_to_create.insert(player_box.name.clone());
+        self.players.insert(player_box.name.clone(), player_box);
+    }
+
+    fn simulate_next_turn(&mut self) {
+        if self.debug {
+            println!("Simulating next turn");
+        }
+
+        // Create new snakes.
+        // @TODO: Don't put a snake where a snake already is.
+        for player_name in self.snakes_to_create.iter() {
+            // @TODO: Use self.grid.random_cell()
+            let snake = Snake::new(vec![]);
+            self.context.snakes.insert(player_name.clone(), snake);
+        }
+
+        // Apply movement and remove unmoved nskaes.
+        for (player_name, snake) in self.context.snakes.iter_mut() {
+            if self.snake_plans.contains_key(player_name) {
+                let plan = self.snake_plans.get(player_name).unwrap();
+                snake.step_in_direction(*plan);
+            } else {
+                // Snakes which weren't moved turn into food and die.
+                self.context.food.extend(snake.segments.iter());
+                self.snakes_to_remove.insert(player_name.clone());
+            }
+        }
+        for player_name in self.snakes_to_remove.drain() {
+            self.context.snakes.remove(&player_name);
+        }
+
+        // Detect collisions with food.
+        for (player_name, snake) in self.context.snakes.iter_mut() {
+            if self.context.food.contains(&snake.segments[0]) {
+                snake.grow();
+            }
+        }
+
+        // Detect collisions with snakes and remove colliding snakes.
+        for (player_name, snake) in self.context.snakes.iter() {
+            for (_, snake2) in self.context.snakes.iter() {
+                if (snake.has_collided_into(snake2)) {
+                    self.context.food.extend(snake.segments.iter());
+                    self.snakes_to_remove.insert(player_name.clone());
+                    break;
+                }
+            }
+        }
+        for player_name in self.snakes_to_remove.drain() {
+            self.context.snakes.remove(&player_name);
+        }
+
+        self.turn_number += 1;
+    }
+}
+
+/*
+fn game_manager(mut g: Arc<RefCell<Game>>, mut connections: HashMap<PlayerName, PlayerConnection>) {
+    // let mut game: Arc<Game> = Arc::new(game);
+
+    let mut game = g.borrow_mut();
+
+    connections
+        .par_iter()
+        .map(|(player_name, mut player_connection)| player_connection.write(&Command::NewGame));
+
+    let gp = game.players.clone();
+    let commands = gp
+        .par_iter()
+        .map(|(player_name, player)| {
+            let mut player_connection = connections.get_mut(player_name).unwrap();
+            let command = player_connection.write(&Command::Turn { game: game.clone() })
+                .and_then(|_| player_connection.write(&Command::MakeAMove))
+                .and_then(|_| player_connection.read())
+                .and_then(|command| {
+                    match command {
+                        Command::Move { direction } => {
+                            // println!("{:?}", Command::Move { direction: direction });
+                            // direction_tx.send((player_name.clone(), Some(direction)));
+                            Ok(direction)
+                        }
+                        command => {
+                            player_connection.write(&Command::Error).unwrap_or(());
+                            Err(Error::new(ErrorKind::Other,
+                                           format!("Unexpected command {:?}", command)))
+                        }
+                    }
+                });
+            (player_name, command)
+        });
+
+    let snakes = commands.map(|(player_name, direction)| {
+        match direction {
+            Ok(direction) => {
+                let mut snake = game.players.get(player_name).unwrap().snake.clone().unwrap();
+                snake.step_in_direction(direction);
+                (player_name.clone(), Some(snake))
+            },
+            Err(err) => {
+                println!("Player {:?} move error: {:?}", player_name.clone(), err);
+                (player_name.clone(), None)
+            }
+        }
+    });
+
+    snakes.map(|(player_name, snake)| {
+        game.players.get_mut(&player_name).unwrap().snake = snake;
+    });
 }
 
 fn player_handshake_handler(stream: TcpStream,
@@ -130,35 +234,27 @@ fn player_handshake_handler(stream: TcpStream,
 
 fn player_game_handler(mut player_connection: PlayerConnection,
                        player_name: PlayerName,
-                       game_rx: Receiver<Game>,
-                       direction_tx: Sender<(PlayerName, Option<Direction>)>) {
-    thread::spawn(move || {
-        player_connection.write(&Command::NewGame).expect("Could not write Command::NewGame.");
-
-        loop {
-            let game = game_rx.recv().unwrap();
-
-            player_connection.write(&Command::Turn { game: game.clone() })
-                .expect("Could not write Command::Turn.");
-
-            player_connection.write(&Command::MakeAMove)
-                .expect("Could not write Command::MakeAMove.");
-
-            match player_connection.read()
-                .expect("Could not read anything; expected Command::Move.") {
-                Command::Move { direction } => {
-                    println!("{:?}", Command::Move { direction: direction });
-                    direction_tx.send((player_name.clone(), Some(direction)));
+                       game: &Game,
+                       direction_tx: Sender<Option<Direction>>) {
+    loop {
+        let command = player_connection.write(&Command::Turn { game: game.clone() })
+            .and_then(|_| player_connection.write(&Command::MakeAMove))
+            .and_then(|_| player_connection.read())
+            .and_then(|command| {
+                match command {
+                    Command::Move { direction } => {
+                        // println!("{:?}", Command::Move { direction: direction });
+                        // direction_tx.send((player_name.clone(), Some(direction)));
+                        Ok(direction)
+                    }
+                    command => {
+                        player_connection.write(&Command::Error).unwrap_or(());
+                        Err(Error::new(ErrorKind::Other,
+                                       format!("Unexpected command {:?}", command)))
+                    }
                 }
-                Command::Quit => {
-                    println!("QUIT");
-                    return;
-                }
-                command => {
-                    player_connection.write(&Command::Error).unwrap_or(());
-                    panic!(format!("Unexpected {:?}.", command));
-                }
-            }
-        }
-    });
+            });
+        direction_tx.send(command.ok());
+    }
 }
+*/

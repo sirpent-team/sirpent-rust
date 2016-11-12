@@ -4,6 +4,7 @@ use grid::*;
 pub struct Snake {
     pub alive: bool,
     pub segments: Vec<Vector>,
+    previous_tail: Option<Vector>,
 }
 
 impl Snake {
@@ -11,6 +12,7 @@ impl Snake {
         Snake {
             alive: true,
             segments: segments,
+            previous_tail: None
         }
     }
 
@@ -35,13 +37,20 @@ impl Snake {
     }
 
     pub fn step_in_direction(&mut self, dir: Direction) {
-        if self.segments.len() == 0 {
-            return;
+        self.previous_tail = self.segments.last().cloned();
+        if !self.segments.is_empty() {
+            for i in (1..self.segments.len()).rev() {
+                self.segments[i] = self.segments[i - 1];
+            }
+            self.segments[0] = self.segments[0].neighbour(&dir);
         }
-        for i in (1..self.segments.len()).rev() {
-            self.segments[i] = self.segments[i - 1];
+    }
+
+    pub fn grow(&mut self) {
+        if self.previous_tail.is_some() {
+            self.segments.push(self.previous_tail.unwrap());
+            self.previous_tail = None;
         }
-        self.segments[0] = self.segments[0].neighbour(&dir);
     }
 }
 

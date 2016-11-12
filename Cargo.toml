@@ -10,13 +10,14 @@ hexagon = []
 triangle = []
 
 [dependencies]
-ansi_term = "0.8.0"
+ansi_term = "0.9"
 uuid = { version = "0.3", features = ["v4", "serde"] }
-rand = "0.3.*"
+rand = "0.3"
 chan = "0.1"
 serde = "0.8"
 serde_json = "0.8"
 serde_derive = "0.8"
+rayon = "0.5"
 
 [dev-dependencies]
 quickcheck = "0.2.*"

@@ -1,4 +1,5 @@
-#![feature(question_mark, rustc_macro, structural_match, rustc_attrs)]
+//#![feature(rustc_macro, structural_match, rustc_attrs, custom_derive)]
+#![feature(proc_macro)]
 
 extern crate uuid;
 extern crate rand;
