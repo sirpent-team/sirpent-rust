@@ -4,12 +4,59 @@ use std::marker::Send;
 use std::io::{Result, Write, BufReader, BufWriter, BufRead, Lines, Error, ErrorKind};
 use std::result::Result as StdResult;
 use std::error::Error as StdError;
-use std::collections::BTreeMap;
+use std::collections::{HashMap, BTreeMap};
 use serde_json;
 
+use player::*;
 use protocol::*;
 
 static LF: &'static [u8] = b"\n";
+
+type Slot = usize;
+
+pub struct PlayerConnections {
+    connections: HashMap<PlayerName, PlayerConnection>,
+}
+
+impl PlayerConnections {
+    pub fn new() -> PlayerConnections {
+        PlayerConnections { connections: HashMap::new() }
+    }
+
+    pub fn add_player(&mut self, player_name: PlayerName, player_connection: PlayerConnection) {
+        self.connections.insert(player_name, player_connection);
+    }
+
+    pub fn broadcast(&mut self, command: Command) -> HashMap<PlayerName, Result<()>> {
+        let mut m = HashMap::new();
+        for (player_name, connection) in self.connections.iter_mut() {
+            m.insert(player_name.clone(), connection.write(&command));
+        }
+        return m;
+    }
+
+    pub fn send(&mut self, player_name: PlayerName, command: Command) -> Result<()> {
+        return self.connections
+            .get_mut(&player_name)
+            .expect("Sending to unknown player_name.")
+            .write(&command);
+    }
+
+    pub fn collect(&mut self) -> HashMap<PlayerName, Result<Command>> {
+        let mut m = HashMap::new();
+        for (player_name, connection) in self.connections.iter_mut() {
+            m.insert(player_name.clone(), connection.read());
+        }
+        return m;
+    }
+
+    pub fn recieve(&mut self, player_name: PlayerName) -> Result<Command> {
+        return self.connections
+            .get_mut(&player_name)
+            .expect("Receiving from unknown player_name.")
+            .read();
+    }
+}
 
 // @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
 pub struct PlayerConnection {
@@ -34,6 +81,7 @@ impl PlayerConnection {
 
         let line =
             self.reader.next().ok_or(Error::new(ErrorKind::Other, "None read from stream."))??;
+        println!("{:?}", line);
         let mut command_value: serde_json::Value = serde_to_io(serde_json::from_str(&line))?;
 
         let obj = command_value.as_object_mut()
