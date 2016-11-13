@@ -29,7 +29,7 @@ pub fn client_detect_vector() {
                      })
         }
         command => {
-            player_connection.write(&Command::Error).unwrap_or(());
+            player_connection.write(&Command::Error {}).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     };
@@ -45,7 +45,7 @@ pub fn client_detect_vector() {
             (grid, timeout)
         }
         command => {
-            player_connection.write(&Command::Error).unwrap_or(());
+            player_connection.write(&Command::Error {}).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     };
@@ -53,28 +53,27 @@ pub fn client_detect_vector() {
     player_connection.write(&Command::Hello {
             player: Player {
                 name: "daenerys".to_string(),
-                snake: None,
             },
             secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
         })
         .expect("Could not write Command::Hello.");
 
     match player_connection.read().expect("Could not read anything; expected Command::NewGame.") {
-        Command::NewGame => println!("{:?}", Command::NewGame),
+        Command::NewGame {} => println!("{:?}", Command::NewGame {}),
         command => {
-            player_connection.write(&Command::Error).unwrap_or(());
+            player_connection.write(&Command::Error {}).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     }
 
-    let mut turn_game: Game = match player_connection.read()
+    let mut turn_game: GameContext = match player_connection.read()
         .expect("Could not read anything; expected Command::Turn.") {
         Command::Turn { game } => {
             println!("{:?}", Command::Turn { game: game.clone() });
             game
         }
         command => {
-            player_connection.write(&Command::Error).unwrap_or(());
+            player_connection.write(&Command::Error {}).unwrap_or(());
             panic!(format!("Unexpected {:?}.", command));
         }
     };
@@ -84,9 +83,9 @@ pub fn client_detect_vector() {
 
         match player_connection.read()
             .expect("Could not read anything; expected Command::MakeAMove.") {
-            Command::MakeAMove => println!("{:?}", Command::MakeAMove),
+            Command::MakeAMove {} => println!("{:?}", Command::MakeAMove {}),
             command => {
-                player_connection.write(&Command::Error).unwrap_or(());
+                player_connection.write(&Command::Error {}).unwrap_or(());
                 panic!(format!("Unexpected {:?}.", command));
             }
         }
@@ -96,16 +95,16 @@ pub fn client_detect_vector() {
 
         match player_connection.read()
             .expect("Could not read anything; expected Command::Timedout/Died/Won/Turn.") {
-            Command::TimedOut => {
-                println!("{:?}", Command::TimedOut);
+            Command::TimedOut {} => {
+                println!("{:?}", Command::TimedOut {});
                 return;
             }
-            Command::Died => {
-                println!("{:?}", Command::Died);
+            Command::Died {} => {
+                println!("{:?}", Command::Died {});
                 return;
             }
-            Command::Won => {
-                println!("{:?}", Command::Won);
+            Command::Won {} => {
+                println!("{:?}", Command::Won {});
                 return;
             }
             Command::Turn { game } => {
@@ -114,7 +113,7 @@ pub fn client_detect_vector() {
                 continue;
             }
             command => {
-                player_connection.write(&Command::Error).unwrap_or(());
+                player_connection.write(&Command::Error {}).unwrap_or(());
                 panic!(format!("Unexpected {:?}.", command));
             }
         }

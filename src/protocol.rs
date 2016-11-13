@@ -1,11 +1,13 @@
 use std::time::Duration;
 
-use game::*;
 use grid::*;
 use player::*;
+use game_state::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.2";
 
+// @TODO: Remove empty struct enums. Temporary workaround as custom deserialisation logic in
+// PlayerConnection.read couldn't handle things correctly.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Command {
     // Upon connect, the server must send a VERSION message.
@@ -28,19 +30,19 @@ pub enum Command {
     },
     // Otherwise or at any time, the client can send a QUIT message or just close the socket.
     #[serde(rename = "quit")]
-    Quit,
+    Quit {},
     // In case of a problem on either side, an ERROR message can be sent.
     #[serde(rename = "error")]
-    Error,
+    Error {},
     // To begin a new game, the server must send a NEW_GAME message to indicate this.
     #[serde(rename = "new_game")]
-    NewGame,
+    NewGame {},
     // The server must send a TURN message with the initial state of the Game.
     #[serde(rename = "turn")]
-    Turn { game: Game },
+    Turn { game: GameContext },
     // The server must send a MAKE_A_MOVE message to request the player's next move.
     #[serde(rename = "make_a_move")]
-    MakeAMove,
+    MakeAMove {},
     // The client must reply with a MOVE message to indicate their next action.
     // The server must then send a new TURN message to start the next TURN.
     #[serde(rename = "move")]
@@ -48,18 +50,18 @@ pub enum Command {
     // The server may kill players who do not reply within a certain time. The server must send a
     // TIMEDOUT message to such players.
     #[serde(rename = "timed_out")]
-    TimedOut,
+    TimedOut {},
     // If a player died during this turn, the server must send a DIED message.
     #[serde(rename = "died")]
-    Died,
+    Died {},
     // If a player was the only survivor of this turn, the server must send a WON message.
     #[serde(rename = "won")]
-    Won,
+    Won {},
     // A new round now starts. The server may only send further messages to surviving players.
     // The server must send a new TURN message with the result of the previous round.
     // At the conclusion of the game, the server should send a GAME_OVER message to all players.
     #[serde(rename = "game_over")]
-    GameOver,
+    GameOver {},
 }
 
 impl Command {
