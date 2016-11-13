@@ -12,7 +12,7 @@ impl Snake {
         Snake {
             alive: true,
             segments: segments,
-            previous_tail: None
+            previous_tail: None,
         }
     }
 
