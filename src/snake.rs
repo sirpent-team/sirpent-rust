@@ -47,8 +47,8 @@ impl Snake {
     }
 
     pub fn grow(&mut self) {
-        if self.previous_tail.is_some() {
-            self.segments.push(self.previous_tail.unwrap());
+        if let Some(previous_tail) = self.previous_tail {
+            self.segments.push(previous_tail);
             self.previous_tail = None;
         }
     }
