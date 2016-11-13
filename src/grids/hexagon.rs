@@ -121,8 +121,12 @@ impl GridTrait for HexagonGrid {
         unimplemented!();
     }
 
-    fn random_cell<R: Rng>(&self) -> HexagonVector {
-        unimplemented!();
+    fn random_cell<R: Rng>(&self, mut rng: R) -> HexagonVector {
+        let isize_radius = self.radius as isize;
+        HexagonVector {
+            x: rng.gen_range(-isize_radius, isize_radius + 1),
+            y: rng.gen_range(-isize_radius, isize_radius + 1),
+        }
     }
 }
 

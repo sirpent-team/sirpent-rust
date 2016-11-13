@@ -126,7 +126,7 @@ impl GridTrait for TriangleGrid {
         unimplemented!();
     }
 
-    fn random_cell<R: Rng>(&self) -> TriangleVector {
+    fn random_cell<R: Rng>(&self, rng: R) -> TriangleVector {
         unimplemented!();
     }
 }
