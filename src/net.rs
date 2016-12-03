@@ -15,12 +15,24 @@ static LF: &'static [u8] = b"\n";
 type Slot = usize;
 
 pub struct PlayerConnections {
+    accepting: bool,
     connections: HashMap<PlayerName, PlayerConnection>,
 }
 
 impl PlayerConnections {
     pub fn new() -> PlayerConnections {
-        PlayerConnections { connections: HashMap::new() }
+        PlayerConnections {
+            accepting: true,
+            connections: HashMap::new(),
+        }
+    }
+
+    pub fn is_accepting(&self) -> bool {
+        self.accepting
+    }
+
+    pub fn close(&mut self) {
+        self.accepting = false;
     }
 
     pub fn add_player(&mut self, player_name: PlayerName, player_connection: PlayerConnection) {

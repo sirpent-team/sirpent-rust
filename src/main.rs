@@ -15,14 +15,16 @@ use std::net::TcpStream;
 use std::io::Result;
 use std::sync::{Arc, RwLock};
 use std::ops::Deref;
+use rand::os::OsRng;
 
 use sirpent::*;
 
 fn main() {
     println!("{}", Yellow.bold().paint("Sirpent"));
 
+    let osrng = OsRng::new().unwrap();
     let grid = Grid { radius: 15 };
-    let food0 = Vector { x: 9, y: 13 };
+    let food0 = grid.random_cell(osrng);
 
     let game_state = Arc::new(RwLock::new(GameState::new(grid, true)));
     game_state.write().unwrap().context.food.insert(food0);
@@ -39,10 +41,14 @@ fn main() {
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
         plain_server.listen(move |stream: TcpStream| {
-            let (player, player_connection) = player_handshake_handler(stream, grid.clone())
-                .unwrap();
-            player_connections2.write().unwrap().add_player(player.name.clone(), player_connection);
-            game_state2.write().unwrap().add_player(player);
+            if player_connections2.read().unwrap().is_accepting() {
+                let (player, player_connection) = player_handshake_handler(stream, grid.clone())
+                    .unwrap();
+                player_connections2.write()
+                    .unwrap()
+                    .add_player(player.name.clone(), player_connection);
+                game_state2.write().unwrap().add_player(player);
+            }
         });
     });
 
@@ -50,22 +56,31 @@ fn main() {
 
     player_connections.write()
         .unwrap()
+        .close();
+    player_connections.write()
+        .unwrap()
         .broadcast(Command::NewGame {});
 
     loop {
-        // Print result of previous turn (here so 0th is printed).
-        println!("{:?} {:?}",
-                 game_state.read().unwrap().turn_number,
-                 game_state.read().unwrap().deref());
-        // @DEBUG: Wait before advancing.
-        thread::sleep(time::Duration::from_millis(500));
+        // Issue notifications of Turn to each player.
+        {
+            let game_state_read = game_state.read().unwrap();
 
-        // @TODO: Broadcast game state and recieve moves in parallel.
-        // Broadcast request for moves.
-        player_connections.write()
-            .unwrap()
-            .broadcast(Command::Turn { game: game_state.read().unwrap().context.clone() });
-        player_connections.write().unwrap().broadcast(Command::MakeAMove {});
+            // Print result of previous turn (here so 0th is printed).
+            println!("{:?} {:?}",
+                     game_state_read.turn_number,
+                     game_state_read.deref());
+            // @DEBUG: Wait before advancing.
+            thread::sleep(time::Duration::from_millis(500));
+
+            // @TODO: Broadcast game state and recieve moves in parallel.
+            // Broadcast request for moves.
+            let turn_command = Command::Turn { game: game_state_read.context.clone() };
+            player_connections.write()
+                .unwrap()
+                .broadcast(turn_command);
+            player_connections.write().unwrap().broadcast(Command::MakeAMove {});
+        }
 
         // Aggregate move responses.
         for (player_name, command_result) in player_connections.write().unwrap().collect() {

@@ -1,0 +1,29 @@
+> {"msg": "ready"}
+{
+  "resp": "match_start",
+  "data": {
+    "snakes": {
+      "sirpent-demo": {
+        "alive": true,
+        "segments": ["0,0"]
+      },
+      "sirpent-dummy": {
+        "alive": true,
+        "segments": ["1,1"]
+      }
+    },
+    "food": ["0,1"]
+  }
+}
+
+> {"msg": "edges"}
+{"resp": "edges", "data": {"edges": [["0,0", "0,1"], ["0,1", "1,1"], ["1,1","1,0"], ["1,0","0,0"], ["0,1", "0,0"], ["1,1", "0,1"], ["1,0","1,1"], ["0,0","1,0"]]]]}}
+> {"msg": "tiling"}
+{"resp": "tiling", "data": {"kind": "square", "width":2, "height":2}
+> {"msg": "cells"}
+{"resp": "cells", "data": {"cells": ["0,1", "0,1"]}}
+> {"msg": "match_state"}
+{"resp": "match_state", "data": {"match_id": "<xxx>", "snakes": {"sirpent-demo": {"alive": true, "pos":["0,0"]}, "sirpent-dummy":{"alive":true, "pos":["1,1"]}}, "food": ["0,1"]}}
+
+> {"msg": "move", "data": {"next": "1,1"}}
+{"resp": "match_play", "data": {"match_id": "<xxx>", "snakes": {"sirpent-demo": {"alive": true, "pos":["0,0"]}, "sirpent-dummy":{"alive":true, "pos":["1,1"]}}, "food": ["0,1"]}}

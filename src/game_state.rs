@@ -20,7 +20,6 @@ pub struct GameState {
 
     pub context: GameContext,
     pub snake_plans: HashMap<PlayerName, Direction>,
-    pub snakes_to_remove: HashSet<PlayerName>,
 
     pub turn_number: u32,
     pub debug: bool,
@@ -37,7 +36,6 @@ impl GameState {
                 snakes: HashMap::new(),
             },
             snake_plans: HashMap::new(),
-            snakes_to_remove: HashSet::new(),
             turn_number: 0,
             debug: debug,
         }
@@ -65,6 +63,9 @@ impl GameState {
             println!("Simulating next turn");
         }
 
+        let mut snakes_to_remove = HashSet::new();
+        let mut foods_to_remove = HashSet::new();
+
         // Apply movement and remove snakes that did not move.
         for (player_name, snake) in self.context.snakes.iter_mut() {
             if self.snake_plans.contains_key(player_name) {
@@ -74,19 +75,18 @@ impl GameState {
                 }
                 snake.step_in_direction(*plan);
             } else {
-                if self.debug {
-                    println!("Snake {:?} was not moved.", player_name);
-                }
-                // Snakes which weren't moved turn into food and die.
-                self.context.food.extend(snake.segments.iter());
-                self.snakes_to_remove.insert(player_name.clone());
+                snakes_to_remove.insert(player_name.clone());
             }
         }
-        for player_name in self.snakes_to_remove.drain() {
+        for player_name in snakes_to_remove.drain() {
             if self.debug {
-                println!("Snake {:?} was removed (remove stage 1).", player_name);
+                println!("Snake {:?} was not moved and has been removed.",
+                         player_name);
             }
-            self.context.snakes.remove(&player_name);
+            // Kill snake and drop food at all its segments that are within the grid.
+            let mut dead_snake = self.context.snakes.remove(&player_name).unwrap();
+            dead_snake.segments.retain(|&segment| self.grid.is_within_bounds(segment));
+            self.context.food.extend(dead_snake.segments.iter());
         }
 
         // Grow snakes whose heads collided with a food.
@@ -97,9 +97,14 @@ impl GameState {
                              player_name,
                              snake.segments[0]);
                 }
-                // @TODO: Remove food at snake.segments[0].
+                // Remove this food afterwards such that N snakes colliding on top of a food all grow.
+                // They immediately die but this way collision with growth of both snakes is possible.
+                foods_to_remove.insert(snake.segments[0]);
                 snake.grow();
             }
+        }
+        for food in foods_to_remove.drain() {
+            self.context.food.remove(&food);
         }
 
         // Detect collisions with snakes and remove colliding snakes.
@@ -111,17 +116,39 @@ impl GameState {
                                  player_name,
                                  player_name2);
                     }
-                    self.context.food.extend(snake.segments.iter());
-                    self.snakes_to_remove.insert(player_name.clone());
+                    snakes_to_remove.insert(player_name.clone());
                     break;
                 }
             }
         }
-        for player_name in self.snakes_to_remove.drain() {
+        for player_name in snakes_to_remove.drain() {
             if self.debug {
-                println!("Snake {:?} was removed (remove stage 2).", player_name);
+                println!("Snake {:?} collided with another snake and has been removed.",
+                         player_name);
             }
-            self.context.snakes.remove(&player_name);
+            // Kill snake and drop food at all its segments that are within the grid.
+            let mut dead_snake = self.context.snakes.remove(&player_name).unwrap();
+            dead_snake.segments.retain(|&segment| self.grid.is_within_bounds(segment));
+            self.context.food.extend(dead_snake.segments.iter());
+        }
+
+        // Detect snakes outside grid and remove them.
+        for (player_name, snake) in self.context.snakes.iter() {
+            for &segment in snake.segments.iter() {
+                if !self.grid.is_within_bounds(segment) {
+                    snakes_to_remove.insert(player_name.clone());
+                }
+            }
+        }
+        for player_name in snakes_to_remove.drain() {
+            if self.debug {
+                println!("Snake {:?} extended beyond Grid boundaries and has been removed.",
+                         player_name);
+            }
+            // Kill snake and drop food at all its segments that are within the grid.
+            let mut dead_snake = self.context.snakes.remove(&player_name).unwrap();
+            dead_snake.segments.retain(|&segment| self.grid.is_within_bounds(segment));
+            self.context.food.extend(dead_snake.segments.iter());
         }
 
         self.turn_number += 1;
