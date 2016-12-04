@@ -86,24 +86,21 @@ impl GameState {
 
         // Apply movement and remove snakes that did not move.
         for (player_name, snake) in self.context.snakes.iter_mut() {
+            let mut cause_of_death: Option<CauseOfDeath> =
+                Some(CauseOfDeath::NoMoveMade("No move information.".to_string()));
             if self.snake_plans.contains_key(player_name) {
                 match *self.snake_plans.get(player_name).unwrap() {
                     Ok(plan) => {
+                        cause_of_death = None;
                         snake.step_in_direction(plan);
-                        if self.debug {
-                            println!("Snake {:?} moved {:?}.", player_name, plan);
-                        }
                     }
                     Err(ref move_error) => {
-                        self.snakes_to_remove.insert(player_name.clone(),
-                                                     CauseOfDeath::NoMoveMade(move_error.clone()));
+                        cause_of_death = Some(CauseOfDeath::NoMoveMade(move_error.clone()));
                     }
                 };
-
-            } else {
-                self.snakes_to_remove.insert(player_name.clone(),
-                                             CauseOfDeath::NoMoveMade("No move information."
-                                                 .to_string()));
+            }
+            if cause_of_death.is_some() {
+                self.snakes_to_remove.insert(player_name.clone(), cause_of_death.unwrap());
             }
         }
         self.remove_snakes();
