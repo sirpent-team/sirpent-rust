@@ -70,7 +70,7 @@ fn main() {
             println!("{:?} {:?}",
                      game_state_read.turn_number,
                      game_state_read.deref());
-            println!("removed snakes {:?}", game_state_read.snakes_to_remove);
+            println!("removed snakes {:?}", game_state_read.dead_snakes);
             // @DEBUG: Wait before advancing.
             thread::sleep(time::Duration::from_millis(500));
 
