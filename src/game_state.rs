@@ -94,36 +94,36 @@ impl GameState {
 
     fn simulate_snake_movement(&mut self) {
         // Apply movement and remove snakes that did not move.
+        // Snake plans are Result<Direction, MoveError>. MoveError = String.
+        // So we can specify an underlying error rather than just omitting any move.
+        // Then below if no snake plan is set, we use a default error message.
+        // While intricate this very neatly leads to CauseOfDeath.
+
+        let default_planless_error = Err("No move information.".to_string());
+
         for (player_name, snake) in self.context.snakes.iter_mut() {
-            let mut cause_of_death: Option<CauseOfDeath> =
-                Some(CauseOfDeath::NoMoveMade("No move information.".to_string()));
-            if self.snake_plans.contains_key(player_name) {
-                match *self.snake_plans.get(player_name).unwrap() {
-                    Ok(plan) => {
-                        cause_of_death = None;
-                        snake.step_in_direction(plan);
-                    }
-                    Err(ref move_error) => {
-                        cause_of_death = Some(CauseOfDeath::NoMoveMade(move_error.clone()));
-                    }
-                };
-            }
-            if cause_of_death.is_some() {
-                self.dead_snakes.insert(player_name.clone(), cause_of_death.unwrap());
+            // Retrieve snake plan if one exists.
+            let snake_plan: &Result<Direction, MoveError> = self.snake_plans
+                .get(player_name)
+                .unwrap_or(&default_planless_error);
+
+            // Move if a direction provided else use MoveError for CauseOfDeath.
+            match *snake_plan {
+                Ok(direction) => snake.step_in_direction(direction),
+                Err(ref move_error) => {
+                    let cause_of_death = CauseOfDeath::NoMoveMade(move_error.clone());
+                    self.dead_snakes.insert(player_name.clone(), cause_of_death);
+                }
             }
         }
     }
 
     fn simulate_snake_eating(&mut self) {
-        for (player_name, snake) in self.context.snakes.iter_mut() {
+        for (_, snake) in self.context.snakes.iter_mut() {
             if self.context.food.contains(&snake.segments[0]) {
-                if self.debug {
-                    println!("Snake {:?} ate a food {:?}.",
-                             player_name,
-                             snake.segments[0]);
-                }
-                // Remove this food afterwards such that N snakes colliding on top of a food all grow.
-                // They immediately die but this way collision with growth of both snakes is possible.
+                // Remove this food only after the full loop, such that N snakes colliding on top of a
+                // food all grow. They immediately die but this way collision with growth of both snakes
+                // is possible.
                 self.eaten_food.insert(snake.segments[0]);
                 snake.grow();
             }
@@ -132,16 +132,11 @@ impl GameState {
 
     fn simulate_snake_collisions(&mut self) {
         for (player_name, snake) in self.context.snakes.iter() {
-            for (player_name2, snake2) in self.context.snakes.iter() {
-                if snake != snake2 && snake.has_collided_into(snake2) {
-                    if self.debug {
-                        println!("Snake {:?} collided into Snake {:?}.",
-                                 player_name,
-                                 player_name2);
-                    }
+            for (coll_player_name, coll_snake) in self.context.snakes.iter() {
+                if snake != coll_snake && snake.has_collided_into(coll_snake) {
                     self.dead_snakes
                         .insert(player_name.clone(),
-                                CauseOfDeath::CollidedWithSnake(player_name2.clone()));
+                                CauseOfDeath::CollidedWithSnake(coll_player_name.clone()));
                     break;
                 }
             }
@@ -153,7 +148,7 @@ impl GameState {
             for &segment in snake.segments.iter() {
                 if !self.grid.is_within_bounds(segment) {
                     self.dead_snakes.insert(player_name.clone(),
-                                                 CauseOfDeath::CollidedWithBounds(segment));
+                                            CauseOfDeath::CollidedWithBounds(segment));
                 }
             }
         }
@@ -163,13 +158,17 @@ impl GameState {
         // N.B. At one point we .drain()ed the dead_snakes Set. This was removed so it
         // can be used to track which players were killed.
         for (player_name, _) in self.dead_snakes.iter() {
-            // Kill snake if not already killed, and drop food at all its segments that are within the grid.
-            match self.context.snakes.remove(player_name) {
-                Some(mut dead_snake) => {
-                    dead_snake.segments.retain(|&segment| self.grid.is_within_bounds(segment));
-                    self.context.food.extend(dead_snake.segments.iter());
+            // Kill snake if not already killed, and drop food at non-head segments within the grid.
+            // @TODO: This code is much cleaner than the last draft but still lots goes on here.
+            if let Some(dead_snake) = self.context.snakes.remove(player_name) {
+                // Get segments[1..] safely. Directly slicing panics if the Vec had <2 elements.
+                if let Some((_, headless_segments)) = dead_snake.segments.split_first() {
+                    // Only retain segments if within grid.
+                    let corpse_food: Vec<&Vector> = headless_segments.iter()
+                        .filter(|&s| self.grid.is_within_bounds(*s))
+                        .collect();
+                    self.context.food.extend(corpse_food);
                 }
-                _ => {}
             }
         }
     }
