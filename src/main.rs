@@ -70,6 +70,7 @@ fn main() {
             println!("{:?} {:?}",
                      game_state_read.turn_number,
                      game_state_read.deref());
+            println!("removed snakes {:?}", game_state_read.snakes_to_remove);
             // @DEBUG: Wait before advancing.
             thread::sleep(time::Duration::from_millis(500));
 
@@ -85,7 +86,7 @@ fn main() {
         // Aggregate move responses.
         for (player_name, command_result) in player_connections.write().unwrap().collect() {
             if let Ok(Command::Move { direction }) = command_result {
-                game_state.write().unwrap().snake_plans.insert(player_name, direction);
+                game_state.write().unwrap().snake_plans.insert(player_name, Ok(direction));
             }
         }
 

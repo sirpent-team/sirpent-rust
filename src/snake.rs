@@ -1,4 +1,5 @@
 use grid::*;
+use player::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct Snake {
@@ -52,6 +53,14 @@ impl Snake {
             self.previous_tail = None;
         }
     }
+}
+
+// Useful for debugging and statistics.
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+pub enum CauseOfDeath {
+    NoMoveMade(MoveError),
+    CollidedWithSnake(PlayerName),
+    CollidedWithBounds(Vector),
 }
 
 #[cfg(test)]

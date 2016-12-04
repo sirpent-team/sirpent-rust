@@ -28,3 +28,5 @@ pub trait GridTrait
     fn cells(&self) -> Vec<Self::Vector>;
     fn random_cell<R: Rng>(&self, rng: R) -> Self::Vector;
 }
+
+pub type MoveError = String;
