@@ -26,7 +26,7 @@ pub trait GridTrait
     fn dimensions(&self) -> Vec<isize>;
     fn is_within_bounds(&self, v: Self::Vector) -> bool;
     fn cells(&self) -> Vec<Self::Vector>;
-    fn random_cell<R: Rng>(&self, rng: R) -> Self::Vector;
+    fn random_cell<R: Rng>(&self, rng: &mut R) -> Self::Vector;
 }
 
 pub type MoveError = String;

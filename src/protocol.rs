@@ -39,7 +39,7 @@ pub enum Command {
     NewGame {},
     // The server must send a TURN message with the initial state of the Game.
     #[serde(rename = "turn")]
-    Turn { game: GameContext },
+    Turn { game: GameState },
     // The server must send a MAKE_A_MOVE message to request the player's next move.
     #[serde(rename = "make_a_move")]
     MakeAMove {},

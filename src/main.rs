@@ -22,21 +22,17 @@ use sirpent::*;
 fn main() {
     println!("{}", Yellow.bold().paint("Sirpent"));
 
-    let osrng = OsRng::new().unwrap();
+    let mut osrng = OsRng::new().unwrap();
     let grid = Grid { radius: 15 };
-    let food0 = grid.random_cell(osrng);
+    let mut game_state = GameState::new(grid);
+    game_state.food.insert(grid.random_cell(&mut osrng));
 
-    let game_state = Arc::new(RwLock::new(GameState::new(grid, true)));
-    game_state.write().unwrap().context.food.insert(food0);
-
-    // let snake = Snake::new(vec![Vector { x: 3, y: 8 }]);
-    game_state.write().unwrap().add_player(Player::new("abserde".to_string()));
+    //game_state.add_player(Player::new("abserde".to_string()));
+    let mut game_engine = GameEngine::new(osrng, game_state);
 
     // -----------------------------------------------------------------------
 
     let player_connections = Arc::new(RwLock::new(PlayerConnections::new()));
-
-    let game_state2 = game_state.clone();
     let player_connections2 = player_connections.clone();
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
@@ -47,7 +43,7 @@ fn main() {
                 player_connections2.write()
                     .unwrap()
                     .add_player(player.name.clone(), player_connection);
-                game_state2.write().unwrap().add_player(player);
+                game_engine.add_player(player);
             }
         });
     });
@@ -64,19 +60,19 @@ fn main() {
     loop {
         // Issue notifications of Turn to each player.
         {
-            let game_state_read = game_state.read().unwrap();
+            let game_state_read = game_engine.state.read().unwrap();
 
             // Print result of previous turn (here so 0th is printed).
             println!("{:?} {:?}",
                      game_state_read.turn_number,
                      game_state_read.deref());
-            println!("removed snakes {:?}", game_state_read.dead_snakes);
+            println!("removed snakes {:?}", game_engine.dead_snakes);
             // @DEBUG: Wait before advancing.
             thread::sleep(time::Duration::from_millis(500));
 
             // @TODO: Broadcast game state and recieve moves in parallel.
             // Broadcast request for moves.
-            let turn_command = Command::Turn { game: game_state_read.context.clone() };
+            let turn_command = Command::Turn { game: game_state_read.clone() };
             player_connections.write()
                 .unwrap()
                 .broadcast(turn_command);
@@ -86,12 +82,12 @@ fn main() {
         // Aggregate move responses.
         for (player_name, command_result) in player_connections.write().unwrap().collect() {
             if let Ok(Command::Move { direction }) = command_result {
-                game_state.write().unwrap().snake_plans.insert(player_name, Ok(direction));
+                game_engine.add_snake_plan(player_name, Ok(direction));
             }
         }
 
         // Advance turn.
-        game_state.write().unwrap().simulate_next_turn();
+        game_engine.simulate_next_turn();
     }
 }
 

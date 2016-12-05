@@ -104,7 +104,7 @@ impl GridTrait for SquareGrid {
         unimplemented!();
     }
 
-    fn random_cell<R: Rng>(&self, mut rng: R) -> SquareVector {
+    fn random_cell<R: Rng>(&self, rng: &mut R) -> SquareVector {
         let isize_width = self.width as isize;
         let isize_height = self.height as isize;
         SquareVector {
