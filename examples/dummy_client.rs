@@ -1,5 +1,3 @@
-#![feature(question_mark)]
-
 extern crate ansi_term;
 extern crate sirpent;
 extern crate rand;
@@ -66,7 +64,7 @@ pub fn client_detect_vector() {
         }
     }
 
-    let mut turn_game: GameContext = match player_connection.read()
+    let mut turn_game: GameState = match player_connection.read()
         .expect("Could not read anything; expected Command::Turn.") {
         Command::Turn { game } => {
             println!("{:?}", Command::Turn { game: game.clone() });

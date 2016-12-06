@@ -1,5 +1,4 @@
 use uuid::Uuid;
-use rand::OsRng;
 use std::collections::{HashSet, HashMap};
 
 use grid::*;

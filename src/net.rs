@@ -6,33 +6,20 @@ use std::result::Result as StdResult;
 use std::error::Error as StdError;
 use std::collections::{HashMap, BTreeMap};
 use serde_json;
+use rayon::prelude::*;
 
 use player::*;
 use protocol::*;
 
 static LF: &'static [u8] = b"\n";
 
-type Slot = usize;
-
 pub struct PlayerConnections {
-    accepting: bool,
     connections: HashMap<PlayerName, PlayerConnection>,
 }
 
 impl PlayerConnections {
     pub fn new() -> PlayerConnections {
-        PlayerConnections {
-            accepting: true,
-            connections: HashMap::new(),
-        }
-    }
-
-    pub fn is_accepting(&self) -> bool {
-        self.accepting
-    }
-
-    pub fn close(&mut self) {
-        self.accepting = false;
+        PlayerConnections { connections: HashMap::new() }
     }
 
     pub fn add_player(&mut self, player_name: PlayerName, player_connection: PlayerConnection) {
@@ -40,33 +27,35 @@ impl PlayerConnections {
     }
 
     pub fn broadcast(&mut self, command: Command) -> HashMap<PlayerName, Result<()>> {
-        let mut m = HashMap::new();
-        for (player_name, connection) in self.connections.iter_mut() {
-            m.insert(player_name.clone(), connection.write(&command));
-        }
-        return m;
+        let mut result_pairs = Vec::with_capacity(self.connections.len());
+        self.connections
+            .par_iter_mut()
+            .map(|(player_name, connection)| (player_name.clone(), connection.write(&command)))
+            .collect_into(&mut result_pairs);
+        result_pairs.into_iter().collect()
     }
 
     pub fn send(&mut self, player_name: PlayerName, command: Command) -> Result<()> {
-        return self.connections
+        self.connections
             .get_mut(&player_name)
             .expect("Sending to unknown player_name.")
-            .write(&command);
+            .write(&command)
     }
 
     pub fn collect(&mut self) -> HashMap<PlayerName, Result<Command>> {
-        let mut m = HashMap::new();
-        for (player_name, connection) in self.connections.iter_mut() {
-            m.insert(player_name.clone(), connection.read());
-        }
-        return m;
+        let mut result_pairs = Vec::with_capacity(self.connections.len());
+        self.connections
+            .par_iter_mut()
+            .map(|(player_name, connection)| (player_name.clone(), connection.read()))
+            .collect_into(&mut result_pairs);
+        result_pairs.into_iter().collect()
     }
 
     pub fn recieve(&mut self, player_name: PlayerName) -> Result<Command> {
-        return self.connections
+        self.connections
             .get_mut(&player_name)
             .expect("Receiving from unknown player_name.")
-            .read();
+            .read()
     }
 }
 

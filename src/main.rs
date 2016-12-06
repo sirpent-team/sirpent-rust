@@ -14,7 +14,6 @@ use std::io::{Error, ErrorKind};
 use std::net::TcpStream;
 use std::io::Result;
 use std::sync::{Arc, RwLock};
-use std::ops::Deref;
 use rand::os::OsRng;
 
 use sirpent::*;
@@ -27,67 +26,41 @@ fn main() {
     let mut game_state = GameState::new(grid);
     game_state.food.insert(grid.random_cell(&mut osrng));
 
-    //game_state.add_player(Player::new("abserde".to_string()));
-    let mut game_engine = GameEngine::new(osrng, game_state);
+    let game_engine = Arc::new(RwLock::new(GameEngine::new(osrng, game_state)));
 
     // -----------------------------------------------------------------------
 
-    let player_connections = Arc::new(RwLock::new(PlayerConnections::new()));
-    let player_connections2 = player_connections.clone();
+    let game_engine2 = game_engine.clone();
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
         plain_server.listen(move |stream: TcpStream| {
-            if player_connections2.read().unwrap().is_accepting() {
+            // @TODO: New logic for accepting/rejecting/queueing new players.
+            if true {
+                // game_engine2.read().unwrap().player_connections.is_accepting() {
                 let (player, player_connection) = player_handshake_handler(stream, grid.clone())
                     .unwrap();
-                player_connections2.write()
-                    .unwrap()
-                    .add_player(player.name.clone(), player_connection);
-                game_engine.add_player(player);
+                game_engine2.write().unwrap().add_player(player, player_connection);
             }
         });
     });
 
     thread::sleep(time::Duration::from_millis(5000));
 
-    player_connections.write()
+    // @TODO: New logic for accepting/rejecting/queueing new players.
+    // game_engine
+    //     .write()
+    //     .unwrap()
+    //     .player_connections
+    //     .close();
+    game_engine.write()
         .unwrap()
-        .close();
-    player_connections.write()
-        .unwrap()
+        .player_connections
         .broadcast(Command::NewGame {});
 
     loop {
-        // Issue notifications of Turn to each player.
-        {
-            let game_state_read = game_engine.state.read().unwrap();
-
-            // Print result of previous turn (here so 0th is printed).
-            println!("{:?} {:?}",
-                     game_state_read.turn_number,
-                     game_state_read.deref());
-            println!("removed snakes {:?}", game_engine.dead_snakes);
-            // @DEBUG: Wait before advancing.
-            thread::sleep(time::Duration::from_millis(500));
-
-            // @TODO: Broadcast game state and recieve moves in parallel.
-            // Broadcast request for moves.
-            let turn_command = Command::Turn { game: game_state_read.clone() };
-            player_connections.write()
-                .unwrap()
-                .broadcast(turn_command);
-            player_connections.write().unwrap().broadcast(Command::MakeAMove {});
-        }
-
-        // Aggregate move responses.
-        for (player_name, command_result) in player_connections.write().unwrap().collect() {
-            if let Ok(Command::Move { direction }) = command_result {
-                game_engine.add_snake_plan(player_name, Ok(direction));
-            }
-        }
-
+        game_engine.write().unwrap().ask_for_moves();
         // Advance turn.
-        game_engine.simulate_next_turn();
+        game_engine.write().unwrap().simulate_next_turn();
     }
 }
 
