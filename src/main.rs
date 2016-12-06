@@ -63,7 +63,9 @@ fn main() {
     }
 }
 
-fn player_handshake_handler(stream: TcpStream, grid: Grid) -> Result<(Player, PlayerConnection), ProtocolError> {
+fn player_handshake_handler(stream: TcpStream,
+                            grid: Grid)
+                            -> Result<(Player, PlayerConnection), ProtocolError> {
     // @TODO: Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
 
@@ -85,7 +87,7 @@ fn player_handshake_handler(stream: TcpStream, grid: Grid) -> Result<(Player, Pl
         }
         Ok(_) => {
             player_connection.write(&Command::Error {}).unwrap_or(());
-            return Err(ProtocolError::UnexpectedCommand)
+            return Err(ProtocolError::UnexpectedCommand);
         }
         Err(e) => {
             return Err(e);

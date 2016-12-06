@@ -125,7 +125,8 @@ impl<R: Rng> GameEngine<R> {
             match *snake_plan {
                 Ok(direction) => snake.step_in_direction(direction),
                 Err(ref move_error) => {
-                    let cause_of_death = CauseOfDeath::NoMoveMade((*move_error).description().to_string());
+                    let cause_of_death =
+                        CauseOfDeath::NoMoveMade((*move_error).description().to_string());
                     self.dead_snakes.insert(player_name.clone(), cause_of_death);
                 }
             }

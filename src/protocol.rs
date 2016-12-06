@@ -91,7 +91,7 @@ pub enum ProtocolError {
     CommandSerialiseNotObjectNotString,
     SendToUnknownPlayer,
     RecieveFromUnknownPlayer,
-    UnexpectedCommand
+    UnexpectedCommand,
 }
 
 // @TODO: Consider if this is best.
@@ -109,14 +109,18 @@ impl Error for ProtocolError {
             ProtocolError::NothingReadFromStream => "Nothing read from stream.",
             ProtocolError::MessageReadNotADictionary => "Message from stream was not a dictionary.",
             ProtocolError::MessageReadMissingMsgField => "No msg field in message from stream.",
-            ProtocolError::MessageReadNonStringMsgField => "msg field was not a string in message from stream.",
+            ProtocolError::MessageReadNonStringMsgField => {
+                "msg field was not a string in message from stream."
+            }
             ProtocolError::MessageReadMissingDataField => "No data field provided from stream.",
             ProtocolError::CommandWasEmpty => "The outer Command object was empty.",
             ProtocolError::CommandDataWasNotObject => "Command data was not an object.",
-            ProtocolError::CommandSerialiseNotObjectNotString => "Serialised Command was not an object or string.",
+            ProtocolError::CommandSerialiseNotObjectNotString => {
+                "Serialised Command was not an object or string."
+            }
             ProtocolError::SendToUnknownPlayer => "Sending to unknown player_name.",
             ProtocolError::RecieveFromUnknownPlayer => "Receiving from unknown player_name.",
-            ProtocolError::UnexpectedCommand => "Unexpected command read."
+            ProtocolError::UnexpectedCommand => "Unexpected command read.",
         }
     }
 
@@ -124,7 +128,7 @@ impl Error for ProtocolError {
         match *self {
             ProtocolError::Io(ref io_err) => Some(io_err),
             ProtocolError::Serde(ref serde_json_err) => Some(serde_json_err),
-            _ => None
+            _ => None,
         }
     }
 }

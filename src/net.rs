@@ -26,7 +26,9 @@ impl PlayerConnections {
         self.connections.insert(player_name, player_connection);
     }
 
-    pub fn broadcast(&mut self, command: Command) -> HashMap<PlayerName, StdResult<(), ProtocolError>> {
+    pub fn broadcast(&mut self,
+                     command: Command)
+                     -> HashMap<PlayerName, StdResult<(), ProtocolError>> {
         let mut result_pairs = Vec::with_capacity(self.connections.len());
         self.connections
             .par_iter_mut()
@@ -35,7 +37,10 @@ impl PlayerConnections {
         result_pairs.into_iter().collect()
     }
 
-    pub fn send(&mut self, player_name: PlayerName, command: Command) -> StdResult<(), ProtocolError> {
+    pub fn send(&mut self,
+                player_name: PlayerName,
+                command: Command)
+                -> StdResult<(), ProtocolError> {
         self.connections
             .get_mut(&player_name)
             .ok_or(ProtocolError::SendToUnknownPlayer)?
@@ -80,8 +85,7 @@ impl PlayerConnection {
     pub fn read(&mut self) -> StdResult<Command, ProtocolError> {
         self.stream.set_read_timeout(self.timeouts.read)?;
 
-        let line =
-            self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
+        let line = self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
         println!("{:?}", line);
         let mut command_value: serde_json::Value = serde_to_io(serde_json::from_str(&line))?;
 
@@ -121,9 +125,7 @@ impl PlayerConnection {
                 msg_.clone()
             }
             serde_json::Value::String(command_msg) => command_msg,
-            _ => {
-                return Err(ProtocolError::CommandSerialiseNotObjectNotString)
-            }
+            _ => return Err(ProtocolError::CommandSerialiseNotObjectNotString),
         };
 
         // Using a Map here was putting data before msg in output JSON. For developers it is easier to

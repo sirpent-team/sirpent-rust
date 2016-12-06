@@ -77,7 +77,7 @@ impl From<MoveError> for CauseOfDeath {
 #[derive(Debug)]
 pub enum MoveError {
     NoMoveSet,
-    Protocol(ProtocolError)
+    Protocol(ProtocolError),
 }
 
 // @TODO: Consider if this is best.
@@ -85,7 +85,7 @@ impl Display for MoveError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match *self {
             MoveError::NoMoveSet => f.write_str(self.description()),
-            MoveError::Protocol(ref protocol_err) => protocol_err.fmt(f)
+            MoveError::Protocol(ref protocol_err) => protocol_err.fmt(f),
         }
     }
 }
@@ -94,14 +94,14 @@ impl Error for MoveError {
     fn description(&self) -> &str {
         match *self {
             MoveError::NoMoveSet => "No Move Provided.",
-            MoveError::Protocol(ref protocol_err) => protocol_err.description()
+            MoveError::Protocol(ref protocol_err) => protocol_err.description(),
         }
     }
 
     fn cause(&self) -> Option<&Error> {
         match *self {
             MoveError::Protocol(ref protocol_err) => Some(protocol_err),
-            _ => None
+            _ => None,
         }
     }
 }
