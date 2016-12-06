@@ -82,6 +82,8 @@ impl<R: Rng> GameEngine<R> {
     }
 
     pub fn ask_for_moves(&mut self) {
+        self.snake_plans.clear();
+
         for (player_name, cause_of_death) in self.dead_snakes.iter() {
             let r = self.player_connections
                 .send(player_name.clone(),
