@@ -81,8 +81,8 @@ fn player_handshake_handler(stream: TcpStream,
         .expect("Could not write Command::Server.");
 
     let player = match player_connection.read() {
-        Ok(Command::Hello { player, secret }) => {
-            println!("Player {:?} with secret {:?}", player, secret);
+        Ok(Command::Hello { player }) => {
+            println!("Player {:?}", player);
             player
         }
         Ok(_) => {

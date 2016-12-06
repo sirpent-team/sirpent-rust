@@ -52,7 +52,6 @@ pub fn client_detect_vector() {
             player: Player {
                 name: "daenerys".to_string(),
             },
-            secret: Some("DeagOLmol3105764438410301265454621913800982laskhdasdj".to_string()),
         })
         .expect("Could not write Command::Hello.");
 
