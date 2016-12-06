@@ -102,10 +102,12 @@ impl<R: Rng> GameEngine<R> {
 
         // Aggregate move responses.
         for (player_name, command_result) in self.player_connections.collect() {
-            if let Ok(Command::Move { direction }) = command_result {
-                self.add_snake_plan(player_name, Ok(direction));
-            }
-            // @TODO: Pass Err(String) as snake plans also.
+            let snake_plan = match command_result {
+                Ok(Command::Move { direction }) => Ok(direction),
+                Ok(_) => Err(From::from(ProtocolError::UnexpectedCommand)),
+                Err(e) => Err(From::from(e)),
+            };
+            self.snake_plans.insert(player_name.clone(), snake_plan);
         }
     }
 
