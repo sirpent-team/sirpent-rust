@@ -1,9 +1,8 @@
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
 use std::marker::Send;
-use std::io::{self, Write, BufReader, BufWriter, BufRead, Lines, Error, ErrorKind};
+use std::io::{self, Write, BufReader, BufWriter, BufRead, Lines};
 use std::result::Result as StdResult;
-use std::error::Error as StdError;
 use std::collections::{HashMap, BTreeMap};
 use serde_json;
 use rayon::prelude::*;

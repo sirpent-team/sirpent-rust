@@ -12,7 +12,7 @@ use std::str;
 use std::time;
 use std::net::TcpStream;
 use std::result::Result;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use rand::os::OsRng;
 
 use sirpent::*;
@@ -22,6 +22,9 @@ fn main() {
 
     let mut osrng = OsRng::new().unwrap();
     let grid = Grid { radius: 15 };
+
+    let waiting_players = Arc::new(Mutex::new(Vec::new()));
+
     let mut game_state = GameState::new(grid);
     game_state.food.insert(grid.random_cell(&mut osrng));
 
@@ -29,7 +32,7 @@ fn main() {
 
     // -----------------------------------------------------------------------
 
-    let game_engine2 = game_engine.clone();
+    let waiting_players2 = waiting_players.clone();
     thread::spawn(move || {
         let plain_server = SirpentServer::plain("0.0.0.0:5513").unwrap();
         plain_server.listen(move |stream: TcpStream| {
@@ -38,19 +41,18 @@ fn main() {
                 // game_engine2.read().unwrap().player_connections.is_accepting() {
                 let (player, player_connection) = player_handshake_handler(stream, grid.clone())
                     .unwrap();
-                game_engine2.write().unwrap().add_player(player, player_connection);
+                waiting_players2.lock().unwrap().push((player, player_connection));
             }
         });
     });
 
     thread::sleep(time::Duration::from_millis(5000));
 
-    // @TODO: New logic for accepting/rejecting/queueing new players.
-    // game_engine
-    //     .write()
-    //     .unwrap()
-    //     .player_connections
-    //     .close();
+    let mut wp = waiting_players.lock().unwrap();
+    for (player, player_connection) in wp.drain(..) {
+        game_engine.write().unwrap().add_player(player, player_connection);
+    }
+
     game_engine.write()
         .unwrap()
         .player_connections
