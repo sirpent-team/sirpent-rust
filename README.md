@@ -19,8 +19,6 @@ cargo run --example dummy_client
 
 ### Square
 
-**Not yet implemented (`SquareGrid::random_cell`).**
-
 Run the Server:
 
 ``` sh
@@ -31,20 +29,4 @@ Run a client:
 
 ``` sh
 cargo run --example dummy_client --no-default-features --features square
-```
-
-### Triangle
-
-**Not yet implemented (`TriangleGrid::random_cell`).**
-
-Run the Server:
-
-``` sh
-cargo run --no-default-features --features triangle
-```
-
-Run a client:
-
-``` sh
-cargo run --example dummy_client --no-default-features --features triangle
 ```
