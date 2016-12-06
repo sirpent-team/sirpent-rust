@@ -104,7 +104,7 @@ impl<R: Rng> GameEngine<R> {
         for (player_name, command_result) in self.player_connections.collect() {
             let snake_plan = match command_result {
                 Ok(Command::Move { direction }) => Ok(direction),
-                Ok(_) => Err(From::from(ProtocolError::UnexpectedCommand)),
+                Ok(_) => Err(From::from(ProtocolError::WrongCommand)),
                 Err(e) => Err(From::from(e)),
             };
             self.snake_plans.insert(player_name.clone(), snake_plan);

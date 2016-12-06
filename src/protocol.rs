@@ -89,6 +89,7 @@ pub enum ProtocolError {
     SendToUnknownPlayer,
     RecieveFromUnknownPlayer,
     UnexpectedCommand,
+    WrongCommand,
 }
 
 // @TODO: Consider if this is best.
@@ -118,6 +119,7 @@ impl Error for ProtocolError {
             ProtocolError::SendToUnknownPlayer => "Sending to unknown player_name.",
             ProtocolError::RecieveFromUnknownPlayer => "Receiving from unknown player_name.",
             ProtocolError::UnexpectedCommand => "Unexpected command read.",
+            ProtocolError::WrongCommand => "Wrong command was read.",
         }
     }
 
