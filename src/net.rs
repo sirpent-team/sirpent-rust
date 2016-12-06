@@ -91,7 +91,7 @@ impl PlayerConnection {
 
         let line = self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
         println!("{:?}", line);
-        let mut command_value: serde_json::Value = serde_to_io(serde_json::from_str(&line))?;
+        let mut command_value: serde_json::Value = serde_json::from_str(&line)?;
 
         let obj = command_value.as_object_mut()
             .ok_or(ProtocolError::MessageReadNotADictionary)?;
@@ -107,7 +107,7 @@ impl PlayerConnection {
         command_map.insert(msg, data);
         let command_map = serde_json::Value::Object(command_map);
 
-        let command: Command = serde_to_io(serde_json::from_value(command_map))?;
+        let command: Command = serde_json::from_value(command_map)?;
         Ok(command)
     }
 
@@ -141,7 +141,7 @@ impl PlayerConnection {
         };
 
         // serde_json:: to_writer seems to never return when using a BufWriter<TcpStream>.
-        self.writer.write_all(serde_to_io(serde_json::to_string(&message))?.as_bytes())?;
+        self.writer.write_all(serde_json::to_string(&message)?.as_bytes())?;
         self.writer.write_all(LF)?;
         self.writer.flush()?;
         Ok(())
@@ -152,17 +152,6 @@ impl PlayerConnection {
 struct Message {
     msg: String,
     data: serde_json::Value,
-}
-
-/// Converts a Result<T, serde_json::Error> into an Result<T>.
-fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> io::Result<T> {
-    match res {
-        Ok(x) => Ok(x),
-        Err(e) => {
-            Err(Error::new(ErrorKind::Other,
-                           &format!("A serde_json error occurred. ({})", e.description())[..]))
-        }
-    }
 }
 
 /// A settings struct containing a set of timeouts which can be applied to a server.
