@@ -1,7 +1,7 @@
 use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
 use std::marker::Send;
-use std::io::{Result, Write, BufReader, BufWriter, BufRead, Lines, Error, ErrorKind};
+use std::io::{self, Write, BufReader, BufWriter, BufRead, Lines, Error, ErrorKind};
 use std::result::Result as StdResult;
 use std::error::Error as StdError;
 use std::collections::{HashMap, BTreeMap};
@@ -26,7 +26,7 @@ impl PlayerConnections {
         self.connections.insert(player_name, player_connection);
     }
 
-    pub fn broadcast(&mut self, command: Command) -> HashMap<PlayerName, Result<()>> {
+    pub fn broadcast(&mut self, command: Command) -> HashMap<PlayerName, StdResult<(), ProtocolError>> {
         let mut result_pairs = Vec::with_capacity(self.connections.len());
         self.connections
             .par_iter_mut()
@@ -35,14 +35,14 @@ impl PlayerConnections {
         result_pairs.into_iter().collect()
     }
 
-    pub fn send(&mut self, player_name: PlayerName, command: Command) -> Result<()> {
+    pub fn send(&mut self, player_name: PlayerName, command: Command) -> StdResult<(), ProtocolError> {
         self.connections
             .get_mut(&player_name)
-            .expect("Sending to unknown player_name.")
+            .ok_or(ProtocolError::SendToUnknownPlayer)?
             .write(&command)
     }
 
-    pub fn collect(&mut self) -> HashMap<PlayerName, Result<Command>> {
+    pub fn collect(&mut self) -> HashMap<PlayerName, StdResult<Command, ProtocolError>> {
         let mut result_pairs = Vec::with_capacity(self.connections.len());
         self.connections
             .par_iter_mut()
@@ -51,10 +51,10 @@ impl PlayerConnections {
         result_pairs.into_iter().collect()
     }
 
-    pub fn recieve(&mut self, player_name: PlayerName) -> Result<Command> {
+    pub fn recieve(&mut self, player_name: PlayerName) -> StdResult<Command, ProtocolError> {
         self.connections
             .get_mut(&player_name)
-            .expect("Receiving from unknown player_name.")
+            .ok_or(ProtocolError::RecieveFromUnknownPlayer)?
             .read()
     }
 }
@@ -68,7 +68,7 @@ pub struct PlayerConnection {
 }
 
 impl PlayerConnection {
-    pub fn new(stream: TcpStream, timeouts: Option<Timeouts>) -> Result<PlayerConnection> {
+    pub fn new(stream: TcpStream, timeouts: Option<Timeouts>) -> io::Result<PlayerConnection> {
         Ok(PlayerConnection {
             timeouts: timeouts.unwrap_or(Default::default()),
             stream: stream.try_clone()?,
@@ -77,23 +77,23 @@ impl PlayerConnection {
         })
     }
 
-    pub fn read(&mut self) -> Result<Command> {
+    pub fn read(&mut self) -> StdResult<Command, ProtocolError> {
         self.stream.set_read_timeout(self.timeouts.read)?;
 
         let line =
-            self.reader.next().ok_or(Error::new(ErrorKind::Other, "None read from stream."))??;
+            self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
         println!("{:?}", line);
         let mut command_value: serde_json::Value = serde_to_io(serde_json::from_str(&line))?;
 
         let obj = command_value.as_object_mut()
-            .ok_or(Error::new(ErrorKind::Other, "The msg was not a dictionary."))?;
+            .ok_or(ProtocolError::MessageReadNotADictionary)?;
         let msg = obj.remove("msg")
-            .ok_or(Error::new(ErrorKind::Other, "No msg field provided."))?
+            .ok_or(ProtocolError::MessageReadMissingMsgField)?
             .as_str()
-            .ok_or(Error::new(ErrorKind::Other, "The msg field was not a string."))?
+            .ok_or(ProtocolError::MessageReadNonStringMsgField)?
             .to_string();
         let data = obj.remove("data")
-            .ok_or(Error::new(ErrorKind::Other, "No data field provided."))?;
+            .ok_or(ProtocolError::MessageReadMissingDataField)?;
 
         let mut command_map: BTreeMap<String, serde_json::Value> = BTreeMap::new();
         command_map.insert(msg, data);
@@ -103,7 +103,7 @@ impl PlayerConnection {
         Ok(command)
     }
 
-    pub fn write(&mut self, command: &Command) -> Result<()> {
+    pub fn write(&mut self, command: &Command) -> Result<(), ProtocolError> {
         self.stream.set_write_timeout(self.timeouts.write)?;
 
         let command_value = serde_json::to_value(command);
@@ -114,16 +114,15 @@ impl PlayerConnection {
             serde_json::Value::Object(command_map) => {
                 let (msg_, data_) = command_map.iter()
                     .next()
-                    .ok_or(Error::new(ErrorKind::Other, "The outer Command object was empty."))?;
+                    .ok_or(ProtocolError::CommandWasEmpty)?;
                 data.append(data_.clone()
                     .as_object_mut()
-                    .ok_or(Error::new(ErrorKind::Other, "Command data was not an object."))?);
+                    .ok_or(ProtocolError::CommandDataWasNotObject)?);
                 msg_.clone()
             }
             serde_json::Value::String(command_msg) => command_msg,
             _ => {
-                return Err(Error::new(ErrorKind::Other,
-                                      "Serialised Command was not an object or string."))
+                return Err(ProtocolError::CommandSerialiseNotObjectNotString)
             }
         };
 
@@ -150,7 +149,7 @@ struct Message {
 }
 
 /// Converts a Result<T, serde_json::Error> into an Result<T>.
-fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> Result<T> {
+fn serde_to_io<T>(res: StdResult<T, serde_json::Error>) -> io::Result<T> {
     match res {
         Ok(x) => Ok(x),
         Err(e) => {
@@ -207,7 +206,7 @@ impl SirpentServer {
     ///
     /// Panics if the provided address does not parse. To avoid this
     /// call `to_socket_addrs` yourself and pass a parsed `SocketAddr`.
-    pub fn plain<A: ToSocketAddrs>(addr: A) -> Result<SirpentServer> {
+    pub fn plain<A: ToSocketAddrs>(addr: A) -> io::Result<SirpentServer> {
         let sock_addr = addr.to_socket_addrs()
             .ok()
             .and_then(|mut addrs| addrs.next())

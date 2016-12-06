@@ -1,4 +1,8 @@
 use std::time::Duration;
+use std::fmt::{self, Display, Formatter};
+use std::io;
+use serde_json;
+use std::error::Error;
 
 use grid::*;
 use player::*;
@@ -70,5 +74,69 @@ impl Command {
             sirpent: env!("CARGO_PKG_VERSION").to_string(),
             protocol: PROTOCOL_VERSION.to_string(),
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum ProtocolError {
+    Io(io::Error),
+    Serde(serde_json::Error),
+    NothingReadFromStream,
+    MessageReadNotADictionary,
+    MessageReadMissingMsgField,
+    MessageReadNonStringMsgField,
+    MessageReadMissingDataField,
+    CommandWasEmpty,
+    CommandDataWasNotObject,
+    CommandSerialiseNotObjectNotString,
+    SendToUnknownPlayer,
+    RecieveFromUnknownPlayer,
+    UnexpectedCommand
+}
+
+// @TODO: Consider if this is best.
+impl Display for ProtocolError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.write_str(self.description())
+    }
+}
+
+impl Error for ProtocolError {
+    fn description(&self) -> &str {
+        match *self {
+            ProtocolError::Io(ref io_err) => io_err.description(),
+            ProtocolError::Serde(ref serde_json_err) => serde_json_err.description(),
+            ProtocolError::NothingReadFromStream => "Nothing read from stream.",
+            ProtocolError::MessageReadNotADictionary => "Message from stream was not a dictionary.",
+            ProtocolError::MessageReadMissingMsgField => "No msg field in message from stream.",
+            ProtocolError::MessageReadNonStringMsgField => "msg field was not a string in message from stream.",
+            ProtocolError::MessageReadMissingDataField => "No data field provided from stream.",
+            ProtocolError::CommandWasEmpty => "The outer Command object was empty.",
+            ProtocolError::CommandDataWasNotObject => "Command data was not an object.",
+            ProtocolError::CommandSerialiseNotObjectNotString => "Serialised Command was not an object or string.",
+            ProtocolError::SendToUnknownPlayer => "Sending to unknown player_name.",
+            ProtocolError::RecieveFromUnknownPlayer => "Receiving from unknown player_name.",
+            ProtocolError::UnexpectedCommand => "Unexpected command read."
+        }
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        match *self {
+            ProtocolError::Io(ref io_err) => Some(io_err),
+            ProtocolError::Serde(ref serde_json_err) => Some(serde_json_err),
+            _ => None
+        }
+    }
+}
+
+impl From<io::Error> for ProtocolError {
+    fn from(err: io::Error) -> ProtocolError {
+        ProtocolError::Io(err)
+    }
+}
+
+impl From<serde_json::Error> for ProtocolError {
+    fn from(err: serde_json::Error) -> ProtocolError {
+        ProtocolError::Serde(err)
     }
 }

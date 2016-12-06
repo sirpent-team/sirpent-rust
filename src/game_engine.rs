@@ -1,4 +1,5 @@
 use rand::Rng;
+use std::error::Error;
 use std::collections::{HashSet, HashMap};
 
 use grid::*;
@@ -112,19 +113,19 @@ impl<R: Rng> GameEngine<R> {
         // Then below if no snake plan is set, we use a default error message.
         // While intricate this very neatly leads to CauseOfDeath.
 
-        let default_planless_error = Err("No move information.".to_string());
+        let no_move_set = Err(MoveError::NoMoveSet);
 
         for (player_name, snake) in self.state.snakes.iter_mut() {
             // Retrieve snake plan if one exists.
             let snake_plan: &Result<Direction, MoveError> = self.snake_plans
                 .get(player_name)
-                .unwrap_or(&default_planless_error);
+                .unwrap_or(&no_move_set);
 
             // Move if a direction provided else use MoveError for CauseOfDeath.
             match *snake_plan {
                 Ok(direction) => snake.step_in_direction(direction),
                 Err(ref move_error) => {
-                    let cause_of_death = CauseOfDeath::NoMoveMade(move_error.clone());
+                    let cause_of_death = CauseOfDeath::NoMoveMade((*move_error).description().to_string());
                     self.dead_snakes.insert(player_name.clone(), cause_of_death);
                 }
             }

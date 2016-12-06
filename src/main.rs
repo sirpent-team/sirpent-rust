@@ -10,9 +10,8 @@ use ansi_term::Colour::*;
 use std::thread;
 use std::str;
 use std::time;
-use std::io::{Error, ErrorKind};
 use std::net::TcpStream;
-use std::io::Result;
+use std::result::Result;
 use std::sync::{Arc, RwLock};
 use rand::os::OsRng;
 
@@ -64,7 +63,7 @@ fn main() {
     }
 }
 
-fn player_handshake_handler(stream: TcpStream, grid: Grid) -> Result<(Player, PlayerConnection)> {
+fn player_handshake_handler(stream: TcpStream, grid: Grid) -> Result<(Player, PlayerConnection), ProtocolError> {
     // @TODO: Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
 
@@ -84,10 +83,9 @@ fn player_handshake_handler(stream: TcpStream, grid: Grid) -> Result<(Player, Pl
             println!("Player {:?} with secret {:?}", player, secret);
             player
         }
-        Ok(command) => {
+        Ok(_) => {
             player_connection.write(&Command::Error {}).unwrap_or(());
-            return Err(Error::new(ErrorKind::Other,
-                                  format!("Unexpected command {:?}", command)));
+            return Err(ProtocolError::UnexpectedCommand)
         }
         Err(e) => {
             return Err(e);
