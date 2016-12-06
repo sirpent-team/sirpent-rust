@@ -1,15 +1,17 @@
-// #![feature(rustc_macro, structural_match, rustc_attrs, custom_derive)]
 #![feature(proc_macro)]
 
+// UUID is used to give unique identifiers to each game.
 extern crate uuid;
+// Rand is used to generate OS-level random numbers.
 extern crate rand;
-extern crate serde;
+// Rayon's par_iter() is used to do things in parallel.
 extern crate rayon;
+// Serde is used to Serialise/Deserialise game data.
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
-#[macro_use(chan_select)]
-extern crate chan;
+// Quickcheck is used for property-based testing.
 #[cfg(test)]
 extern crate quickcheck;
 

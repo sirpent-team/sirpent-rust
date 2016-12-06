@@ -2,8 +2,6 @@ extern crate ansi_term;
 extern crate sirpent;
 extern crate rand;
 extern crate uuid;
-#[macro_use(chan_select)]
-extern crate chan;
 extern crate rayon;
 
 use ansi_term::Colour::*;
