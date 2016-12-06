@@ -26,6 +26,10 @@ impl PlayerConnections {
         self.connections.insert(player_name, player_connection);
     }
 
+    pub fn remove_player(&mut self, player_name: PlayerName) -> Option<PlayerConnection> {
+        self.connections.remove(&player_name)
+    }
+
     pub fn broadcast(&mut self,
                      command: Command)
                      -> HashMap<PlayerName, StdResult<(), ProtocolError>> {

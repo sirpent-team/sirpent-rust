@@ -1,12 +1,13 @@
 use rand::Rng;
 use std::error::Error;
 use std::collections::{HashSet, HashMap};
+use std::ops::Deref;
 
 use grid::*;
-use snake::*;
 use player::*;
 use game_state::*;
 use net::*;
+use snake::*;
 use protocol::*;
 
 pub struct GameEngine<R: Rng> {
@@ -60,12 +61,37 @@ impl<R: Rng> GameEngine<R> {
         self.snake_plans.insert(player_name.clone(), snake_plan);
     }
 
+    pub fn game_over(&mut self) -> Option<Option<Player>> {
+        match self.state.snakes.len() {
+            0 => Some(None),
+            1 => {
+                let victor_name = self.state.snakes.keys().next().unwrap();
+
+                let r = self.player_connections
+                    .send(victor_name.clone(), Command::Won {});
+                if r.is_err() {
+                    println!("Sending errored {:?}", r);
+                }
+
+                self.player_connections.remove_player(victor_name.clone()).unwrap();
+                // Connection ended here as it goes out of scope.
+                Some(Some(self.players[victor_name].deref().clone()))
+            }
+            _ => None,
+        }
+    }
+
     pub fn ask_for_moves(&mut self) {
-        // Print result of previous turn (here so 0th is printed).
-        println!("TURN {}", self.state.turn_number);
-        println!("removed snakes {:?}", self.dead_snakes);
-        println!("{:?}", self.state);
-        println!("--------------");
+        for (player_name, cause_of_death) in self.dead_snakes.iter() {
+            let r = self.player_connections
+                .send(player_name.clone(),
+                      Command::Died { cause_of_death: cause_of_death.clone() });
+            if r.is_err() {
+                println!("Sending errored {:?}", r);
+            }
+            self.player_connections.remove_player(player_name.clone()).unwrap();
+            // Connection ended here as it goes out of scope.
+        }
 
         // Broadcast request for moves.
         let turn_command = Command::Turn { game: self.state.clone() };

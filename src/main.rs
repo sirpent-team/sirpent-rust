@@ -57,9 +57,29 @@ fn main() {
         .broadcast(Command::NewGame {});
 
     loop {
-        game_engine.write().unwrap().ask_for_moves();
+        let mut game_engine_writable = game_engine.write().unwrap();
+
+        if let Some(victory) = game_engine_writable.game_over() {
+            if let Some(victor) = victory {
+                println!("Player {:?} won.", victor);
+            } else {
+                println!("No surviving players.");
+            }
+            return;
+        }
+
+        game_engine_writable.ask_for_moves();
+
         // Advance turn.
-        game_engine.write().unwrap().simulate_next_turn();
+        game_engine_writable.simulate_next_turn();
+
+        // Print result of previous turn (here so 0th is printed).
+        println!("TURN {}", game_engine_writable.state.turn_number);
+        println!("removed snakes {:?}", game_engine_writable.dead_snakes);
+        println!("{:?}", game_engine_writable.state);
+        println!("--------------");
+
+        thread::sleep(time::Duration::from_millis(500));
     }
 }
 

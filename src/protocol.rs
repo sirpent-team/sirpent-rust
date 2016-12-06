@@ -5,6 +5,7 @@ use serde_json;
 use std::error::Error;
 
 use grid::*;
+use snake::*;
 use player::*;
 use game_state::*;
 
@@ -53,7 +54,7 @@ pub enum Command {
     TimedOut {},
     // If a player died during this turn, the server must send a DIED message.
     #[serde(rename = "died")]
-    Died {},
+    Died { cause_of_death: CauseOfDeath },
     // If a player was the only survivor of this turn, the server must send a WON message.
     #[serde(rename = "won")]
     Won {},

@@ -96,8 +96,8 @@ pub fn client_detect_vector() {
                 println!("{:?}", Command::TimedOut {});
                 return;
             }
-            Command::Died {} => {
-                println!("{:?}", Command::Died {});
+            Command::Died { cause_of_death } => {
+                println!("{:?}", Command::Died { cause_of_death: cause_of_death });
                 return;
             }
             Command::Won {} => {
