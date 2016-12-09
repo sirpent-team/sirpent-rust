@@ -21,16 +21,16 @@ mod grids;
 mod snake;
 mod player;
 mod protocol;
-mod game_state;
-mod game_engine;
+mod state;
+// mod engine;
 
 pub use net::*;
 pub use grid::*;
 pub use snake::*;
 pub use player::*;
 pub use protocol::*;
-pub use game_state::*;
-pub use game_engine::*;
+pub use state::*;
+// pub use engine::*;
 
 #[cfg(test)]
 mod tests {

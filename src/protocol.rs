@@ -7,7 +7,7 @@ use std::error::Error;
 use grid::*;
 use snake::*;
 use player::*;
-use game_state::*;
+use state::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.2";
 
@@ -19,31 +19,24 @@ pub enum Command {
     #[serde(rename = "version")]
     Version { sirpent: String, protocol: String },
     // The server must then send a SERVER message.
-    #[serde(rename = "server")]
-    Server {
+    #[serde(rename = "welcome")]
+    Welcome {
         grid: Grid,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<Duration>,
     },
     // The client should decide whether it is compatible with this protocol and server setup.
     // If the client wishes to continue it must send a HELLO message.
-    #[serde(rename = "hello")]
-    Hello { player: Player },
-    // Otherwise or at any time, the client can send a QUIT message or just close the socket.
-    #[serde(rename = "quit")]
-    Quit {},
-    // In case of a problem on either side, an ERROR message can be sent.
-    #[serde(rename = "error")]
-    Error {},
+    #[serde(rename = "identify")]
+    Identify { player: Player },
+    #[serde(rename = "identified")]
+    Identified { player_name: PlayerName },
     // To begin a new game, the server must send a NEW_GAME message to indicate this.
     #[serde(rename = "new_game")]
-    NewGame {},
+    NewGame { game: GameState },
     // The server must send a TURN message with the initial state of the Game.
     #[serde(rename = "turn")]
-    Turn { game: GameState },
-    // The server must send a MAKE_A_MOVE message to request the player's next move.
-    #[serde(rename = "make_a_move")]
-    MakeAMove {},
+    Turn { turn: TurnState },
     // The client must reply with a MOVE message to indicate their next action.
     // The server must then send a new TURN message to start the next TURN.
     #[serde(rename = "move")]

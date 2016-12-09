@@ -3,81 +3,25 @@ use std::time::Duration;
 use std::marker::Send;
 use std::io::{self, Write, BufReader, BufWriter, BufRead, Lines};
 use std::result::Result as StdResult;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::BTreeMap;
 use serde_json;
-use rayon::prelude::*;
+use std::fmt;
 
-use player::*;
 use protocol::*;
 
 static LF: &'static [u8] = b"\n";
 
-pub struct PlayerConnections {
-    connections: HashMap<PlayerName, PlayerConnection>,
-}
-
-impl PlayerConnections {
-    pub fn new() -> PlayerConnections {
-        PlayerConnections { connections: HashMap::new() }
-    }
-
-    pub fn add_player(&mut self, player_name: PlayerName, player_connection: PlayerConnection) {
-        self.connections.insert(player_name, player_connection);
-    }
-
-    pub fn remove_player(&mut self, player_name: PlayerName) -> Option<PlayerConnection> {
-        self.connections.remove(&player_name)
-    }
-
-    pub fn broadcast(&mut self,
-                     command: Command)
-                     -> HashMap<PlayerName, StdResult<(), ProtocolError>> {
-        let mut result_pairs = Vec::with_capacity(self.connections.len());
-        self.connections
-            .par_iter_mut()
-            .map(|(player_name, connection)| (player_name.clone(), connection.write(&command)))
-            .collect_into(&mut result_pairs);
-        result_pairs.into_iter().collect()
-    }
-
-    pub fn send(&mut self,
-                player_name: PlayerName,
-                command: Command)
-                -> StdResult<(), ProtocolError> {
-        self.connections
-            .get_mut(&player_name)
-            .ok_or(ProtocolError::SendToUnknownPlayer)?
-            .write(&command)
-    }
-
-    pub fn collect(&mut self) -> HashMap<PlayerName, StdResult<Command, ProtocolError>> {
-        let mut result_pairs = Vec::with_capacity(self.connections.len());
-        self.connections
-            .par_iter_mut()
-            .map(|(player_name, connection)| (player_name.clone(), connection.read()))
-            .collect_into(&mut result_pairs);
-        result_pairs.into_iter().collect()
-    }
-
-    pub fn recieve(&mut self, player_name: PlayerName) -> StdResult<Command, ProtocolError> {
-        self.connections
-            .get_mut(&player_name)
-            .ok_or(ProtocolError::RecieveFromUnknownPlayer)?
-            .read()
-    }
-}
-
-// @TODO: Add Drop to PlayerConnection that sends QUIT? Potential for deadlock waiting if so?
-pub struct PlayerConnection {
-    timeouts: Timeouts,
+// @TODO: Add Drop to ProtocolConnection that sends QUIT? Potential for deadlock waiting if so?
+pub struct ProtocolConnection {
+    pub timeouts: Timeouts,
     stream: TcpStream,
     reader: Lines<BufReader<TcpStream>>,
     writer: BufWriter<TcpStream>,
 }
 
-impl PlayerConnection {
-    pub fn new(stream: TcpStream, timeouts: Option<Timeouts>) -> io::Result<PlayerConnection> {
-        Ok(PlayerConnection {
+impl ProtocolConnection {
+    pub fn new(stream: TcpStream, timeouts: Option<Timeouts>) -> io::Result<ProtocolConnection> {
+        Ok(ProtocolConnection {
             timeouts: timeouts.unwrap_or(Default::default()),
             stream: stream.try_clone()?,
             reader: BufReader::new(stream.try_clone()?).lines(),
@@ -85,7 +29,7 @@ impl PlayerConnection {
         })
     }
 
-    pub fn read(&mut self) -> StdResult<Command, ProtocolError> {
+    pub fn recieve(&mut self) -> StdResult<Command, ProtocolError> {
         self.stream.set_read_timeout(self.timeouts.read)?;
 
         let line = self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
@@ -110,7 +54,7 @@ impl PlayerConnection {
         Ok(command)
     }
 
-    pub fn write(&mut self, command: &Command) -> Result<(), ProtocolError> {
+    pub fn send(&mut self, command: &Command) -> Result<(), ProtocolError> {
         self.stream.set_write_timeout(self.timeouts.write)?;
 
         let command_value = serde_json::to_value(command);
@@ -144,6 +88,12 @@ impl PlayerConnection {
         self.writer.write_all(LF)?;
         self.writer.flush()?;
         Ok(())
+    }
+}
+
+impl fmt::Debug for ProtocolConnection {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ProtocolConnection {{ ??? }}")
     }
 }
 
