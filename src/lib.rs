@@ -22,7 +22,7 @@ mod snake;
 mod player;
 mod protocol;
 mod state;
-// mod engine;
+mod engine;
 
 pub use net::*;
 pub use grid::*;
@@ -30,7 +30,7 @@ pub use snake::*;
 pub use player::*;
 pub use protocol::*;
 pub use state::*;
-// pub use engine::*;
+pub use engine::*;
 
 #[cfg(test)]
 mod tests {

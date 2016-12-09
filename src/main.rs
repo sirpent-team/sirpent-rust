@@ -26,7 +26,7 @@ fn main() {
     let mut game_state = GameState::new(grid);
     game_state.food.insert(grid.random_cell(&mut osrng));
 
-    let game_engine = Arc::new(RwLock::new(GameEngine::new(osrng, game_state)));
+    let engine = Arc::new(RwLock::new(Engine::new(osrng, game_state)));
 
     // -----------------------------------------------------------------------
 
