@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use grid::*;
 use player::*;
@@ -68,47 +67,9 @@ pub enum CauseOfDeath {
     CollidedWithBounds(Vector),
 }
 
-impl From<MoveError> for CauseOfDeath {
-    fn from(err: MoveError) -> CauseOfDeath {
+impl From<ProtocolError> for CauseOfDeath {
+    fn from(err: ProtocolError) -> CauseOfDeath {
         CauseOfDeath::NoMoveMade(err.description().to_string())
-    }
-}
-
-#[derive(Debug)]
-pub enum MoveError {
-    NoMoveSet,
-    Protocol(ProtocolError),
-}
-
-// @TODO: Consider if this is best.
-impl Display for MoveError {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match *self {
-            MoveError::NoMoveSet => f.write_str(self.description()),
-            MoveError::Protocol(ref protocol_err) => protocol_err.fmt(f),
-        }
-    }
-}
-
-impl Error for MoveError {
-    fn description(&self) -> &str {
-        match *self {
-            MoveError::NoMoveSet => "No Move Provided.",
-            MoveError::Protocol(ref protocol_err) => protocol_err.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&Error> {
-        match *self {
-            MoveError::Protocol(ref protocol_err) => Some(protocol_err),
-            _ => None,
-        }
-    }
-}
-
-impl From<ProtocolError> for MoveError {
-    fn from(err: ProtocolError) -> MoveError {
-        MoveError::Protocol(err)
     }
 }
 

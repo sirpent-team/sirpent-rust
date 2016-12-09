@@ -41,33 +41,44 @@ impl State {
         let new_turn = self.turn.clone();
     }
 
-    fn request_moves(&mut self) -> HashMap<PlayerName, Result<Direction, MoveError>> {
+    fn request_moves(&mut self) -> HashMap<PlayerName, Move> {
         // Aggregate move responses.
-        let mut moves: Vec<(PlayerName, Result<Direction, MoveError>)> =
-            Vec::with_capacity(self.turn.snakes.len());
+        let mut moves: Vec<Option<Move>> = Vec::with_capacity(self.turn.snakes.len());
 
         let turn = self.turn.clone();
-        self.player_conns.par_iter_mut()
+        self.player_conns
+            .par_iter_mut()
             .map(|(player_name, mut player_conn)| {
-                match player_conn.tell_turn(turn.clone()) {
-                    Err(e) => return (player_name.clone(), Err(From::from(e))),
-                    _ => {}
-                };
-                let move_ = player_conn.ask_next_move();
-                (player_name.clone(), move_)
+                let player_name = player_name.clone();
+                if turn.snakes.contains_key(&player_name) {
+                    // If player alive, try sending turn. If that succeeds, try and read a move.
+                    match player_conn.tell_turn(turn.clone()) {
+                        Ok(_) => Some(player_conn.ask_next_move()),
+                        Err(e) => Some(Err(e)),
+                    }
+                } else {
+                    // If player is dead, send turn but ignore errors.
+                    // @TODO: If errors then close connection?
+                    match player_conn.tell_turn(turn.clone()) {
+                        _ => None,
+                    }
+                }
             })
             .collect_into(&mut moves);
 
-        /*let living_player_names: Vec<PlayerName> = self.turn.snakes.keys().cloned().collect();
-        living_player_names.par_iter()
-            .map(|player_name| {
-                let player_name: PlayerName = player_name.clone();
-                let move_ = self.player_conns.get_mut(&player_name).unwrap().ask_next_move();
-                (player_name, move_)
+        // For unclear reasons, par_iter's filter_map does not have collect/collect_into defined.
+        self.game
+            .players
+            .keys()
+            .cloned()
+            .zip(moves.into_iter())
+            .filter_map(|(player_name, maybe_move)| {
+                match maybe_move {
+                    Some(move_) => Some((player_name, move_)),
+                    None => None,
+                }
             })
-            .collect_into(&mut moves);*/
-
-        moves.into_iter().collect()
+            .collect()
     }
 }
 

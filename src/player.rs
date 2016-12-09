@@ -5,6 +5,7 @@ use state::*;
 use protocol::*;
 
 pub type PlayerName = String;
+pub type Move = Result<Direction, ProtocolError>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Player {
@@ -38,11 +39,11 @@ impl PlayerConnection {
             })?;
         match self.conn.recieve() {
                 Ok(Command::Identify { player }) => Ok(player),
-                Ok(_) => Err(ProtocolError::WrongCommand),
+                Ok(command) => Err(ProtocolError::WrongCommand { command: command }),
                 Err(e) => Err(e),
             }
             .and_then(|player| {
-                self.conn.send(&Command::Identified { player_name: player.name.clone() });
+                self.conn.send(&Command::Identified { player_name: player.name.clone() })?;
                 Ok(player)
             })
     }
@@ -55,11 +56,11 @@ impl PlayerConnection {
         self.conn.send(&Command::Turn { turn: turn_state })
     }
 
-    pub fn ask_next_move(&mut self) -> Result<Direction, MoveError> {
+    pub fn ask_next_move(&mut self) -> Result<Direction, ProtocolError> {
         match self.conn.recieve() {
             Ok(Command::Move { direction }) => Ok(direction),
-            Ok(_) => Err(From::from(ProtocolError::WrongCommand)),
-            Err(e) => Err(From::from(e)),
+            Ok(command) => Err(ProtocolError::WrongCommand { command: command }),
+            Err(e) => Err(e),
         }
     }
 
