@@ -3,9 +3,10 @@ use std::error::Error;
 use std::collections::HashMap;
 
 use grid::*;
-use player::*;
 use state::*;
 use snake::*;
+use player::*;
+use protocol::*;
 
 pub struct Engine<R: Rng> {
     pub rng: Box<R>,
@@ -14,12 +15,26 @@ pub struct Engine<R: Rng> {
 }
 
 impl<R: Rng> Engine<R> {
-    pub fn new(rng: R, state: State) -> Engine<R> {
+    pub fn new(rng: R, grid: Grid) -> Engine<R> {
+        let state = State::new(grid);
         Engine {
             rng: Box::new(rng),
             new_turn: state.turn.clone(),
             state: state,
         }
+    }
+
+    pub fn add_player(&mut self,
+                      player: Player,
+                      connection: PlayerConnection)
+                      -> Result<PlayerName, ProtocolError> {
+        let new_snake = Snake::new(vec![self.state.game.grid.random_cell(&mut *self.rng)]);
+        self.state.add_player(player, connection, new_snake)
+    }
+
+    pub fn new_game(&mut self) -> HashMap<PlayerName, Result<(), ProtocolError>> {
+        self.manage_food();
+        self.state.new_game()
     }
 
     pub fn concluded(&mut self) -> Option<HashMap<PlayerName, (Player, Snake)>> {
@@ -39,7 +54,7 @@ impl<R: Rng> Engine<R> {
         }
     }
 
-    pub fn turn(&mut self) {
+    pub fn turn(&mut self) -> TurnState {
         let moves = self.state.request_moves();
 
         self.new_turn = self.state.turn.clone();
@@ -69,6 +84,7 @@ impl<R: Rng> Engine<R> {
         self.new_turn.turn_number += 1;
 
         self.state.turn = self.new_turn.clone();
+        self.new_turn.clone()
     }
 
     fn snake_movement(&mut self, moves: HashMap<PlayerName, Move>) {

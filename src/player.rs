@@ -29,6 +29,13 @@ pub struct PlayerConnection {
 }
 
 impl PlayerConnection {
+    // @TODO: Convert to a From implementation.
+    pub fn new(conn: ProtocolConnection) -> PlayerConnection {
+        PlayerConnection {
+            conn: conn
+        }
+    }
+
     pub fn handshake(&mut self, grid: Grid) -> Result<Player, ProtocolError> {
         self.conn.send(&Command::version())?;
         let read_timeout = self.conn.timeouts.read;
@@ -38,14 +45,14 @@ impl PlayerConnection {
                 timeout: read_timeout,
             })?;
         match self.conn.recieve() {
-                Ok(Command::Identify { player }) => Ok(player),
-                Ok(command) => Err(ProtocolError::WrongCommand { command: command }),
-                Err(e) => Err(e),
-            }
-            .and_then(|player| {
-                self.conn.send(&Command::Identified { player_name: player.name.clone() })?;
-                Ok(player)
-            })
+            Ok(Command::Identify { player }) => Ok(player),
+            Ok(command) => Err(ProtocolError::WrongCommand { command: command }),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn identified(&mut self, final_player_name: PlayerName) -> Result<(), ProtocolError> {
+        self.conn.send(&Command::Identified { player_name: final_player_name })
     }
 
     pub fn tell_new_game(&mut self, game_state: GameState) -> Result<(), ProtocolError> {

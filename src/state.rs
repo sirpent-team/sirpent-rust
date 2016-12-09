@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use grid::*;
 use snake::*;
 use player::*;
+use protocol::*;
 
 #[derive(Debug)]
 pub struct State {
@@ -35,9 +36,9 @@ impl State {
 
     pub fn add_player(&mut self,
                       mut player: Player,
-                      connection: PlayerConnection,
+                      mut connection: PlayerConnection,
                       snake: Snake)
-                      -> PlayerName {
+                      -> Result<PlayerName, ProtocolError> {
         // Dedupe player name.
         while self.game.players.contains_key(&player.name) {
             player.name.push('_');
@@ -45,10 +46,28 @@ impl State {
 
         let player_name = player.name.clone();
         self.game.players.insert(player_name.clone(), player);
+        connection.identified(player_name.clone())?;
         self.player_conns.insert(player_name.clone(), connection);
         self.turn.snakes.insert(player_name.clone(), snake);
 
-        player_name
+        Ok(player_name)
+    }
+
+    pub fn new_game(&mut self) -> HashMap<PlayerName, Result<(), ProtocolError>> {
+        let mut results: Vec<Result<(), ProtocolError>> =
+            Vec::with_capacity(self.turn.snakes.len());
+
+        let game_state = self.game.clone();
+        self.player_conns
+            .par_iter_mut()
+            .map(|(_, player_conn)| player_conn.tell_new_game(game_state.clone()))
+            .collect_into(&mut results);
+
+        self.player_conns
+            .keys()
+            .cloned()
+            .zip(results.into_iter())
+            .collect()
     }
 
     pub fn request_moves(&mut self) -> HashMap<PlayerName, Move> {

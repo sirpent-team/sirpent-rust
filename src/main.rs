@@ -9,7 +9,6 @@ use std::thread;
 use std::str;
 use std::time;
 use std::net::TcpStream;
-use std::result::Result;
 use std::sync::{Arc, Mutex, RwLock};
 use rand::os::OsRng;
 
@@ -18,15 +17,11 @@ use sirpent::*;
 fn main() {
     println!("{}", Yellow.bold().paint("Sirpent"));
 
-    let mut osrng = OsRng::new().unwrap();
+    let osrng = OsRng::new().unwrap();
     let grid = Grid { radius: 15 };
+    let engine = Arc::new(RwLock::new(Engine::new(osrng, grid)));
 
     let waiting_players = Arc::new(Mutex::new(Vec::new()));
-
-    let mut game_state = GameState::new(grid);
-    game_state.food.insert(grid.random_cell(&mut osrng));
-
-    let engine = Arc::new(RwLock::new(Engine::new(osrng, game_state)));
 
     // -----------------------------------------------------------------------
 
@@ -37,8 +32,7 @@ fn main() {
             // @TODO: New logic for accepting/rejecting/queueing new players.
             if true {
                 // game_engine2.read().unwrap().player_connections.is_accepting() {
-                let (player, player_connection) = player_handshake_handler(stream, grid.clone())
-                    .unwrap();
+                let (player, player_connection) = player_handshake_handler(stream, grid.clone());
                 waiting_players2.lock().unwrap().push((player, player_connection));
             }
         });
@@ -48,36 +42,35 @@ fn main() {
 
     let mut wp = waiting_players.lock().unwrap();
     for (player, player_connection) in wp.drain(..) {
-        game_engine.write().unwrap().add_player(player, player_connection);
+        let original_player_name = player.name.clone();
+        match engine.write().unwrap().add_player(player, player_connection) {
+            Err(e) => println!("Error {:?} adding player {:?}", e, original_player_name),
+            Ok(final_player_name) => {
+                println!("Player {:?} now named {:?}",
+                         original_player_name,
+                         final_player_name)
+            }
+        }
     }
 
-    game_engine.write()
-        .unwrap()
-        .player_connections
-        .broadcast(Command::NewGame {});
+    engine.write().unwrap().new_game();
 
     loop {
-        let mut game_engine_writable = game_engine.write().unwrap();
-
-        if let Some(victory) = game_engine_writable.game_over() {
-            if let Some(victor) = victory {
-                println!("Player {:?} won.", victor);
-            } else {
-                println!("No surviving players.");
-            }
-            return;
-        }
-
-        game_engine_writable.ask_for_moves();
+        let mut engine_writable = engine.write().unwrap();
 
         // Advance turn.
-        game_engine_writable.simulate_next_turn();
+        let new_turn = engine_writable.turn();
 
         // Print result of previous turn (here so 0th is printed).
-        println!("TURN {}", game_engine_writable.state.turn_number);
-        println!("removed snakes {:?}", game_engine_writable.dead_snakes);
-        println!("{:?}", game_engine_writable.state);
+        println!("TURN {}", new_turn.turn_number);
+        println!("Snake casualties: {:?}", new_turn.casualties);
+        println!("{:?}", new_turn);
         println!("--------------");
+
+        if let Some(victors) = engine_writable.concluded() {
+            println!("{:?} Victors: {:?}", victors.len(), victors);
+            break;
+        }
 
         thread::sleep(time::Duration::from_millis(500));
     }
@@ -85,33 +78,14 @@ fn main() {
 
 fn player_handshake_handler(stream: TcpStream,
                             grid: Grid)
-                            -> Result<(Player, PlayerConnection), ProtocolError> {
+                            -> (Player, PlayerConnection) {
     // @TODO: Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
 
-    let mut player_connection = PlayerConnection::new(stream, None)
+    let protocol_connection = ProtocolConnection::new(stream, None)
         .expect("Could not produce new PlayerConnection.");
+    let mut player_connection = PlayerConnection::new(protocol_connection);
 
-    player_connection.write(&Command::version()).expect("Could not write Command::version().");
-
-    player_connection.write(&Command::Server {
-            grid: grid,
-            timeout: None,
-        })
-        .expect("Could not write Command::Server.");
-
-    let player = match player_connection.read() {
-        Ok(Command::Hello { player }) => {
-            println!("Player {:?}", player);
-            player
-        }
-        Ok(_) => {
-            player_connection.write(&Command::Error {}).unwrap_or(());
-            return Err(ProtocolError::UnexpectedCommand);
-        }
-        Err(e) => {
-            return Err(e);
-        }
-    };
-    return Ok((player, player_connection));
+    let player = player_connection.handshake(grid).expect("Error doing player handshake.");
+    (player, player_connection)
 }
