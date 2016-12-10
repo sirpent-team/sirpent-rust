@@ -76,9 +76,7 @@ fn main() {
     }
 }
 
-fn player_handshake_handler(stream: TcpStream,
-                            grid: Grid)
-                            -> (Player, PlayerConnection) {
+fn player_handshake_handler(stream: TcpStream, grid: Grid) -> (Player, PlayerConnection) {
     // @TODO: Prevent memory exhaustion: stop reading from string after 1MiB.
     // @TODO @DEBUG: Need to reset this for each new message communication.
 

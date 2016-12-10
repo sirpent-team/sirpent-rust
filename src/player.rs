@@ -31,9 +31,7 @@ pub struct PlayerConnection {
 impl PlayerConnection {
     // @TODO: Convert to a From implementation.
     pub fn new(conn: ProtocolConnection) -> PlayerConnection {
-        PlayerConnection {
-            conn: conn
-        }
+        PlayerConnection { conn: conn }
     }
 
     pub fn handshake(&mut self, grid: Grid) -> Result<Player, ProtocolError> {
