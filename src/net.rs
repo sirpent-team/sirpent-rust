@@ -2,14 +2,17 @@ use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
 use std::marker::Send;
 use std::io::{self, Write, BufReader, BufWriter, BufRead, Lines};
-use std::result::Result as StdResult;
+use std::result::Result;
 use std::collections::BTreeMap;
 use serde_json;
 use std::fmt;
+use serde::{Serialize, Deserialize};
 
 use protocol::*;
 
 static LF: &'static [u8] = b"\n";
+
+pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
 // @TODO: Add Drop to ProtocolConnection that sends QUIT? Potential for deadlock waiting if so?
 pub struct ProtocolConnection {
@@ -29,7 +32,9 @@ impl ProtocolConnection {
         })
     }
 
-    pub fn recieve(&mut self) -> StdResult<Command, ProtocolError> {
+    pub fn recieve<T: Deserialize>(&mut self) -> ProtocolResult<T>
+        where T: Sized
+    {
         self.stream.set_read_timeout(self.timeouts.read)?;
 
         let line = self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
@@ -50,14 +55,16 @@ impl ProtocolConnection {
         command_map.insert(msg, data);
         let command_map = serde_json::Value::Object(command_map);
 
-        let command: Command = serde_json::from_value(command_map)?;
-        Ok(command)
+        // *msg = serde_json::from_value(command_map)?;
+        Ok(serde_json::from_value(command_map)?)
     }
 
-    pub fn send(&mut self, command: &Command) -> Result<(), ProtocolError> {
+    pub fn send<T: Serialize>(&mut self, msg: &T) -> ProtocolResult<()>
+        where T: Sized
+    {
         self.stream.set_write_timeout(self.timeouts.write)?;
 
-        let command_value = serde_json::to_value(command);
+        let command_value = serde_json::to_value(msg);
 
         let mut data = BTreeMap::new();
 

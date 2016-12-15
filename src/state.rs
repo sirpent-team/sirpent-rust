@@ -2,10 +2,10 @@ use uuid::Uuid;
 use std::collections::{HashSet, HashMap};
 use rayon::prelude::*;
 
+use net::*;
 use grid::*;
 use snake::*;
 use player::*;
-use protocol::*;
 
 #[derive(Debug)]
 pub struct State {
@@ -38,24 +38,23 @@ impl State {
                       mut player: Player,
                       mut connection: PlayerConnection,
                       snake: Snake)
-                      -> Result<PlayerName, ProtocolError> {
+                      -> ProtocolResult<PlayerName> {
         // Dedupe player name.
         while self.game.players.contains_key(&player.name) {
             player.name.push('_');
         }
 
         let player_name = player.name.clone();
-        self.game.players.insert(player_name.clone(), player);
-        connection.identified(player_name.clone())?;
-        self.player_conns.insert(player_name.clone(), connection);
-        self.turn.snakes.insert(player_name.clone(), snake);
+        // self.game.players.insert(player_name.clone(), player);
+        // connection.identified(player_name.clone())?;
+        // self.player_conns.insert(player_name.clone(), connection);
+        // self.turn.snakes.insert(player_name.clone(), snake);
 
         Ok(player_name)
     }
 
-    pub fn new_game(&mut self) -> HashMap<PlayerName, Result<(), ProtocolError>> {
-        let mut results: Vec<Result<(), ProtocolError>> =
-            Vec::with_capacity(self.turn.snakes.len());
+    pub fn new_game(&mut self) -> HashMap<PlayerName, ProtocolResult<()>> {
+        let mut results: Vec<ProtocolResult<()>> = Vec::with_capacity(self.turn.snakes.len());
 
         let game_state = self.game.clone();
         self.player_conns

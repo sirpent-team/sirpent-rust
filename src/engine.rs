@@ -2,11 +2,11 @@ use rand::Rng;
 use std::error::Error;
 use std::collections::HashMap;
 
+use net::*;
 use grid::*;
 use state::*;
 use snake::*;
 use player::*;
-use protocol::*;
 
 pub struct Engine<R: Rng> {
     pub rng: Box<R>,
@@ -27,12 +27,12 @@ impl<R: Rng> Engine<R> {
     pub fn add_player(&mut self,
                       player: Player,
                       connection: PlayerConnection)
-                      -> Result<PlayerName, ProtocolError> {
+                      -> ProtocolResult<PlayerName> {
         let new_snake = Snake::new(vec![self.state.game.grid.random_cell(&mut *self.rng)]);
         self.state.add_player(player, connection, new_snake)
     }
 
-    pub fn new_game(&mut self) -> HashMap<PlayerName, Result<(), ProtocolError>> {
+    pub fn new_game(&mut self) -> HashMap<PlayerName, ProtocolResult<()>> {
         self.manage_food();
         self.state.new_game()
     }

@@ -17,55 +17,89 @@ pub static PROTOCOL_VERSION: &'static str = "0.2";
 pub enum Command {
     // Upon connect, the server must send a VERSION message.
     #[serde(rename = "version")]
-    Version { sirpent: String, protocol: String },
-    // The server must then send a SERVER message.
-    #[serde(rename = "welcome")]
-    Welcome {
-        grid: Grid,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        timeout: Option<Duration>,
-    },
+    Version(VersionMsg),
     // The client should decide whether it is compatible with this protocol and server setup.
     // If the client wishes to continue it must send a HELLO message.
     #[serde(rename = "identify")]
-    Identify { player: Player },
-    #[serde(rename = "identified")]
-    Identified { player_name: PlayerName },
+    Identify(IdentifyMsg),
+    // The server must then send a SERVER message.
+    #[serde(rename = "welcome")]
+    Welcome(WelcomeMsg),
     // To begin a new game, the server must send a NEW_GAME message to indicate this.
     #[serde(rename = "new_game")]
-    NewGame { game: GameState },
+    NewGame(NewGameMsg),
     // The server must send a TURN message with the initial state of the Game.
     #[serde(rename = "turn")]
-    Turn { turn: TurnState },
+    Turn(TurnMsg),
     // The client must reply with a MOVE message to indicate their next action.
     // The server must then send a new TURN message to start the next TURN.
     #[serde(rename = "move")]
-    Move { direction: Direction },
-    // The server may kill players who do not reply within a certain time. The server must send a
-    // TIMEDOUT message to such players.
-    #[serde(rename = "timed_out")]
-    TimedOut {},
+    Move(MoveMsg),
     // If a player died during this turn, the server must send a DIED message.
     #[serde(rename = "died")]
-    Died { cause_of_death: CauseOfDeath },
+    Died(DiedMsg),
     // If a player was the only survivor of this turn, the server must send a WON message.
     #[serde(rename = "won")]
-    Won {},
+    Won(WonMsg),
     // A new round now starts. The server may only send further messages to surviving players.
     // The server must send a new TURN message with the result of the previous round.
     // At the conclusion of the game, the server should send a GAME_OVER message to all players.
     #[serde(rename = "game_over")]
-    GameOver {},
+    GameOver(GameOverMsg),
 }
 
-impl Command {
-    pub fn version() -> Command {
-        Command::Version {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VersionMsg {
+    pub sirpent: String,
+    pub protocol: String,
+}
+
+impl VersionMsg {
+    pub fn new() -> VersionMsg {
+        VersionMsg {
             sirpent: env!("CARGO_PKG_VERSION").to_string(),
             protocol: PROTOCOL_VERSION.to_string(),
         }
     }
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IdentifyMsg {
+    pub desired_player_name: PlayerName,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WelcomeMsg {
+    pub player_name: PlayerName,
+    pub grid: Grid,
+    pub timeout: Option<Duration>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NewGameMsg {
+    pub game: GameState,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TurnMsg {
+    pub turn: TurnState,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MoveMsg {
+    pub direction: Direction,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiedMsg {
+    pub cause_of_death: CauseOfDeath,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WonMsg {}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GameOverMsg {}
 
 #[derive(Debug)]
 pub enum ProtocolError {
@@ -82,7 +116,7 @@ pub enum ProtocolError {
     SendToUnknownPlayer,
     RecieveFromUnknownPlayer,
     UnexpectedCommand,
-    WrongCommand { command: Command },
+    WrongCommand(String),
 }
 
 // @TODO: Consider if this is best.
@@ -113,7 +147,7 @@ impl Error for ProtocolError {
             ProtocolError::RecieveFromUnknownPlayer => "Receiving from unknown player_name.",
             ProtocolError::UnexpectedCommand => "Unexpected command read.",
             // @TODO: Really want to include the wrong command in the message usable by clients.
-            ProtocolError::WrongCommand { ref command } => "Wrong command was read.",
+            ProtocolError::WrongCommand(_) => "Wrong command was read.",
         }
     }
 
