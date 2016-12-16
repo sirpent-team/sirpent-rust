@@ -12,8 +12,6 @@ use protocol::*;
 
 static LF: &'static [u8] = b"\n";
 
-pub type ProtocolResult<T> = Result<T, ProtocolError>;
-
 // @TODO: Add Drop to ProtocolConnection that sends QUIT? Potential for deadlock waiting if so?
 pub struct ProtocolConnection {
     pub timeouts: Timeouts,
@@ -60,7 +58,8 @@ impl ProtocolConnection {
     }
 
     pub fn send<T: Serialize>(&mut self, msg: &T) -> ProtocolResult<()>
-        where T: Sized + Into<Command>, Command: From<T>
+        where T: Sized + Into<Command>,
+              Command: From<T>
     {
         self.stream.set_write_timeout(self.timeouts.write)?;
 

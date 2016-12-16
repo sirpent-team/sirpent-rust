@@ -2,6 +2,7 @@ use std::time::Duration;
 use std::fmt::{self, Display, Formatter};
 use std::io;
 use serde_json;
+use serde::{Serialize, Deserialize};
 use std::error::Error;
 
 use grid::*;
@@ -11,88 +12,78 @@ use state::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.2";
 
-// @TODO: Remove empty struct enums. Temporary workaround as custom deserialisation logic in
-// PlayerConnection.read couldn't handle things correctly.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum Command {
-    // Upon connect, the server must send a VERSION message.
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+pub enum MessageType {
     #[serde(rename = "version")]
-    Version(VersionMsg),
-    // The client should decide whether it is compatible with this protocol and server setup.
-    // If the client wishes to continue it must send a HELLO message.
+    Version,
     #[serde(rename = "identify")]
-    Identify(IdentifyMsg),
-    // The server must then send a SERVER message.
+    Identify,
     #[serde(rename = "welcome")]
-    Welcome(WelcomeMsg),
-    // To begin a new game, the server must send a NEW_GAME message to indicate this.
+    Welcome,
     #[serde(rename = "new_game")]
-    NewGame(NewGameMsg),
-    // The server must send a TURN message with the initial state of the Game.
+    NewGame,
     #[serde(rename = "turn")]
-    Turn(TurnMsg),
-    // The client must reply with a MOVE message to indicate their next action.
-    // The server must then send a new TURN message to start the next TURN.
+    Turn,
     #[serde(rename = "move")]
-    Move(MoveMsg),
-    // If a player died during this turn, the server must send a DIED message.
+    Move,
     #[serde(rename = "died")]
-    Died(DiedMsg),
-    // If a player was the only survivor of this turn, the server must send a WON message.
+    Died,
     #[serde(rename = "won")]
-    Won(WonMsg),
-    // A new round now starts. The server may only send further messages to surviving players.
-    // The server must send a new TURN message with the result of the previous round.
-    // At the conclusion of the game, the server should send a GAME_OVER message to all players.
+    Won,
     #[serde(rename = "game_over")]
-    GameOver(GameOverMsg),
+    GameOver,
 }
 
-impl From<VersionMsg> for Command {
-    fn from(msg: VersionMsg) -> Command {
-        Command::Version(msg)
+trait MessageTyped {
+    const MessageType: MessageType;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Message {
+    pub msg_type: MessageType,
+    pub data: serde_json::Value,
+}
+
+impl Message {
+    pub fn new(line: String) -> ProtocolResult<Message> {
+        let line_value: serde_json::Value = serde_json::from_str(&line)?;
+        let obj = command_value.as_object_mut()
+            .ok_or(ProtocolError::MessageReadNotADictionary)?;
+        let msg = obj.remove("msg")
+            .ok_or(ProtocolError::MessageReadMissingMsgField)?
+            .as_str()
+            .ok_or(ProtocolError::MessageReadNonStringMsgField)?
+            .to_string();
+        let msg_type: MessageType = serde_json::from_str(msg)?;
+        let data = obj.remove("data")
+            .ok_or(ProtocolError::MessageReadMissingDataField)?;
+
+        Ok(Message {
+            msg_type: msg_type,
+            data: data
+        })
+    }
+
+    pub fn encode<T: Serialize + MessageTyped>(message_typed: T) -> Message {
+        Message {
+            msg_type: T::MessageType,
+            data: serde_json::to_value(message_typed)
+        }
+    }
+
+    pub fn decode<T: Deserialize + MessageTyped>(&self) -> ProtocolResult<T>
+        where T: Sized
+    {
+        if self.msg_type != T::MessageType {
+            return Err(ProtocolError::WrongCommand);
+        }
+        match serde_json::from_value(self.data) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(From::from(e))
+        }
     }
 }
-impl From<IdentifyMsg> for Command {
-    fn from(msg: IdentifyMsg) -> Command {
-        Command::Identify(msg)
-    }
-}
-impl From<WelcomeMsg> for Command {
-    fn from(msg: WelcomeMsg) -> Command {
-        Command::Welcome(msg)
-    }
-}
-impl From<NewGameMsg> for Command {
-    fn from(msg: NewGameMsg) -> Command {
-        Command::NewGame(msg)
-    }
-}
-impl From<TurnMsg> for Command {
-    fn from(msg: TurnMsg) -> Command {
-        Command::Turn(msg)
-    }
-}
-impl From<MoveMsg> for Command {
-    fn from(msg: MoveMsg) -> Command {
-        Command::Move(msg)
-    }
-}
-impl From<DiedMsg> for Command {
-    fn from(msg: DiedMsg) -> Command {
-        Command::Died(msg)
-    }
-}
-impl From<WonMsg> for Command {
-    fn from(msg: WonMsg) -> Command {
-        Command::Won(msg)
-    }
-}
-impl From<GameOverMsg> for Command {
-    fn from(msg: GameOverMsg) -> Command {
-        Command::GameOver(msg)
-    }
-}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VersionMsg {
@@ -109,10 +100,8 @@ impl VersionMsg {
     }
 }
 
-impl From<Command> for VersionMsg {
-    fn from(cmd: Command) -> VersionMsg {
-        cmd.0
-    }
+impl MessageTyped for VersionMsg {
+    const MessageType: MessageType = MessageType::Version;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -120,10 +109,8 @@ pub struct IdentifyMsg {
     pub desired_player_name: PlayerName,
 }
 
-impl From<Command> for IdentifyMsg {
-    fn from(cmd: Command) -> IdentifyMsg {
-        cmd.0
-    }
+impl MessageTyped for IdentifyMsg {
+    const MessageType: MessageType = MessageType::Identify;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -133,9 +120,17 @@ pub struct WelcomeMsg {
     pub timeout: Option<Duration>,
 }
 
+impl MessageTyped for WelcomeMsg {
+    const MessageType: MessageType = MessageType::Welcome;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NewGameMsg {
     pub game: GameState,
+}
+
+impl MessageTyped for NewGameMsg {
+    const MessageType: MessageType = MessageType::NewGame;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -143,9 +138,17 @@ pub struct TurnMsg {
     pub turn: TurnState,
 }
 
+impl MessageTyped for TurnMsg {
+    const MessageType: MessageType = MessageType::Turn;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MoveMsg {
     pub direction: Direction,
+}
+
+impl MessageTyped for MoveMsg {
+    const MessageType: MessageType = MessageType::Move;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -153,11 +156,23 @@ pub struct DiedMsg {
     pub cause_of_death: CauseOfDeath,
 }
 
+impl MessageTyped for DiedMsg {
+    const MessageType: MessageType = MessageType::Died;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WonMsg {}
 
+impl MessageTyped for WonMsg {
+    const MessageType: MessageType = MessageType::Won;
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GameOverMsg {}
+
+impl MessageTyped for GameOverMsg {
+    const MessageType: MessageType = MessageType::GameOver;
+}
 
 #[derive(Debug)]
 pub enum ProtocolError {
@@ -174,7 +189,7 @@ pub enum ProtocolError {
     SendToUnknownPlayer,
     RecieveFromUnknownPlayer,
     UnexpectedCommand,
-    WrongCommand(String),
+    WrongCommand,
 }
 
 // @TODO: Consider if this is best.
@@ -205,7 +220,7 @@ impl Error for ProtocolError {
             ProtocolError::RecieveFromUnknownPlayer => "Receiving from unknown player_name.",
             ProtocolError::UnexpectedCommand => "Unexpected command read.",
             // @TODO: Really want to include the wrong command in the message usable by clients.
-            ProtocolError::WrongCommand(_) => "Wrong command was read.",
+            ProtocolError::WrongCommand => "Wrong command was read.",
         }
     }
 
@@ -229,3 +244,5 @@ impl From<serde_json::Error> for ProtocolError {
         ProtocolError::Serde(err)
     }
 }
+
+pub type ProtocolResult<T> = Result<T, ProtocolError>;
