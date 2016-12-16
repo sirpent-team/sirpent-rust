@@ -6,6 +6,7 @@ use net::*;
 use grid::*;
 use snake::*;
 use player::*;
+use protocol::*;
 
 #[derive(Debug)]
 pub struct State {

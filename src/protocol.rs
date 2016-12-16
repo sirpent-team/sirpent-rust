@@ -72,7 +72,7 @@ impl PlainMessage {
         }
     }
 
-    pub fn to_typed<T: Deserialize + MessageTyped>(&self) -> ProtocolResult<T>
+    pub fn to_typed<T: Deserialize + MessageTyped>(self) -> ProtocolResult<T>
         where T: Sized
     {
         if self.msg_type != T::MessageType {

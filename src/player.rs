@@ -38,7 +38,7 @@ impl PlayerConnection {
     }
 
     pub fn version(&mut self) -> ProtocolResult<()> {
-        self.conn.send(&VersionMsg::new())
+        self.conn.send(VersionMsg::new())
     }
 
     pub fn identify(&mut self) -> ProtocolResult<PlayerName> {
@@ -51,7 +51,7 @@ impl PlayerConnection {
 
     pub fn welcome(&mut self, player_name: PlayerName, grid: Grid) -> ProtocolResult<()> {
         let read_timeout = self.conn.timeouts.read.clone();
-        self.conn.send(&WelcomeMsg {
+        self.conn.send(WelcomeMsg {
             player_name: player_name,
             grid: grid,
             timeout: read_timeout,
@@ -59,11 +59,11 @@ impl PlayerConnection {
     }
 
     pub fn tell_new_game(&mut self, game_state: GameState) -> ProtocolResult<()> {
-        self.conn.send(&NewGameMsg { game: game_state })
+        self.conn.send(NewGameMsg { game: game_state })
     }
 
     pub fn tell_turn(&mut self, turn_state: TurnState) -> ProtocolResult<()> {
-        self.conn.send(&TurnMsg { turn: turn_state })
+        self.conn.send(TurnMsg { turn: turn_state })
     }
 
     pub fn ask_next_move(&mut self) -> ProtocolResult<Direction> {
@@ -75,11 +75,11 @@ impl PlayerConnection {
     }
 
     pub fn tell_death(&mut self, cause_of_death: CauseOfDeath) -> ProtocolResult<()> {
-        self.conn.send(&DiedMsg { cause_of_death: cause_of_death })
+        self.conn.send(DiedMsg { cause_of_death: cause_of_death })
     }
 
-    pub fn tell_won(&mut self, cause_of_death: CauseOfDeath) -> ProtocolResult<()> {
-        self.conn.send(&WonMsg {})
+    pub fn tell_won(&mut self) -> ProtocolResult<()> {
+        self.conn.send(WonMsg {})
     }
 }
 

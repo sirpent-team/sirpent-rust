@@ -2,8 +2,6 @@ use std::net::{ToSocketAddrs, SocketAddr, TcpStream, TcpListener};
 use std::time::Duration;
 use std::marker::Send;
 use std::io::{self, Write, BufReader, BufWriter, BufRead, Lines};
-use std::result::Result;
-use std::collections::BTreeMap;
 use serde_json;
 use std::fmt;
 use serde::{Serialize, Deserialize};
@@ -50,10 +48,10 @@ impl ProtocolConnection {
         }
     }
 
-    pub fn send<T: Serialize + MessageTyped>(&mut self, message: &T) -> ProtocolResult<()>
+    pub fn send<T: Serialize + MessageTyped>(&mut self, message: T) -> ProtocolResult<()>
         where T: Sized
     {
-        self.send_plain(&PlainMessage::from_typed(*message))
+        self.send_plain(&PlainMessage::from_typed(message))
     }
 
     pub fn send_plain(&mut self, plain_msg: &PlainMessage) -> ProtocolResult<()> {

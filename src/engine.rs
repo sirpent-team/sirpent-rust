@@ -7,6 +7,7 @@ use grid::*;
 use state::*;
 use snake::*;
 use player::*;
+use protocol::*;
 
 pub struct Engine<R: Rng> {
     pub rng: Box<R>,
