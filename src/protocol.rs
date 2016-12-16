@@ -46,25 +46,6 @@ pub struct PlainMessage {
 }
 
 impl PlainMessage {
-    // pub fn from_string(line: String) -> ProtocolResult<Message> {
-    // let line_value: serde_json::Value = serde_json::from_str(&line)?;
-    // let obj = line_value.as_object_mut()
-    // .ok_or(ProtocolError::MessageReadNotADictionary)?;
-    // let msg = obj.remove("msg")
-    // .ok_or(ProtocolError::MessageReadMissingMsgField)?
-    // .as_str()
-    // .ok_or(ProtocolError::MessageReadNonStringMsgField)?
-    // .to_string();
-    // let msg_type: MessageType = serde_json::from_str(msg)?;
-    // let data = obj.remove("data")
-    // .ok_or(ProtocolError::MessageReadMissingDataField)?;
-    //
-    // Ok(Message {
-    // msg_type: msg_type,
-    // data: data
-    // })
-    // }
-
     pub fn from_typed<T: Serialize + MessageTyped>(message_typed: T) -> PlainMessage {
         PlainMessage {
             msg_type: T::MESSAGE_TYPE,
@@ -247,3 +228,16 @@ impl From<serde_json::Error> for ProtocolError {
 }
 
 pub type ProtocolResult<T> = Result<T, ProtocolError>;
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_convert_io_errors_to_protocol_errors() {
+        let ioerr = io::Error::new(io::ErrorKind::Other, "oh no!");
+        let exp_protocol_error = ProtocolError::Io(ioerr);
+        assert_eq!(From::from(ioerr), exp_protocol_error);
+    }
+}

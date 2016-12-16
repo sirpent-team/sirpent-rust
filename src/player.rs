@@ -108,26 +108,31 @@ enum PlayerEvent {
 
 impl PlayerState {
     pub fn next(self, connection: &mut PlayerConnection, event: PlayerEvent) -> PlayerState {
-        let a: ProtocolResult<PlayerState> = match (self, event) {
-                (PlayerState::New, PlayerEvent::Versioning) => {
-                    connection.version().and(Ok(PlayerState::Version))
-                }
-                (PlayerState::Version, PlayerEvent::Identifying) => {
-                    connection.identify().and_then(|desired_player_name| {
-                        Ok(PlayerState::Identify { desired_player_name: desired_player_name })
-                    })
-                }
-                (PlayerState::Identify { ref desired_player_name },
-                 PlayerEvent::Welcoming { ref player_name, grid, timeout }) => {
-                    connection.welcome(player_name.clone(), grid)
-                        .and(Ok(PlayerState::Ready))
-                }
-                (PlayerState::Ready, PlayerEvent::GameBegins) => Ok(PlayerState::Playing),
-                (PlayerState::Playing, PlayerEvent::GameEnds) => Ok(PlayerState::Ready),
-                (PlayerState::Errored(e), _) => Err(e),
-                _ => unimplemented!(),
+        self.next_internal(connection, event).unwrap_or_else(|e| PlayerState::Errored(e))
+    }
+
+    fn next_internal(self,
+                     connection: &mut PlayerConnection,
+                     event: PlayerEvent)
+                     -> ProtocolResult<PlayerState> {
+        match (self, event) {
+            (PlayerState::New, PlayerEvent::Versioning) => {
+                connection.version()?;
+                Ok(PlayerState::Version)
             }
-            .or_else(|e| Ok(PlayerState::Errored(e)));
-        a.unwrap()
+            (PlayerState::Version, PlayerEvent::Identifying) => {
+                let desired_player_name = connection.identify()?;
+                Ok(PlayerState::Identify { desired_player_name: desired_player_name })
+            }
+            (PlayerState::Identify { ref desired_player_name },
+             PlayerEvent::Welcoming { ref player_name, grid, timeout }) => {
+                connection.welcome(player_name.clone(), grid)?;
+                Ok(PlayerState::Ready)
+            }
+            (PlayerState::Ready, PlayerEvent::GameBegins) => Ok(PlayerState::Playing),
+            (PlayerState::Playing, PlayerEvent::GameEnds) => Ok(PlayerState::Ready),
+            (PlayerState::Errored(e), _) => Err(e),
+            _ => unimplemented!(),
+        }
     }
 }

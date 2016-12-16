@@ -58,6 +58,8 @@ impl ProtocolConnection {
         self.stream.set_write_timeout(self.timeouts.write)?;
 
         self.writer.write_all(serde_json::to_string(&plain_msg)?.as_bytes())?;
+        self.writer.write_all(LF)?;
+        self.writer.flush()?;
         Ok(())
     }
 }
