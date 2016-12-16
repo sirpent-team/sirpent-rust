@@ -34,44 +34,45 @@ pub enum MessageType {
     GameOver,
 }
 
-trait MessageTyped {
+pub trait MessageTyped {
     const MessageType: MessageType;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
+    #[serde(rename = "msg")]
     pub msg_type: MessageType,
     pub data: serde_json::Value,
 }
 
 impl Message {
-    pub fn new(line: String) -> ProtocolResult<Message> {
-        let line_value: serde_json::Value = serde_json::from_str(&line)?;
-        let obj = command_value.as_object_mut()
-            .ok_or(ProtocolError::MessageReadNotADictionary)?;
-        let msg = obj.remove("msg")
-            .ok_or(ProtocolError::MessageReadMissingMsgField)?
-            .as_str()
-            .ok_or(ProtocolError::MessageReadNonStringMsgField)?
-            .to_string();
-        let msg_type: MessageType = serde_json::from_str(msg)?;
-        let data = obj.remove("data")
-            .ok_or(ProtocolError::MessageReadMissingDataField)?;
+    // pub fn from_string(line: String) -> ProtocolResult<Message> {
+    // let line_value: serde_json::Value = serde_json::from_str(&line)?;
+    // let obj = line_value.as_object_mut()
+    // .ok_or(ProtocolError::MessageReadNotADictionary)?;
+    // let msg = obj.remove("msg")
+    // .ok_or(ProtocolError::MessageReadMissingMsgField)?
+    // .as_str()
+    // .ok_or(ProtocolError::MessageReadNonStringMsgField)?
+    // .to_string();
+    // let msg_type: MessageType = serde_json::from_str(msg)?;
+    // let data = obj.remove("data")
+    // .ok_or(ProtocolError::MessageReadMissingDataField)?;
+    //
+    // Ok(Message {
+    // msg_type: msg_type,
+    // data: data
+    // })
+    // }
 
-        Ok(Message {
-            msg_type: msg_type,
-            data: data
-        })
-    }
-
-    pub fn encode<T: Serialize + MessageTyped>(message_typed: T) -> Message {
+    pub fn from_message_typed<T: Serialize + MessageTyped>(message_typed: T) -> Message {
         Message {
             msg_type: T::MessageType,
-            data: serde_json::to_value(message_typed)
+            data: serde_json::to_value(message_typed),
         }
     }
 
-    pub fn decode<T: Deserialize + MessageTyped>(&self) -> ProtocolResult<T>
+    pub fn to_message_typed<T: Deserialize + MessageTyped>(&self) -> ProtocolResult<T>
         where T: Sized
     {
         if self.msg_type != T::MessageType {
@@ -79,7 +80,7 @@ impl Message {
         }
         match serde_json::from_value(self.data) {
             Ok(v) => Ok(v),
-            Err(e) => Err(From::from(e))
+            Err(e) => Err(From::from(e)),
         }
     }
 }

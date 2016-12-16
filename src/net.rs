@@ -30,70 +30,25 @@ impl ProtocolConnection {
         })
     }
 
-    pub fn recieve<T: Deserialize>(&mut self) -> ProtocolResult<T>
-        where T: Sized + Into<Command> + From<Command>
+    pub fn recieve<T: Deserialize + MessageTyped>(&mut self) -> ProtocolResult<Message>
+        where T: Sized
     {
         self.stream.set_read_timeout(self.timeouts.read)?;
 
         let line = self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
         println!("{:?}", line);
-        let mut command_value: serde_json::Value = serde_json::from_str(&line)?;
-
-        let obj = command_value.as_object_mut()
-            .ok_or(ProtocolError::MessageReadNotADictionary)?;
-        let msg = obj.remove("msg")
-            .ok_or(ProtocolError::MessageReadMissingMsgField)?
-            .as_str()
-            .ok_or(ProtocolError::MessageReadNonStringMsgField)?
-            .to_string();
-        let data = obj.remove("data")
-            .ok_or(ProtocolError::MessageReadMissingDataField)?;
-
-        let mut command_map: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-        command_map.insert(msg, data);
-        let command_map = serde_json::Value::Object(command_map);
-
-        let command: Command = serde_json::from_value(command_map)?;
-        Ok(Into::into(command))
+        match serde_json::from_str(&line) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(From::from(e)),
+        }
     }
 
-    pub fn send<T: Serialize>(&mut self, msg: &T) -> ProtocolResult<()>
-        where T: Sized + Into<Command>,
-              Command: From<T>
+    pub fn send<T: Serialize + MessageTyped>(&mut self, message: &Message) -> ProtocolResult<()>
+        where T: Sized
     {
         self.stream.set_write_timeout(self.timeouts.write)?;
 
-        let command: Command = From::from(*msg);
-        let command_value = serde_json::to_value(command);
-
-        let mut data = BTreeMap::new();
-
-        let msg = match command_value {
-            serde_json::Value::Object(command_map) => {
-                let (msg_, data_) = command_map.iter()
-                    .next()
-                    .ok_or(ProtocolError::CommandWasEmpty)?;
-                data.append(data_.clone()
-                    .as_object_mut()
-                    .ok_or(ProtocolError::CommandDataWasNotObject)?);
-                msg_.clone()
-            }
-            serde_json::Value::String(command_msg) => command_msg,
-            _ => return Err(ProtocolError::CommandSerialiseNotObjectNotString),
-        };
-
-        // Using a Map here was putting data before msg in output JSON. For developers it is easier to
-        // keep things the sane way around even though for clients it probably won't be a big deal unless
-        // our payloads got big. Thus an order-preserving struct is used.
-        let message = Message {
-            msg: msg,
-            data: serde_json::Value::Object(data),
-        };
-
-        // serde_json:: to_writer seems to never return when using a BufWriter<TcpStream>.
         self.writer.write_all(serde_json::to_string(&message)?.as_bytes())?;
-        self.writer.write_all(LF)?;
-        self.writer.flush()?;
         Ok(())
     }
 }
@@ -102,12 +57,6 @@ impl fmt::Debug for ProtocolConnection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ProtocolConnection {{ ??? }}")
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct Message {
-    msg: String,
-    data: serde_json::Value,
 }
 
 /// A settings struct containing a set of timeouts which can be applied to a server.

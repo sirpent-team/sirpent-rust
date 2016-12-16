@@ -38,11 +38,11 @@ impl PlayerConnection {
     }
 
     pub fn version(&mut self) -> ProtocolResult<()> {
-        self.conn.send(&VersionMsg::new())
+        self.conn.send(&Message::from_message_typed(VersionMsg::new()))
     }
 
     pub fn identify(&mut self) -> ProtocolResult<PlayerName> {
-        let ident: ProtocolResult<IdentifyMsg> = self.conn.recieve();
+        let ident: ProtocolResult<IdentifyMsg> = self.conn.recieve()?.to_message_typed();
         match ident {
             Ok(IdentifyMsg { desired_player_name }) => Ok(desired_player_name),
             Err(e) => Err(e),
@@ -51,23 +51,23 @@ impl PlayerConnection {
 
     pub fn welcome(&mut self, player_name: PlayerName, grid: Grid) -> ProtocolResult<()> {
         let read_timeout = self.conn.timeouts.read.clone();
-        self.conn.send(&WelcomeMsg {
+        self.conn.send(&Message::from_message_typed(WelcomeMsg {
             player_name: player_name,
             grid: grid,
             timeout: read_timeout,
-        })
+        }))
     }
 
     pub fn tell_new_game(&mut self, game_state: GameState) -> ProtocolResult<()> {
-        self.conn.send(&NewGameMsg { game: game_state })
+        self.conn.send(&Message::from_message_typed(NewGameMsg { game: game_state }))
     }
 
     pub fn tell_turn(&mut self, turn_state: TurnState) -> ProtocolResult<()> {
-        self.conn.send(&TurnMsg { turn: turn_state })
+        self.conn.send(&Message::from_message_typed(TurnMsg { turn: turn_state }))
     }
 
     pub fn ask_next_move(&mut self) -> ProtocolResult<Direction> {
-        let move_: ProtocolResult<MoveMsg> = self.conn.recieve();
+        let move_: ProtocolResult<MoveMsg> = self.conn.recieve()?.to_message_typed();
         match move_ {
             Ok(MoveMsg { direction }) => Ok(direction),
             Err(e) => Err(e),
@@ -75,11 +75,11 @@ impl PlayerConnection {
     }
 
     pub fn tell_death(&mut self, cause_of_death: CauseOfDeath) -> ProtocolResult<()> {
-        self.conn.send(&DiedMsg { cause_of_death: cause_of_death })
+        self.conn.send(&Message::from_message_typed(DiedMsg { cause_of_death: cause_of_death }))
     }
 
     pub fn tell_won(&mut self, cause_of_death: CauseOfDeath) -> ProtocolResult<()> {
-        self.conn.send(&WonMsg {})
+        self.conn.send(&Message::from_message_typed(WonMsg {}))
     }
 }
 
