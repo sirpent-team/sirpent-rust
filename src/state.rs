@@ -2,7 +2,6 @@ use uuid::Uuid;
 use std::collections::{HashSet, HashMap};
 use rayon::prelude::*;
 
-use net::*;
 use grid::*;
 use snake::*;
 use player::*;

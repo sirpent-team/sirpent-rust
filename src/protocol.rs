@@ -35,7 +35,7 @@ pub enum MessageType {
 }
 
 pub trait MessageTyped {
-    const MessageType: MessageType;
+    const MESSAGE_TYPE: MessageType;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -67,7 +67,7 @@ impl PlainMessage {
 
     pub fn from_typed<T: Serialize + MessageTyped>(message_typed: T) -> PlainMessage {
         PlainMessage {
-            msg_type: T::MessageType,
+            msg_type: T::MESSAGE_TYPE,
             data: serde_json::to_value(message_typed),
         }
     }
@@ -75,7 +75,7 @@ impl PlainMessage {
     pub fn to_typed<T: Deserialize + MessageTyped>(self) -> ProtocolResult<T>
         where T: Sized
     {
-        if self.msg_type != T::MessageType {
+        if self.msg_type != T::MESSAGE_TYPE {
             return Err(ProtocolError::WrongCommand);
         }
         match serde_json::from_value(self.data) {
@@ -102,7 +102,7 @@ impl VersionMsg {
 }
 
 impl MessageTyped for VersionMsg {
-    const MessageType: MessageType = MessageType::Version;
+    const MESSAGE_TYPE: MessageType = MessageType::Version;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ pub struct IdentifyMsg {
 }
 
 impl MessageTyped for IdentifyMsg {
-    const MessageType: MessageType = MessageType::Identify;
+    const MESSAGE_TYPE: MessageType = MessageType::Identify;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,7 +122,7 @@ pub struct WelcomeMsg {
 }
 
 impl MessageTyped for WelcomeMsg {
-    const MessageType: MessageType = MessageType::Welcome;
+    const MESSAGE_TYPE: MessageType = MessageType::Welcome;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -131,7 +131,7 @@ pub struct NewGameMsg {
 }
 
 impl MessageTyped for NewGameMsg {
-    const MessageType: MessageType = MessageType::NewGame;
+    const MESSAGE_TYPE: MessageType = MessageType::NewGame;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -140,7 +140,7 @@ pub struct TurnMsg {
 }
 
 impl MessageTyped for TurnMsg {
-    const MessageType: MessageType = MessageType::Turn;
+    const MESSAGE_TYPE: MessageType = MessageType::Turn;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -149,7 +149,7 @@ pub struct MoveMsg {
 }
 
 impl MessageTyped for MoveMsg {
-    const MessageType: MessageType = MessageType::Move;
+    const MESSAGE_TYPE: MessageType = MessageType::Move;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -158,21 +158,21 @@ pub struct DiedMsg {
 }
 
 impl MessageTyped for DiedMsg {
-    const MessageType: MessageType = MessageType::Died;
+    const MESSAGE_TYPE: MessageType = MessageType::Died;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WonMsg {}
 
 impl MessageTyped for WonMsg {
-    const MessageType: MessageType = MessageType::Won;
+    const MESSAGE_TYPE: MessageType = MessageType::Won;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GameOverMsg {}
 
 impl MessageTyped for GameOverMsg {
-    const MessageType: MessageType = MessageType::GameOver;
+    const MESSAGE_TYPE: MessageType = MessageType::GameOver;
 }
 
 #[derive(Debug)]

@@ -2,7 +2,6 @@ use rand::Rng;
 use std::error::Error;
 use std::collections::HashMap;
 
-use net::*;
 use grid::*;
 use state::*;
 use snake::*;
