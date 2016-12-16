@@ -30,9 +30,16 @@ impl ProtocolConnection {
         })
     }
 
-    pub fn recieve<T: Deserialize + MessageTyped>(&mut self) -> ProtocolResult<Message>
+    pub fn recieve<T: Deserialize + MessageTyped>(&mut self) -> ProtocolResult<T>
         where T: Sized
     {
+        match self.recieve_plain() {
+            Ok(plain_msg) => plain_msg.to_typed(),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn recieve_plain(&mut self) -> ProtocolResult<PlainMessage> {
         self.stream.set_read_timeout(self.timeouts.read)?;
 
         let line = self.reader.next().ok_or(ProtocolError::NothingReadFromStream)??;
@@ -43,12 +50,16 @@ impl ProtocolConnection {
         }
     }
 
-    pub fn send<T: Serialize + MessageTyped>(&mut self, message: &Message) -> ProtocolResult<()>
+    pub fn send<T: Serialize + MessageTyped>(&mut self, message: &T) -> ProtocolResult<()>
         where T: Sized
     {
+        self.send_plain(&PlainMessage::from_typed(*message))
+    }
+
+    pub fn send_plain(&mut self, plain_msg: &PlainMessage) -> ProtocolResult<()> {
         self.stream.set_write_timeout(self.timeouts.write)?;
 
-        self.writer.write_all(serde_json::to_string(&message)?.as_bytes())?;
+        self.writer.write_all(serde_json::to_string(&plain_msg)?.as_bytes())?;
         Ok(())
     }
 }

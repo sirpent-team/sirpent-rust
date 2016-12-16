@@ -39,13 +39,13 @@ pub trait MessageTyped {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Message {
+pub struct PlainMessage {
     #[serde(rename = "msg")]
     pub msg_type: MessageType,
     pub data: serde_json::Value,
 }
 
-impl Message {
+impl PlainMessage {
     // pub fn from_string(line: String) -> ProtocolResult<Message> {
     // let line_value: serde_json::Value = serde_json::from_str(&line)?;
     // let obj = line_value.as_object_mut()
@@ -65,14 +65,14 @@ impl Message {
     // })
     // }
 
-    pub fn from_message_typed<T: Serialize + MessageTyped>(message_typed: T) -> Message {
-        Message {
+    pub fn from_typed<T: Serialize + MessageTyped>(message_typed: T) -> PlainMessage {
+        PlainMessage {
             msg_type: T::MessageType,
             data: serde_json::to_value(message_typed),
         }
     }
 
-    pub fn to_message_typed<T: Deserialize + MessageTyped>(&self) -> ProtocolResult<T>
+    pub fn to_typed<T: Deserialize + MessageTyped>(&self) -> ProtocolResult<T>
         where T: Sized
     {
         if self.msg_type != T::MessageType {
