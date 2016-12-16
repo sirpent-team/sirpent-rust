@@ -33,7 +33,7 @@ impl ProtocolConnection {
     }
 
     pub fn recieve<T: Deserialize>(&mut self) -> ProtocolResult<T>
-        where T: Sized
+        where T: Sized + Into<Command> + From<Command>
     {
         self.stream.set_read_timeout(self.timeouts.read)?;
 
@@ -55,16 +55,17 @@ impl ProtocolConnection {
         command_map.insert(msg, data);
         let command_map = serde_json::Value::Object(command_map);
 
-        // *msg = serde_json::from_value(command_map)?;
-        Ok(serde_json::from_value(command_map)?)
+        let command: Command = serde_json::from_value(command_map)?;
+        Ok(Into::into(command))
     }
 
     pub fn send<T: Serialize>(&mut self, msg: &T) -> ProtocolResult<()>
-        where T: Sized
+        where T: Sized + Into<Command>, Command: From<T>
     {
         self.stream.set_write_timeout(self.timeouts.write)?;
 
-        let command_value = serde_json::to_value(msg);
+        let command: Command = From::from(*msg);
+        let command_value = serde_json::to_value(command);
 
         let mut data = BTreeMap::new();
 

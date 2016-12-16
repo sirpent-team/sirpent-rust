@@ -48,6 +48,52 @@ pub enum Command {
     GameOver(GameOverMsg),
 }
 
+impl From<VersionMsg> for Command {
+    fn from(msg: VersionMsg) -> Command {
+        Command::Version(msg)
+    }
+}
+impl From<IdentifyMsg> for Command {
+    fn from(msg: IdentifyMsg) -> Command {
+        Command::Identify(msg)
+    }
+}
+impl From<WelcomeMsg> for Command {
+    fn from(msg: WelcomeMsg) -> Command {
+        Command::Welcome(msg)
+    }
+}
+impl From<NewGameMsg> for Command {
+    fn from(msg: NewGameMsg) -> Command {
+        Command::NewGame(msg)
+    }
+}
+impl From<TurnMsg> for Command {
+    fn from(msg: TurnMsg) -> Command {
+        Command::Turn(msg)
+    }
+}
+impl From<MoveMsg> for Command {
+    fn from(msg: MoveMsg) -> Command {
+        Command::Move(msg)
+    }
+}
+impl From<DiedMsg> for Command {
+    fn from(msg: DiedMsg) -> Command {
+        Command::Died(msg)
+    }
+}
+impl From<WonMsg> for Command {
+    fn from(msg: WonMsg) -> Command {
+        Command::Won(msg)
+    }
+}
+impl From<GameOverMsg> for Command {
+    fn from(msg: GameOverMsg) -> Command {
+        Command::GameOver(msg)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VersionMsg {
     pub sirpent: String,
@@ -63,9 +109,21 @@ impl VersionMsg {
     }
 }
 
+impl From<Command> for VersionMsg {
+    fn from(cmd: Command) -> VersionMsg {
+        cmd.0
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IdentifyMsg {
     pub desired_player_name: PlayerName,
+}
+
+impl From<Command> for IdentifyMsg {
+    fn from(cmd: Command) -> IdentifyMsg {
+        cmd.0
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
