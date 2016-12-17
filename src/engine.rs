@@ -154,7 +154,9 @@ impl<R: Rng> Engine<R> {
     fn remove_snakes(&mut self) {
         // N.B. At one point we .drain()ed the dead_snakes Set. This was removed so it
         // can be used to track which players were killed.
-        for (player_name, _) in self.new_turn.casualties.iter() {
+        for (player_name, &(ref cause_of_death, _)) in self.new_turn.casualties.iter() {
+            self.state.kill_player(player_name.clone(), cause_of_death.clone());
+
             // Kill snake if not already killed, and drop food at non-head segments within the grid.
             // @TODO: This code is much cleaner than the last draft but still lots goes on here.
             if let Some(dead_snake) = self.new_turn.snakes.remove(player_name) {

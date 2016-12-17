@@ -112,6 +112,15 @@ impl State {
         moves
     }
 
+    pub fn kill_player(&mut self, player_name: PlayerName, cause_of_death: CauseOfDeath) {
+        self.game.players.get_mut(&player_name).unwrap().cause_of_death =
+            Some(cause_of_death.clone());
+        self.player_agents
+            .get_mut(&player_name)
+            .unwrap()
+            .next(PlayerEvent::Death { cause_of_death: cause_of_death });
+    }
+
     pub fn living_players(&self) -> HashMap<PlayerName, (Player, Snake)> {
         self.turn
             .snakes

@@ -36,7 +36,7 @@ pub fn client_detect_vector() {
         .expect("Sending Identify.");
 
     let welcome_msg: ProtocolResult<WelcomeMessage> = protocol_connection.recieve();
-    let (player_name, grid, timeout) = match welcome_msg {
+    let (_, grid, _) = match welcome_msg {
         Ok(WelcomeMessage { player_name, grid, timeout }) => {
             println!("{:?}",
                      WelcomeMessage {

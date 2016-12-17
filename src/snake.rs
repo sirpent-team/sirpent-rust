@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use grid::*;
 use player::*;
 use protocol::*;
@@ -69,7 +67,7 @@ pub enum CauseOfDeath {
 
 impl From<ProtocolError> for CauseOfDeath {
     fn from(err: ProtocolError) -> CauseOfDeath {
-        CauseOfDeath::NoMoveMade(err.description().to_string())
+        CauseOfDeath::NoMoveMade(format!("{}", err))
     }
 }
 
