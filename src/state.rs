@@ -24,17 +24,24 @@ impl State {
         }
     }
 
-    pub fn add_player(&mut self,
-                      connection: PlayerConnection,
-                      snake: Snake)
-                      -> ProtocolResult<PlayerName> {
+    pub fn add_players(&mut self, mut connections: Vec<PlayerConnection>) -> Vec<PlayerName> {
+        // Slight rearrangement is to work with private add_player.
+        let add_player = Self::add_player;
+        connections.drain(..)
+            .map(|connection| add_player(self, connection))
+            .filter(|res_name| res_name.is_ok())
+            .map(|res_name| res_name.unwrap())
+            .collect()
+    }
+
+    fn add_player(&mut self, connection: PlayerConnection) -> ProtocolResult<PlayerName> {
         // Get desired name of this player.
         let mut player_agent = PlayerAgent::new(connection);
         player_agent.next(PlayerEvent::Versioning);
         let desired_player_name = match player_agent.next(PlayerEvent::Identifying) {
             Some(PlayerState::Identify { ref desired_player_name }) => desired_player_name.clone(),
             None => return Err(player_agent.state.unwrap_err()),
-            _ => unreachable!()
+            _ => unreachable!(),
         };
 
         // Find the final name of this player by deduping.
@@ -47,26 +54,29 @@ impl State {
         // Welcome the player.
         player_agent.next(PlayerEvent::Welcoming {
             player_name: player_name.clone(),
-            grid: self.game.grid
+            grid: self.game.grid,
         });
 
         // Check player connection is ready to start games.
         match player_agent.state {
-            Ok(PlayerState::Ready) => {},
+            Ok(PlayerState::Ready) => {}
             Ok(_) => unreachable!(),
-            Err(e) => return Err(e)
+            Err(e) => return Err(e),
         }
 
-        // Register player agent, player data and player snake.
+        // Register player agent and player data.
         self.player_agents.insert(player_name.clone(), player_agent);
         self.game.players.insert(player_name.clone(), player);
-        self.turn.snakes.insert(player_name.clone(), snake);
 
         // Return the final player name.
         Ok(player_name)
     }
 
-    pub fn new_game(&mut self) {
+    pub fn new_game(&mut self, mut snakes: HashMap<PlayerName, Snake>) {
+        for (player_name, snake) in snakes.drain() {
+            self.turn.snakes.insert(player_name, snake);
+        }
+
         let game = self.game.clone();
         self.player_agents
             .par_iter_mut()

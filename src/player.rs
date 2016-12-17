@@ -183,7 +183,7 @@ impl PlayerAgent {
     pub fn new(connection: PlayerConnection) -> PlayerAgent {
         PlayerAgent {
             state: Ok(PlayerState::New),
-            connection: connection
+            connection: connection,
         }
     }
 
@@ -194,7 +194,7 @@ impl PlayerAgent {
         }
         match self.state.as_mut() {
             Ok(v) => Some(v.clone()),
-            Err(_) => None
+            Err(_) => None,
         }
     }
 }

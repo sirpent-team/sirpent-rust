@@ -5,7 +5,6 @@ use grid::*;
 use state::*;
 use snake::*;
 use player::*;
-use protocol::*;
 
 pub struct Engine<R: Rng> {
     pub rng: Box<R>,
@@ -23,16 +22,17 @@ impl<R: Rng> Engine<R> {
         }
     }
 
-    pub fn add_player(&mut self,
-                      connection: PlayerConnection)
-                      -> ProtocolResult<PlayerName> {
-        let new_snake = Snake::new(vec![self.state.game.grid.random_cell(&mut *self.rng)]);
-        self.state.add_player(connection, new_snake)
-    }
+    pub fn new_game(&mut self, potential_players: Vec<PlayerConnection>) {
+        let living_player_names = self.state.add_players(potential_players);
+        let snakes: HashMap<PlayerName, Snake> = living_player_names.iter()
+            .map(|player_name| {
+                (player_name.clone(),
+                 Snake::new(vec![self.state.game.grid.random_cell(&mut *self.rng)]))
+            })
+            .collect();
 
-    pub fn new_game(&mut self) {
         self.manage_food();
-        self.state.new_game();
+        self.state.new_game(snakes);
     }
 
     pub fn concluded(&mut self) -> Option<HashMap<PlayerName, (Player, Snake)>> {
