@@ -4,7 +4,6 @@ use std::marker::Send;
 use std::io::{self, Write, BufReader, BufWriter, BufRead, Lines};
 use serde_json;
 use std::fmt;
-use serde::{Serialize, Deserialize};
 
 use protocol::*;
 
@@ -28,9 +27,7 @@ impl ProtocolConnection {
         })
     }
 
-    pub fn recieve<T: Deserialize + MessageTyped>(&mut self) -> ProtocolResult<T>
-        where T: Sized
-    {
+    pub fn recieve<T: TypedMessage>(&mut self) -> ProtocolResult<T> {
         match self.recieve_plain() {
             Ok(plain_msg) => plain_msg.to_typed(),
             Err(e) => Err(e),
@@ -48,9 +45,7 @@ impl ProtocolConnection {
         }
     }
 
-    pub fn send<T: Serialize + MessageTyped>(&mut self, message: T) -> ProtocolResult<()>
-        where T: Sized
-    {
+    pub fn send<T: TypedMessage>(&mut self, message: T) -> ProtocolResult<()> {
         self.send_plain(&PlainMessage::from_typed(message))
     }
 

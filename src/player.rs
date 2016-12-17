@@ -38,20 +38,20 @@ impl PlayerConnection {
     }
 
     pub fn version(&mut self) -> ProtocolResult<()> {
-        self.conn.send(VersionMsg::new())
+        self.conn.send(VersionMessage::new())
     }
 
     pub fn identify(&mut self) -> ProtocolResult<PlayerName> {
-        let ident: ProtocolResult<IdentifyMsg> = self.conn.recieve();
+        let ident: ProtocolResult<IdentifyMessage> = self.conn.recieve();
         match ident {
-            Ok(IdentifyMsg { desired_player_name }) => Ok(desired_player_name),
+            Ok(IdentifyMessage { desired_player_name }) => Ok(desired_player_name),
             Err(e) => Err(e),
         }
     }
 
     pub fn welcome(&mut self, player_name: PlayerName, grid: Grid) -> ProtocolResult<()> {
         let read_timeout = self.conn.timeouts.read.clone();
-        self.conn.send(WelcomeMsg {
+        self.conn.send(WelcomeMessage {
             player_name: player_name,
             grid: grid,
             timeout: read_timeout,
@@ -59,27 +59,27 @@ impl PlayerConnection {
     }
 
     pub fn tell_new_game(&mut self, game_state: GameState) -> ProtocolResult<()> {
-        self.conn.send(NewGameMsg { game: game_state })
+        self.conn.send(NewGameMessage { game: game_state })
     }
 
     pub fn tell_turn(&mut self, turn_state: TurnState) -> ProtocolResult<()> {
-        self.conn.send(TurnMsg { turn: turn_state })
+        self.conn.send(TurnMessage { turn: turn_state })
     }
 
     pub fn ask_next_move(&mut self) -> ProtocolResult<Direction> {
-        let move_: ProtocolResult<MoveMsg> = self.conn.recieve();
+        let move_: ProtocolResult<MoveMessage> = self.conn.recieve();
         match move_ {
-            Ok(MoveMsg { direction }) => Ok(direction),
+            Ok(MoveMessage { direction }) => Ok(direction),
             Err(e) => Err(e),
         }
     }
 
     pub fn tell_death(&mut self, cause_of_death: CauseOfDeath) -> ProtocolResult<()> {
-        self.conn.send(DiedMsg { cause_of_death: cause_of_death })
+        self.conn.send(DiedMessage { cause_of_death: cause_of_death })
     }
 
     pub fn tell_won(&mut self) -> ProtocolResult<()> {
-        self.conn.send(WonMsg {})
+        self.conn.send(WonMessage {})
     }
 }
 
@@ -90,6 +90,8 @@ enum PlayerState {
     Identify { desired_player_name: PlayerName },
     Ready,
     Playing,
+    Turning,
+    Moving { direction: Direction },
     Errored(ProtocolError),
 }
 
@@ -102,7 +104,9 @@ enum PlayerEvent {
         grid: Grid,
         timeout: Option<Duration>,
     },
-    GameBegins,
+    GameBegins { game: GameState },
+    NewTurn { turn: TurnState },
+    Move,
     GameEnds,
 }
 

@@ -1,10 +1,6 @@
 extern crate ansi_term;
 extern crate sirpent;
 extern crate rand;
-extern crate uuid;
-#[macro_use(chan_select)]
-extern crate chan;
-extern crate rayon;
 
 use ansi_term::Colour::*;
 use std::thread;
@@ -27,8 +23,8 @@ fn main() {
     let mut cell_counts = HashMap::new();
 
     for _ in 0..(0xFFFFFFF as usize) {
-        let osrng = OsRng::new().unwrap();
-        let random_cell = grid.random_cell(osrng);
+        let mut osrng = OsRng::new().unwrap();
+        let random_cell = grid.random_cell(&mut osrng);
         let cell_count = cell_counts.entry(random_cell).or_insert(0);
         *cell_count += 1;
     }

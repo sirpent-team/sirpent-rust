@@ -17,20 +17,9 @@ pub struct State {
 impl State {
     pub fn new(grid: Grid) -> State {
         State {
-            game: GameState {
-                uuid: Uuid::new_v4(),
-                grid: grid,
-                players: HashMap::new(),
-            },
+            game: GameState::new(grid),
             player_conns: HashMap::new(),
-            turn: TurnState {
-                turn_number: 0,
-                food: HashSet::new(),
-                eaten: HashMap::new(),
-                snakes: HashMap::new(),
-                directions: HashMap::new(),
-                casualties: HashMap::new(),
-            },
+            turn: TurnState::new(),
         }
     }
 
@@ -128,6 +117,16 @@ pub struct GameState {
     pub players: HashMap<PlayerName, Player>,
 }
 
+impl GameState {
+    pub fn new(grid: Grid) -> GameState {
+        GameState {
+            uuid: Uuid::new_v4(),
+            grid: grid,
+            players: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnState {
     pub turn_number: usize,
@@ -136,4 +135,17 @@ pub struct TurnState {
     pub snakes: HashMap<PlayerName, Snake>,
     pub directions: HashMap<PlayerName, Direction>,
     pub casualties: HashMap<PlayerName, (CauseOfDeath, Snake)>,
+}
+
+impl TurnState {
+    pub fn new() -> TurnState {
+        TurnState {
+            turn_number: 0,
+            food: HashSet::new(),
+            eaten: HashMap::new(),
+            snakes: HashMap::new(),
+            directions: HashMap::new(),
+            casualties: HashMap::new(),
+        }
+    }
 }

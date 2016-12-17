@@ -15,104 +15,56 @@ fn main() {
 
 pub fn client_detect_vector() {
     let stream = TcpStream::connect("127.0.0.1:5513").expect("Could not connect to server.");
-    let mut player_connection = PlayerConnection::new(stream, None)
-        .expect("Could not produce new PlayerConnection.");
+    let mut protocol_connection = ProtocolConnection::new(stream, None)
+        .expect("Could not produce new ProtocolConnection.");
 
-    match player_connection.read().expect("Could not read anything; expected Command::Version.") {
-        Command::Version { sirpent, protocol } => {
+    let version_msg: ProtocolResult<VersionMessage> = protocol_connection.recieve();
+    match version_msg {
+        Ok(VersionMessage { sirpent, protocol }) => {
             println!("{:?}",
-                     Command::Version {
+                     VersionMessage {
                          sirpent: sirpent,
                          protocol: protocol,
                      })
         }
-        command => {
-            player_connection.write(&Command::Error {}).unwrap_or(());
-            panic!(format!("Unexpected {:?}.", command));
+        Err(e) => {
+            panic!(format!("Unexpected {:?}.", e));
         }
     };
 
-    let (grid, timeout) = match player_connection.read()
-        .expect("Could not read anything; expected Command::Server.") {
-        Command::Server { grid, timeout } => {
+    protocol_connection.send(IdentifyMessage { desired_player_name: "dummy-client".to_string() })
+        .expect("Sending Identify.");
+
+    let welcome_msg: ProtocolResult<WelcomeMessage> = protocol_connection.recieve();
+    let (player_name, grid, timeout) = match welcome_msg {
+        Ok(WelcomeMessage { player_name, grid, timeout }) => {
             println!("{:?}",
-                     Command::Server {
+                     WelcomeMessage {
+                         player_name: player_name.clone(),
                          grid: grid,
                          timeout: timeout,
                      });
-            (grid, timeout)
+            (player_name, grid, timeout)
         }
-        command => {
-            player_connection.write(&Command::Error {}).unwrap_or(());
-            panic!(format!("Unexpected {:?}.", command));
+        Err(e) => {
+            panic!(format!("Unexpected {:?}.", e));
         }
     };
 
-    player_connection.write(&Command::Hello {
-            player: Player {
-                name: "daenerys".to_string(),
-            },
-        })
-        .expect("Could not write Command::Hello.");
-
-    match player_connection.read().expect("Could not read anything; expected Command::NewGame.") {
-        Command::NewGame {} => println!("{:?}", Command::NewGame {}),
-        command => {
-            player_connection.write(&Command::Error {}).unwrap_or(());
-            panic!(format!("Unexpected {:?}.", command));
-        }
+    let new_game_msg: ProtocolResult<NewGameMessage> = protocol_connection.recieve();
+    match new_game_msg {
+        Ok(NewGameMessage { game }) => println!("{:?}", NewGameMessage { game: game }),
+        Err(e) => panic!(format!("Unexpected {:?}.", e)),
     }
 
-    let mut turn_game: GameState = match player_connection.read()
-        .expect("Could not read anything; expected Command::Turn.") {
-        Command::Turn { game } => {
-            println!("{:?}", Command::Turn { game: game.clone() });
-            game
-        }
-        command => {
-            player_connection.write(&Command::Error {}).unwrap_or(());
-            panic!(format!("Unexpected {:?}.", command));
-        }
-    };
-
     loop {
-        println!("{:?}", turn_game);
-
-        match player_connection.read()
-            .expect("Could not read anything; expected Command::MakeAMove.") {
-            Command::MakeAMove {} => println!("{:?}", Command::MakeAMove {}),
-            command => {
-                player_connection.write(&Command::Error {}).unwrap_or(());
-                panic!(format!("Unexpected {:?}.", command));
-            }
+        let turn_msg: ProtocolResult<TurnMessage> = protocol_connection.recieve();
+        match turn_msg {
+            Ok(TurnMessage { turn }) => println!("{:?}", TurnMessage { turn: turn }),
+            Err(e) => panic!(format!("Unexpected {:?}.", e)),
         }
 
-        player_connection.write(&Command::Move { direction: Direction::variants()[0] })
-            .expect("Could not write Command::Move.");
-
-        match player_connection.read()
-            .expect("Could not read anything; expected Command::Timedout/Died/Won/Turn.") {
-            Command::TimedOut {} => {
-                println!("{:?}", Command::TimedOut {});
-                return;
-            }
-            Command::Died { cause_of_death } => {
-                println!("{:?}", Command::Died { cause_of_death: cause_of_death });
-                return;
-            }
-            Command::Won {} => {
-                println!("{:?}", Command::Won {});
-                return;
-            }
-            Command::Turn { game } => {
-                println!("{:?}", Command::Turn { game: game.clone() });
-                turn_game = game;
-                continue;
-            }
-            command => {
-                player_connection.write(&Command::Error {}).unwrap_or(());
-                panic!(format!("Unexpected {:?}.", command));
-            }
-        }
+        protocol_connection.send(MoveMessage { direction: Direction::variants()[0] })
+            .expect("Sending Move.");
     }
 }

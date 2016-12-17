@@ -77,7 +77,6 @@ impl From<ProtocolError> for CauseOfDeath {
 mod tests {
     use quickcheck::{Arbitrary, Gen, quickcheck};
     use super::*;
-    use grid::*;
 
     impl Arbitrary for Snake {
         fn arbitrary<G: Gen>(g: &mut G) -> Snake {
@@ -97,6 +96,7 @@ mod tests {
             return Snake {
                 alive: alive,
                 segments: segments,
+                previous_tail: None,
             };
         }
 
@@ -106,6 +106,7 @@ mod tests {
                 shrinks.push(Snake {
                     alive: self.alive,
                     segments: self.segments[..i].to_vec(),
+                    previous_tail: None,
                 })
             }
             return Box::new(shrinks.into_iter());
