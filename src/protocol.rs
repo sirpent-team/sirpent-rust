@@ -178,6 +178,10 @@ pub enum ProtocolError {
     RecieveFromUnknownPlayer,
     UnexpectedCommand,
     WrongCommand,
+    InvalidStateTransition {
+        from_state: Box<PlayerState>,
+        event: PlayerEvent,
+    },
 }
 
 // @TODO: Consider if this is best.
@@ -209,6 +213,9 @@ impl Error for ProtocolError {
             ProtocolError::UnexpectedCommand => "Unexpected command read.",
             // @TODO: Really want to include the wrong command in the message usable by clients.
             ProtocolError::WrongCommand => "Wrong command was read.",
+            ProtocolError::InvalidStateTransition { from_state, event } => {
+                "Invalid state transition requested."
+            }
         }
     }
 

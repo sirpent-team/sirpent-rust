@@ -10,7 +10,7 @@ use protocol::*;
 #[derive(Debug)]
 pub struct State {
     pub game: GameState,
-    pub player_conns: HashMap<PlayerName, PlayerConnection>,
+    pub player_agents: HashMap<PlayerName, PlayerAgent>,
     pub turn: TurnState,
 }
 
@@ -18,7 +18,7 @@ impl State {
     pub fn new(grid: Grid) -> State {
         State {
             game: GameState::new(grid),
-            player_conns: HashMap::new(),
+            player_agents: HashMap::new(),
             turn: TurnState::new(),
         }
     }
@@ -45,17 +45,17 @@ impl State {
     pub fn new_game(&mut self) -> HashMap<PlayerName, ProtocolResult<()>> {
         let mut results: Vec<ProtocolResult<()>> = Vec::with_capacity(self.turn.snakes.len());
 
-        let game_state = self.game.clone();
-        self.player_conns
-            .par_iter_mut()
-            .map(|(_, player_conn)| player_conn.tell_new_game(game_state.clone()))
-            .collect_into(&mut results);
+        // let game_state = self.game.clone();
+        // self.player_conns
+        //     .par_iter_mut()
+        //     .map(|(_, player_conn)| player_conn.tell_new_game(game_state.clone()))
+        //     .collect_into(&mut results);
 
-        self.player_conns
-            .keys()
-            .cloned()
-            .zip(results.into_iter())
-            .collect()
+        // self.player_conns
+        //     .keys()
+        //     .cloned()
+        //     .zip(results.into_iter())
+        //     .collect()
     }
 
     pub fn request_moves(&mut self) -> HashMap<PlayerName, Move> {
@@ -63,39 +63,62 @@ impl State {
         let mut moves: Vec<Option<Move>> = Vec::with_capacity(self.turn.snakes.len());
 
         let turn = self.turn.clone();
-        self.player_conns
-            .par_iter_mut()
-            .map(|(player_name, mut player_conn)| {
-                let player_name = player_name.clone();
-                if turn.snakes.contains_key(&player_name) {
-                    // If player alive, try sending turn. If that succeeds, try and read a move.
-                    match player_conn.tell_turn(turn.clone()) {
-                        Ok(_) => Some(player_conn.ask_next_move()),
-                        Err(e) => Some(Err(e)),
-                    }
-                } else {
-                    // If player is dead, send turn but ignore errors.
-                    // @TODO: If errors then close connection?
-                    match player_conn.tell_turn(turn.clone()) {
-                        _ => None,
-                    }
-                }
-            })
-            .collect_into(&mut moves);
 
-        // For unclear reasons, par_iter's filter_map does not have collect/collect_into defined.
-        self.game
-            .players
-            .keys()
-            .cloned()
-            .zip(moves.into_iter())
-            .filter_map(|(player_name, maybe_move)| {
-                match maybe_move {
-                    Some(move_) => Some((player_name, move_)),
-                    None => None,
+        self.player_agents
+            .par_iter_mut()
+            .for_each(|(_, mut player_agent)| {
+                player_agent.next(PlayerEvent::NewTurn { turn: turn.clone() });
+            });
+
+        self.player_agents
+            .par_iter_mut()
+            .filter(|&(_, mut player_agent)| {
+                player_agent.state == PlayerState::Turning
+            })
+            .map(|&(_, mut player_agent)| {
+                player_agent.next(PlayerEvent::Move)
+            })
+            .filter_map(|player_agent| {
+                match player_agent.state {
+                    Ok(PlayerState::Moving { direction }) => Some(direction),
+                    _ => None
                 }
             })
             .collect()
+
+        // self.player_conns
+        //     .par_iter_mut()
+        //     .map(|(player_name, mut player_conn)| {
+        //         let player_name = player_name.clone();
+        //         if turn.snakes.contains_key(&player_name) {
+        //             // If player alive, try sending turn. If that succeeds, try and read a move.
+        //             match player_conn.tell_turn(turn.clone()) {
+        //                 Ok(_) => Some(player_conn.ask_next_move()),
+        //                 Err(e) => Some(Err(e)),
+        //             }
+        //         } else {
+        //             // If player is dead, send turn but ignore errors.
+        //             // @TODO: If errors then close connection?
+        //             match player_conn.tell_turn(turn.clone()) {
+        //                 _ => None,
+        //             }
+        //         }
+        //     })
+        //     .collect_into(&mut moves);
+
+        // // For unclear reasons, par_iter's filter_map does not have collect/collect_into defined.
+        // self.game
+        //     .players
+        //     .keys()
+        //     .cloned()
+        //     .zip(moves.into_iter())
+        //     .filter_map(|(player_name, maybe_move)| {
+        //         match maybe_move {
+        //             Some(move_) => Some((player_name, move_)),
+        //             None => None,
+        //         }
+        //     })
+        //     .collect()
     }
 
     pub fn living_players(&self) -> HashMap<PlayerName, (Player, Snake)> {
@@ -110,7 +133,7 @@ impl State {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
     pub uuid: Uuid,
     pub grid: Grid,
@@ -127,7 +150,7 @@ impl GameState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TurnState {
     pub turn_number: usize,
     pub food: HashSet<Vector>,

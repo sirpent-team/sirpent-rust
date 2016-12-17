@@ -60,7 +60,7 @@ impl Snake {
 
 // Useful for debugging and statistics.
 // CauseOfDeath converts MoveError to a String in order to be serialisable/deserialisable.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CauseOfDeath {
     NoMoveMade(String),
     CollidedWithSnake(PlayerName),
