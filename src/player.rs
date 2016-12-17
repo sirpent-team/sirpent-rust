@@ -83,7 +83,7 @@ impl PlayerConnection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlayerState {
     New,
     Version,
@@ -94,7 +94,6 @@ pub enum PlayerState {
     Moving { direction: Direction },
     Dead,
     Won,
-    Errored(ProtocolError),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,14 +114,10 @@ pub enum PlayerEvent {
 }
 
 impl PlayerState {
-    pub fn next(self, connection: &mut PlayerConnection, event: PlayerEvent) -> PlayerState {
-        self.next_internal(connection, event).unwrap_or_else(|e| PlayerState::Errored(e))
-    }
-
-    fn next_internal(self,
-                     connection: &mut PlayerConnection,
-                     event: PlayerEvent)
-                     -> ProtocolResult<PlayerState> {
+    pub fn next(self,
+                connection: &mut PlayerConnection,
+                event: PlayerEvent)
+                -> ProtocolResult<PlayerState> {
         match (self, event) {
             // New players can be versioned.
             (PlayerState::New, PlayerEvent::Versioning) => {
@@ -173,7 +168,6 @@ impl PlayerState {
             (PlayerState::Won, PlayerEvent::GameEnds) => Ok(PlayerState::Ready),
             (PlayerState::Dead, PlayerEvent::GameEnds) => Ok(PlayerState::Ready),
             // Errored players die.
-            (PlayerState::Errored(e), _) => Err(e),
             (current_state, invalid_event) => {
                 Err(ProtocolError::InvalidStateTransition {
                     from_state: Box::new(current_state),
@@ -186,12 +180,15 @@ impl PlayerState {
 
 #[derive(Debug)]
 pub struct PlayerAgent {
-    pub state: PlayerState,
+    pub state: ProtocolResult<PlayerState>,
     pub connection: PlayerConnection,
 }
 
 impl PlayerAgent {
     pub fn next(&mut self, event: PlayerEvent) {
-        self.state = self.state.next(&mut self.connection, event);
+        if self.state.is_ok() {
+            let state = self.state.as_mut().unwrap().clone();
+            self.state = state.next(&mut self.connection, event);
+        }
     }
 }

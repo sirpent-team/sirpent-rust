@@ -32,9 +32,9 @@ impl<R: Rng> Engine<R> {
         self.state.add_player(player, connection, new_snake)
     }
 
-    pub fn new_game(&mut self) -> HashMap<PlayerName, ProtocolResult<()>> {
+    pub fn new_game(&mut self) {
         self.manage_food();
-        self.state.new_game()
+        self.state.new_game();
     }
 
     pub fn concluded(&mut self) -> Option<HashMap<PlayerName, (Player, Snake)>> {
@@ -56,6 +56,7 @@ impl<R: Rng> Engine<R> {
 
     pub fn turn(&mut self) -> TurnState {
         let moves = self.state.request_moves();
+        // @TODO: Detect players who died during this turn+move comms.
 
         self.new_turn = self.state.turn.clone();
         // N.B. does not free memory.
@@ -87,7 +88,7 @@ impl<R: Rng> Engine<R> {
         self.new_turn.clone()
     }
 
-    fn snake_movement(&mut self, moves: HashMap<PlayerName, Move>) {
+    fn snake_movement(&mut self, directions: HashMap<PlayerName, Direction>) {
         // Apply movement and remove snakes that did not move.
         // Snake plans are Result<Direction, MoveError>. MoveError = String.
         // So we can specify an underlying error rather than just omitting any move.
@@ -96,22 +97,11 @@ impl<R: Rng> Engine<R> {
 
         for (player_name, snake) in self.new_turn.snakes.iter_mut() {
             // Retrieve snake plan if one exists.
-            let ref move_ = moves[player_name];
+            let ref direction = directions[player_name];
 
             // Move if a direction provided else use MoveError for CauseOfDeath.
-            match *move_ {
-                Ok(direction) => {
-                    snake.step_in_direction(direction);
-                    self.new_turn.directions.insert(player_name.clone(), direction);
-                }
-                Err(ref move_error) => {
-                    let cause_of_death =
-                        CauseOfDeath::NoMoveMade((*move_error).description().to_string());
-                    self.new_turn
-                        .casualties
-                        .insert(player_name.clone(), (cause_of_death, snake.clone()));
-                }
-            }
+            snake.step_in_direction(*direction);
+            self.new_turn.directions.insert(player_name.clone(), *direction);
         }
     }
 
