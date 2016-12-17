@@ -212,10 +212,9 @@ impl Error for ProtocolError {
             ProtocolError::RecieveFromUnknownPlayer => "Receiving from unknown player_name.",
             ProtocolError::UnexpectedCommand => "Unexpected command read.",
             // @TODO: Really want to include the wrong command in the message usable by clients.
+            // Means: put format strings in fmt::Display and use that for CauseOfDeath.
             ProtocolError::WrongCommand => "Wrong command was read.",
-            ProtocolError::InvalidStateTransition { ref from_state, ref event } => {
-                "Invalid state transition requested."
-            }
+            ProtocolError::InvalidStateTransition { .. } => "Invalid state transition requested.",
         }
     }
 

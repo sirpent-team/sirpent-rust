@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use net::*;
 use grid::*;
 use snake::*;
@@ -7,7 +5,9 @@ use state::*;
 use protocol::*;
 
 pub type PlayerName = String;
-pub type Move = Result<Direction, ProtocolError>;
+// For the time being, Move needs to be Cloneable. As a result it uses CauseOfDeath instead
+// of ProtocolError - the former being deliberately Clone itself.
+pub type Move = Result<Direction, CauseOfDeath>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Player {
@@ -100,11 +100,7 @@ pub enum PlayerState {
 pub enum PlayerEvent {
     Versioning,
     Identifying,
-    Welcoming {
-        player_name: PlayerName,
-        grid: Grid,
-        timeout: Option<Duration>,
-    },
+    Welcoming { player_name: PlayerName, grid: Grid },
     NewGame { game: GameState },
     NewTurn { turn: TurnState },
     Move,
@@ -130,8 +126,7 @@ impl PlayerState {
                 Ok(PlayerState::Identify { desired_player_name: desired_player_name })
             }
             // All identified players can be welcomed.
-            (PlayerState::Identify { ref desired_player_name },
-             PlayerEvent::Welcoming { ref player_name, grid, timeout }) => {
+            (PlayerState::Identify { .. }, PlayerEvent::Welcoming { ref player_name, grid }) => {
                 connection.send_welcome(player_name.clone(), grid)?;
                 Ok(PlayerState::Ready)
             }
@@ -185,10 +180,21 @@ pub struct PlayerAgent {
 }
 
 impl PlayerAgent {
-    pub fn next(&mut self, event: PlayerEvent) {
+    pub fn new(connection: PlayerConnection) -> PlayerAgent {
+        PlayerAgent {
+            state: Ok(PlayerState::New),
+            connection: connection
+        }
+    }
+
+    pub fn next(&mut self, event: PlayerEvent) -> Option<PlayerState> {
         if self.state.is_ok() {
             let state = self.state.as_mut().unwrap().clone();
             self.state = state.next(&mut self.connection, event);
+        }
+        match self.state.as_mut() {
+            Ok(v) => Some(v.clone()),
+            Err(_) => None
         }
     }
 }

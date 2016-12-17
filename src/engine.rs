@@ -1,5 +1,4 @@
 use rand::Rng;
-use std::error::Error;
 use std::collections::HashMap;
 
 use grid::*;
@@ -25,11 +24,10 @@ impl<R: Rng> Engine<R> {
     }
 
     pub fn add_player(&mut self,
-                      player: Player,
                       connection: PlayerConnection)
                       -> ProtocolResult<PlayerName> {
         let new_snake = Snake::new(vec![self.state.game.grid.random_cell(&mut *self.rng)]);
-        self.state.add_player(player, connection, new_snake)
+        self.state.add_player(connection, new_snake)
     }
 
     pub fn new_game(&mut self) {
@@ -88,7 +86,7 @@ impl<R: Rng> Engine<R> {
         self.new_turn.clone()
     }
 
-    fn snake_movement(&mut self, directions: HashMap<PlayerName, Direction>) {
+    fn snake_movement(&mut self, moves: HashMap<PlayerName, Move>) {
         // Apply movement and remove snakes that did not move.
         // Snake plans are Result<Direction, MoveError>. MoveError = String.
         // So we can specify an underlying error rather than just omitting any move.
@@ -97,11 +95,20 @@ impl<R: Rng> Engine<R> {
 
         for (player_name, snake) in self.new_turn.snakes.iter_mut() {
             // Retrieve snake plan if one exists.
-            let ref direction = directions[player_name];
+            let ref move_ = moves[player_name];
 
             // Move if a direction provided else use MoveError for CauseOfDeath.
-            snake.step_in_direction(*direction);
-            self.new_turn.directions.insert(player_name.clone(), *direction);
+            match *move_ {
+                Ok(direction) => {
+                    snake.step_in_direction(direction);
+                    self.new_turn.directions.insert(player_name.clone(), direction);
+                }
+                Err(ref cause_of_death) => {
+                    self.new_turn
+                        .casualties
+                        .insert(player_name.clone(), (cause_of_death.clone(), snake.clone()));
+                }
+            }
         }
     }
 

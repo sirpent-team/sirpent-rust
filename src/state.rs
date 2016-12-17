@@ -1,6 +1,7 @@
 use uuid::Uuid;
 use std::collections::{HashSet, HashMap};
 use rayon::prelude::*;
+use std::error::Error;
 
 use grid::*;
 use snake::*;
@@ -24,21 +25,44 @@ impl State {
     }
 
     pub fn add_player(&mut self,
-                      mut player: Player,
-                      mut connection: PlayerConnection,
+                      connection: PlayerConnection,
                       snake: Snake)
                       -> ProtocolResult<PlayerName> {
-        // Dedupe player name.
-        while self.game.players.contains_key(&player.name) {
-            player.name.push('_');
+        // Get desired name of this player.
+        let mut player_agent = PlayerAgent::new(connection);
+        player_agent.next(PlayerEvent::Versioning);
+        let desired_player_name = match player_agent.next(PlayerEvent::Identifying) {
+            Some(PlayerState::Identify { ref desired_player_name }) => desired_player_name.clone(),
+            None => return Err(player_agent.state.unwrap_err()),
+            _ => unreachable!()
+        };
+
+        // Find the final name of this player by deduping.
+        let mut player_name = desired_player_name.clone();
+        while self.game.players.contains_key(&player_name) {
+            player_name.push('_');
+        }
+        let player = Player::new(player_name.clone());
+
+        // Welcome the player.
+        player_agent.next(PlayerEvent::Welcoming {
+            player_name: player_name.clone(),
+            grid: self.game.grid
+        });
+
+        // Check player connection is ready to start games.
+        match player_agent.state {
+            Ok(PlayerState::Ready) => {},
+            Ok(_) => unreachable!(),
+            Err(e) => return Err(e)
         }
 
-        let player_name = player.name.clone();
-        // self.game.players.insert(player_name.clone(), player);
-        // connection.identified(player_name.clone())?;
-        // self.player_conns.insert(player_name.clone(), connection);
-        // self.turn.snakes.insert(player_name.clone(), snake);
+        // Register player agent, player data and player snake.
+        self.player_agents.insert(player_name.clone(), player_agent);
+        self.game.players.insert(player_name.clone(), player);
+        self.turn.snakes.insert(player_name.clone(), snake);
 
+        // Return the final player name.
         Ok(player_name)
     }
 
@@ -51,33 +75,31 @@ impl State {
             });
     }
 
-    pub fn request_moves(&mut self) -> HashMap<PlayerName, Direction> {
-        // Tell players about the new turn.
+    pub fn request_moves(&mut self) -> HashMap<PlayerName, Move> {
+        // 1. Tell players about the new turn.
+        // 2. Get a move from all living players.
         let turn = self.turn.clone();
         self.player_agents
             .par_iter_mut()
             .for_each(|(_, mut player_agent)| {
                 player_agent.next(PlayerEvent::NewTurn { turn: turn.clone() });
-            });
-
-        // Get a move from all living players.
-        self.player_agents
-            .par_iter_mut()
-            .filter(|&(_, ref player_agent)| player_agent.state.is_ok())
-            .for_each(|(_, mut player_agent)| {
                 player_agent.next(PlayerEvent::Move);
             });
 
         // Recover direction of move from all living players.
-        self.player_agents
-            .iter()
-            .filter_map(|(player_name, player_agent)| {
-                match player_agent.state {
-                    Ok(PlayerState::Moving { direction }) => Some((player_name.clone(), direction)),
-                    _ => None,
+        let mut moves: HashMap<PlayerName, Move> = HashMap::new();
+        for (player_name, player_agent) in self.player_agents.iter() {
+            let move_ = match player_agent.state {
+                Ok(PlayerState::Moving { direction }) => Ok(direction),
+                Err(ref e) => {
+                    let cause_of_death = CauseOfDeath::NoMoveMade(e.description().to_string());
+                    Err(cause_of_death)
                 }
-            })
-            .collect()
+                _ => unreachable!(),
+            };
+            moves.insert(player_name.clone(), move_);
+        }
+        moves
     }
 
     pub fn living_players(&self) -> HashMap<PlayerName, (Player, Snake)> {
