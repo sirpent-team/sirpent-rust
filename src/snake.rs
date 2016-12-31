@@ -1,5 +1,4 @@
 use grid::*;
-use player::*;
 use protocol::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
@@ -61,7 +60,7 @@ impl Snake {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CauseOfDeath {
     NoMoveMade(String),
-    CollidedWithSnake(PlayerName),
+    CollidedWithSnake(String),
     CollidedWithBounds(Vector),
 }
 

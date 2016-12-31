@@ -8,13 +8,12 @@ use std::fmt::Debug;
 
 use grid::*;
 use snake::*;
-use player::*;
 use state::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.2";
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub enum MessageTypeName {
+pub enum MsgTypeName {
     #[serde(rename = "version")]
     Version,
     #[serde(rename = "identify")]
@@ -35,34 +34,34 @@ pub enum MessageTypeName {
     GameOver,
 }
 
-pub trait TypedMessage: Debug + Clone + Sized + Serialize + Deserialize {
-    const MESSAGE_TYPE_NAME: MessageTypeName;
+pub trait TypedMsg: Debug + Clone + Sized + Serialize + Deserialize {
+    const MSG_TYPE_NAME: MsgTypeName;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PlainMessage {
+pub struct Msg {
     #[serde(rename = "msg")]
-    pub msg_type_name: MessageTypeName,
+    pub msg_type_name: MsgTypeName,
     pub data: serde_json::Value,
 }
 
-impl PlainMessage {
-    pub fn new(msg_type_name: MessageTypeName, data: serde_json::Value) -> PlainMessage {
-        PlainMessage {
+impl Msg {
+    pub fn new(msg_type_name: MsgTypeName, data: serde_json::Value) -> Msg {
+        Msg {
             msg_type_name: msg_type_name,
             data: data,
         }
     }
 
-    pub fn from_typed<T: TypedMessage>(message_typed: T) -> PlainMessage {
-        PlainMessage {
-            msg_type_name: T::MESSAGE_TYPE_NAME,
-            data: serde_json::to_value(message_typed),
+    pub fn from_typed<T: TypedMsg>(msg_typed: T) -> Msg {
+        Msg {
+            msg_type_name: T::MSG_TYPE_NAME,
+            data: serde_json::to_value(msg_typed),
         }
     }
 
-    pub fn to_typed<T: TypedMessage>(self) -> ProtocolResult<T> {
-        if self.msg_type_name != T::MESSAGE_TYPE_NAME {
+    pub fn to_typed<T: TypedMsg>(self) -> ProtocolResult<T> {
+        if self.msg_type_name != T::MSG_TYPE_NAME {
             return Err(ProtocolError::WrongCommand);
         }
         match serde_json::from_value(self.data) {
@@ -74,92 +73,92 @@ impl PlainMessage {
 
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct VersionMessage {
+pub struct VersionMsg {
     pub sirpent: String,
     pub protocol: String,
 }
 
-impl VersionMessage {
-    pub fn new() -> VersionMessage {
-        VersionMessage {
+impl VersionMsg {
+    pub fn new() -> VersionMsg {
+        VersionMsg {
             sirpent: env!("CARGO_PKG_VERSION").to_string(),
             protocol: PROTOCOL_VERSION.to_string(),
         }
     }
 }
 
-impl TypedMessage for VersionMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::Version;
+impl TypedMsg for VersionMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Version;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct IdentifyMessage {
-    pub desired_player_name: PlayerName,
+pub struct IdentifyMsg {
+    pub desired_name: String,
 }
 
-impl TypedMessage for IdentifyMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::Identify;
+impl TypedMsg for IdentifyMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Identify;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WelcomeMessage {
-    pub player_name: PlayerName,
+pub struct WelcomeMsg {
+    pub name: String,
     pub grid: Grid,
     pub timeout: Option<Duration>,
 }
 
-impl TypedMessage for WelcomeMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::Welcome;
+impl TypedMsg for WelcomeMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Welcome;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NewGameMessage {
+pub struct NewGameMsg {
     pub game: GameState,
 }
 
-impl TypedMessage for NewGameMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::NewGame;
+impl TypedMsg for NewGameMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::NewGame;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TurnMessage {
+pub struct TurnMsg {
     pub turn: TurnState,
 }
 
-impl TypedMessage for TurnMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::Turn;
+impl TypedMsg for TurnMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Turn;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MoveMessage {
+pub struct MoveMsg {
     pub direction: Direction,
 }
 
-impl TypedMessage for MoveMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::Move;
+impl TypedMsg for MoveMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Move;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DiedMessage {
+pub struct DiedMsg {
     pub cause_of_death: CauseOfDeath,
 }
 
-impl TypedMessage for DiedMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::Died;
+impl TypedMsg for DiedMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Died;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WonMessage {}
+pub struct WonMsg {}
 
-impl TypedMessage for WonMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::Won;
+impl TypedMsg for WonMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Won;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GameOverMessage {}
+pub struct GameOverMsg {}
 
-impl TypedMessage for GameOverMessage {
-    const MESSAGE_TYPE_NAME: MessageTypeName = MessageTypeName::GameOver;
+impl TypedMsg for GameOverMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::GameOver;
 }
 
 #[derive(Debug)]
@@ -178,10 +177,7 @@ pub enum ProtocolError {
     RecieveFromUnknownPlayer,
     UnexpectedCommand,
     WrongCommand,
-    InvalidStateTransition {
-        from_state: Box<PlayerState>,
-        event: PlayerEvent,
-    },
+    InvalidStateTransition { from_state: String, event: String },
 }
 
 impl Error for ProtocolError {
@@ -301,75 +297,73 @@ mod tests {
     }
 
     #[test]
-    fn can_convert_msgs_to_plainmessage() {
-        convert_msg_to_plainmessage(VersionMessage::new());
-        convert_msg_to_plainmessage(IdentifyMessage { desired_player_name: "abc".to_string() });
-        convert_msg_to_plainmessage(WelcomeMessage {
-            player_name: "def".to_string(),
+    fn can_convert_typedmsgs_to_msg() {
+        convert_typedmsg_to_msg(VersionMsg::new());
+        convert_typedmsg_to_msg(IdentifyMsg { desired_name: "abc".to_string() });
+        convert_typedmsg_to_msg(WelcomeMsg {
+            name: "def".to_string(),
             grid: Grid { radius: 15 },
             timeout: None,
         });
-        convert_msg_to_plainmessage(NewGameMessage { game: GameState::new(Grid { radius: 15 }) });
-        convert_msg_to_plainmessage(TurnMessage { turn: TurnState::new() });
-        convert_msg_to_plainmessage(MoveMessage { direction: Direction::variants()[0] });
-        convert_msg_to_plainmessage(DiedMessage {
+        convert_typedmsg_to_msg(NewGameMsg { game: GameState::new(Grid { radius: 15 }) });
+        convert_typedmsg_to_msg(TurnMsg { turn: TurnState::new() });
+        convert_typedmsg_to_msg(MoveMsg { direction: Direction::variants()[0] });
+        convert_typedmsg_to_msg(DiedMsg {
             cause_of_death: CauseOfDeath::NoMoveMade("ghi".to_string()),
         });
-        convert_msg_to_plainmessage(WonMessage {});
-        convert_msg_to_plainmessage(GameOverMessage {});
+        convert_typedmsg_to_msg(WonMsg {});
+        convert_typedmsg_to_msg(GameOverMsg {});
 
-        let identify_msg = IdentifyMessage { desired_player_name: "jkl".to_string() };
+        let identify_msg = IdentifyMsg { desired_name: "jkl".to_string() };
 
         let mut map: serde_json::value::Map<String, serde_json::Value> =
             serde_json::value::Map::new();
-        map.insert("desired_player_name".to_string(),
+        map.insert("desired_name".to_string(),
                    serde_json::Value::String("jkl".to_string()));
-        let plain_msg = PlainMessage::new(MessageTypeName::Identify,
-                                          serde_json::Value::Object(map));
+        let plain_msg = Msg::new(MsgTypeName::Identify, serde_json::Value::Object(map));
 
-        assert_eq!(format!("{:?}", PlainMessage::from_typed(identify_msg)),
+        assert_eq!(format!("{:?}", Msg::from_typed(identify_msg)),
                    format!("{:?}", plain_msg));
     }
 
-    fn convert_msg_to_plainmessage<T: TypedMessage>(msg: T) {
-        println!("{:?} {:?}", msg.clone(), PlainMessage::from_typed(msg));
+    fn convert_typedmsg_to_msg<T: TypedMsg>(msg: T) {
+        println!("{:?} {:?}", msg.clone(), Msg::from_typed(msg));
 
-        let desired_player_name = "jkl".to_string();
+        let desired_name = "jkl".to_string();
 
         let mut map: serde_json::value::Map<String, serde_json::Value> =
             serde_json::value::Map::new();
-        map.insert("desired_player_name".to_string(),
-                   serde_json::Value::String(desired_player_name.clone()));
-        let identify_msg2: IdentifyMessage = PlainMessage::new(MessageTypeName::Identify,
-                                                               serde_json::Value::Object(map))
+        map.insert("desired_name".to_string(),
+                   serde_json::Value::String(desired_name.clone()));
+        let identify_msg2: IdentifyMsg = Msg::new(MsgTypeName::Identify,
+                                                  serde_json::Value::Object(map))
             .to_typed()
             .unwrap();
 
         assert_eq!(format!("{:?}", identify_msg2),
-                   format!("{:?}",
-                           IdentifyMessage { desired_player_name: desired_player_name.clone() }));
+                   format!("{:?}", IdentifyMsg { desired_name: desired_name.clone() }));
     }
 
     // #[test]
-    // fn can_convert_plainmessages_to_msg() {
-    //     convert_plainmessage_to_msg(VersionMessage::new());
-    //     convert_plainmessage_to_msg(IdentifyMessage { desired_player_name: "abc".to_string() });
-    //     convert_plainmessage_to_msg(WelcomeMessage {
+    // fn can_convert_msgs_to_msg() {
+    //     convert_msg_to_msg(VersionMsg::new());
+    //     convert_msg_to_msg(IdentifyMsg { desired_player_name: "abc".to_string() });
+    //     convert_msg_to_msg(WelcomeMsg {
     //         player_name: "def".to_string(),
     //         grid: Grid { radius: 15 },
     //         timeout: None,
     //     });
-    //     convert_plainmessage_to_msg(NewGameMessage { game: GameState::new(Grid { radius: 15 }) });
-    //     convert_plainmessage_to_msg(TurnMessage { turn: TurnState::new() });
-    //     convert_plainmessage_to_msg(MoveMessage { direction: Direction::variants()[0] });
-    //     convert_plainmessage_to_msg(DiedMessage {
+    //     convert_msg_to_msg(NewGameMsg { game: GameState::new(Grid { radius: 15 }) });
+    //     convert_msg_to_msg(TurnMsg { turn: TurnState::new() });
+    //     convert_msg_to_msg(MoveMsg { direction: Direction::variants()[0] });
+    //     convert_msg_to_msg(DiedMsg {
     //         cause_of_death: CauseOfDeath::NoMoveMade("ghi".to_string()),
     //     });
-    //     convert_plainmessage_to_msg(WonMessage {});
-    //     convert_plainmessage_to_msg(GameOverMessage {});
+    //     convert_msg_to_msg(WonMsg {});
+    //     convert_msg_to_msg(GameOverMsg {});
     // }
 
-    // fn convert_plainmessage_to_msg<T: TypedMessage>(plain_msg: PlainMessage, msg: &mut T) {
+    // fn convert_msg_to_msg<T: TypedMsg>(plain_msg: Msg, msg: &mut T) {
     //     *msg = plain_msg.clone().to_typed().unwrap();
     //     println!("{:?} {:?}", plain_msg, msg.clone());
     // }
