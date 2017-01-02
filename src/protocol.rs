@@ -165,6 +165,7 @@ impl TypedMsg for GameOverMsg {
 pub enum ProtocolError {
     Io(io::Error),
     Serde(serde_json::Error),
+    NoMsgReceived,
     NothingReadFromStream,
     MessageReadNotADictionary,
     MessageReadMissingMsgField,
@@ -185,6 +186,7 @@ impl Error for ProtocolError {
         match *self {
             ProtocolError::Io(ref io_err) => io_err.description(),
             ProtocolError::Serde(ref serde_json_err) => serde_json_err.description(),
+            ProtocolError::NoMsgReceived => "No message received.",
             ProtocolError::NothingReadFromStream => "Nothing read from stream.",
             ProtocolError::MessageReadNotADictionary => "Message from stream was not a dictionary.",
             ProtocolError::MessageReadMissingMsgField => "No msg field in message from stream.",
@@ -226,6 +228,7 @@ impl Display for ProtocolError {
                 format!("Serde JSON Error in protocol handling: {:?}",
                         serde_json_err.description())
             }
+            ProtocolError::NoMsgReceived => "No message received.".to_string(),
             ProtocolError::NothingReadFromStream => "Nothing read from stream.".to_string(),
             ProtocolError::MessageReadNotADictionary => {
                 "Message from stream was not a dictionary.".to_string()

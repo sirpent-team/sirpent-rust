@@ -101,7 +101,6 @@ fn main() {
     let clients = listener.incoming().map(move |(socket, addr)| {
         let transport = socket.framed(MsgCodec);
         (Client.handshake(transport), addr)
-        // (Client.handshake(transport), addr)
     });
     let handle = lp.handle();
 
@@ -180,8 +179,8 @@ fn main() {
 // ---------------- ---------------- ---------------- ---------------- ----------------
 
 type MsgTransport = Framed<TcpStream, MsgCodec>;
-type SendFuture = BoxFuture<MsgTransport, io::Error>;
-type RecvFuture<M: TypedMsg> = BoxFuture<(M, MsgTransport), io::Error>;
+type SendFuture = BoxFuture<MsgTransport, ProtocolError>;
+type RecvFuture<M: TypedMsg> = BoxFuture<(M, MsgTransport), ProtocolError>;
 
 // Data used to when processing a client to perform various operations over its
 // lifetime.
@@ -194,17 +193,17 @@ impl Client {
         where M: std::marker::Send + 'static
     {
         let msg = Msg::from_typed(typed_msg);
-        transport.send(msg).boxed()
+        transport.send(msg).map_err(|e| ProtocolError::from(e)).boxed()
     }
 
     fn recv_msg<M: TypedMsg>(transport: MsgTransport) -> RecvFuture<M>
         where M: std::marker::Send + 'static
     {
         transport.into_future()
-            .map_err(|(e, _)| e)
+            .map_err(|(e, _)| ProtocolError::from(e))
             .and_then(|(option_msg, transport)| {
-                option_msg.ok_or(other_labelled("No Msg received."))
-                    .and_then(|msg| msg.to_typed::<M>().map_err(|e| other(e)))
+                option_msg.ok_or(ProtocolError::NoMsgReceived)
+                    .and_then(|msg| msg.to_typed().map_err(|e| ProtocolError::from(e)))
                     .and_then(|typed_msg| Ok((typed_msg, transport)))
             })
             .boxed()
