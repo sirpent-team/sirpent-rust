@@ -56,8 +56,11 @@ use std::str;
 use std::time::Duration;
 use std::collections::HashSet;
 use tokio_core::io::Codec;
+use std::collections::HashMap;
+use std::error::Error;
 
 use futures::future;
+// use futures::future::*;
 use futures::{BoxFuture, Future, Stream, Sink};
 use tokio_core::net::{TcpStream, TcpListener};
 use tokio_core::reactor::Core;
@@ -98,44 +101,69 @@ fn main() {
     let clients = listener.incoming().map(move |(socket, addr)| {
         let transport = socket.framed(MsgCodec);
         (Client.handshake(transport), addr)
+        // (Client.handshake(transport), addr)
     });
     let handle = lp.handle();
 
     let strings: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let transports: Arc<Mutex<HashMap<String, MsgTransport>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let server = clients.for_each(|(client, addr)| {
         let strings_copy = strings.clone();
+        let transports_copy = transports.clone();
         handle.spawn(client.then(move |res| {
             match res {
-                Ok((msg, transport)) => {
-                    let identify_msg: ProtocolResult<IdentifyMsg> = msg.clone().to_typed();
-                    if identify_msg.is_ok() {
-                        let identify_msg = identify_msg.unwrap();
-                        let mut name = identify_msg.desired_name.clone();
-                        {
-                            let mut strings_copy = strings_copy.lock().unwrap();
-                            while strings_copy.contains(&name) {
-                                name += "_";
-                            }
-                            strings_copy.insert(name.clone());
+                Ok((identify_msg, transport)) => {
+                    let mut name = identify_msg.desired_name.clone();
+                    {
+                        let mut strings_copy = strings_copy.lock().unwrap();
+                        while strings_copy.contains(&name) {
+                            name += "_";
                         }
-                        println!("deduped name {} to {} from {}",
-                                 identify_msg.desired_name,
-                                 name.clone(),
-                                 addr);
-                        // @TODO: Don't wait() - it blocks the thread!
-                        match Client.welcome(transport, name, Grid::new(25), None).wait() {
-                            Err(e) => panic!(e),
-                            _ => {}
+                        strings_copy.insert(name.clone());
+                    }
+                    println!("deduped name {} to {} from {}",
+                             identify_msg.desired_name,
+                             name.clone(),
+                             addr);
+                    // @TODO: Don't wait() - it blocks the thread!
+                    match Client.welcome(transport, name.clone(), Grid::new(25), None).wait() {
+                        Err(e) => panic!(e),
+                        Ok(transport) => {
+                            transports_copy.lock().unwrap().insert(name, transport);
                         }
-                    } else {
-                        println!("could not decode identifymsg out of {:?} from {}",
-                                 msg,
-                                 addr);
+                    }
+
+                    if transports_copy.lock().unwrap().len() > 3 {
+                        let mut transports_copy = transports_copy.lock().unwrap();
+                        // let mut futures = vec![];
+                        for (name, transport) in transports_copy.drain() {
+                            let future = Client.turn(transport, TurnState::new());
+                            let future = future.map(|(msg, transport)| {
+                                println!("{:?}", msg.clone());
+                                (msg, transport)
+                            });
+                            future.wait().unwrap();
+                            // futures.push(future);
+                            // match Client.turn(transport, TurnState::new()).wait() {
+                            // Ok((msg, transport)) => {
+                            // println!("{:?}", msg);
+                            // },
+                            // Err(e) => {
+                            // panic!(e);
+                            // }
+                            // }
+
+                        }
+                        // println!("{:?}", future::join_all(futures).wait().unwrap());
+
+                        // let mut f = future::join_all(futures);
+                        // loop { f.poll().unwrap(); }
                     }
                 }
-                Err(e) => println!("error for {}: {}", addr, e),
-            }
+                Err(e) => println!("{} errored: {}", addr, e),
+            };
             future::ok(())
         }));
         Ok(())
@@ -152,11 +180,8 @@ fn main() {
 // ---------------- ---------------- ---------------- ---------------- ----------------
 
 type MsgTransport = Framed<TcpStream, MsgCodec>;
-type MsgSendFuture = BoxFuture<MsgTransport, io::Error>;
-type MsgOptReceiveFuture = BoxFuture<(Option<Msg>, MsgTransport), (io::Error, MsgTransport)>;
-type MsgOptReceiveResult = Result<(Option<Msg>, MsgTransport), (io::Error, MsgTransport)>;
-type MsgReceiveFuture = BoxFuture<(Msg, MsgTransport), io::Error>;
-type MsgReceiveResult = Result<(Msg, MsgTransport), io::Error>;
+type SendFuture = BoxFuture<MsgTransport, io::Error>;
+type RecvFuture<M: TypedMsg> = BoxFuture<(M, MsgTransport), io::Error>;
 
 // Data used to when processing a client to perform various operations over its
 // lifetime.
@@ -165,18 +190,29 @@ struct Client;
 // http://aturon.github.io/blog/2016/08/11/futures/
 // https://raw.githubusercontent.com/tokio-rs/tokio-socks5/master/src/main.rs
 impl Client {
-    fn handshake(self, transport: MsgTransport) -> MsgReceiveFuture {
-        let version_msg = Msg::from_typed(VersionMsg::new());
-        let versioned: MsgSendFuture = transport.send(version_msg)
-            .boxed();
+    fn send_msg<M: TypedMsg>(transport: MsgTransport, typed_msg: M) -> SendFuture
+        where M: std::marker::Send + 'static
+    {
+        let msg = Msg::from_typed(typed_msg);
+        transport.send(msg).boxed()
+    }
 
-        let registered: MsgReceiveFuture = versioned.and_then(|transport| {
-                transport.into_future()
-                    .then(recv_postprocess)
+    fn recv_msg<M: TypedMsg>(transport: MsgTransport) -> RecvFuture<M>
+        where M: std::marker::Send + 'static
+    {
+        transport.into_future()
+            .map_err(|(e, _)| e)
+            .and_then(|(option_msg, transport)| {
+                option_msg.ok_or(other_labelled("No Msg received."))
+                    .and_then(|msg| msg.to_typed::<M>().map_err(|e| other(e)))
+                    .and_then(|typed_msg| Ok((typed_msg, transport)))
             })
-            .boxed();
+            .boxed()
+    }
 
-        registered
+    fn handshake(self, transport: MsgTransport) -> RecvFuture<IdentifyMsg> {
+        let version_msg = VersionMsg::new();
+        Self::send_msg(transport, version_msg).and_then(Self::recv_msg).boxed()
     }
 
     fn welcome(self,
@@ -184,33 +220,27 @@ impl Client {
                name: String,
                grid: Grid,
                timeout: Option<Duration>)
-               -> MsgSendFuture {
-        let welcome_msg = Msg::from_typed(WelcomeMsg {
+               -> SendFuture {
+        let welcome_msg = WelcomeMsg {
             name: name,
             grid: grid,
             timeout: timeout,
-        });
-        let welcomed: MsgSendFuture = transport.send(welcome_msg)
-            .boxed();
-        welcomed
+        };
+        Self::send_msg(transport, welcome_msg)
+    }
+
+    fn turn(self, transport: MsgTransport, turn: TurnState) -> RecvFuture<MoveMsg> {
+        let turn_msg = TurnMsg { turn: turn };
+        Self::send_msg(transport, turn_msg).and_then(Self::recv_msg).boxed()
     }
 }
 
-fn other(desc: &str) -> io::Error {
+fn other_labelled(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
 }
 
-/// Postprocess result of MsgTransport::into_future() into something with these requirements:
-/// * Err does not contain the MsgTransport. This is for type compatibility with
-///   MsgTransport::send() errors.
-/// * Ok with a None message is mapped to an Err. This is because for my purposes a missing Msg
-///   is an error condition.
-fn recv_postprocess(result: MsgOptReceiveResult) -> MsgReceiveResult {
-    match result {
-        Ok((Some(msg), transport)) => Ok((msg, transport)),
-        Ok((None, _)) => Err(other("No Msg received.")),
-        Err((e, _)) => Err(e),
-    }
+fn other<E: Error>(e: E) -> io::Error {
+    other_labelled(&*format!("{:?}", e))
 }
 
 // ---------------- ---------------- ---------------- ---------------- ----------------
@@ -238,7 +268,7 @@ impl Codec for MsgCodec {
             let msg: Result<Msg, serde_json::Error> = serde_json::from_str(line);
             return match msg {
                 Ok(msg) => Ok(Some(msg)),
-                Err(e) => Err(other(&format!("Msg decode error: {}", e))),
+                Err(e) => Err(other(e)),
             };
         }
 
@@ -248,7 +278,7 @@ impl Codec for MsgCodec {
     fn encode(&mut self, msg: Msg, buf: &mut Vec<u8>) -> io::Result<()> {
         let msg_str = match serde_json::to_string(&msg) {
             Ok(s) => s,
-            Err(e) => return Err(other(&format!("Msg encode error: {}", e))),
+            Err(e) => return Err(other(e)),
         };
 
         for byte in msg_str.as_bytes() {
