@@ -22,24 +22,29 @@ impl<R: Rng> Engine<R> {
         return engine;
     }
 
-    /*
-    pub fn concluded(&mut self) -> Option<HashMap<String, (Player, Snake)>> {
-        let living_players = self.state.living_players();
-        match living_players.len() {
-            0 => {
-                let ref previous_casualties = self.state.turn.casualties;
-                Some(previous_casualties.iter()
-                    .map(|(player_name, &(_, ref snake))| {
-                        (player_name.clone(),
-                         (self.state.game.players[player_name].clone(), snake.clone()))
-                    })
-                    .collect())
-            }
-            1 => Some(living_players),
-            _ => None,
-        }
+    pub fn add_player(&mut self, desired_name: String) -> String {
+        let head = self.game.game.grid.random_cell(&mut *self.rng);
+        let snake = Snake::new(vec![head]);
+        self.game.add_player(desired_name, snake)
     }
-    */
+
+    // pub fn concluded(&mut self) -> Option<HashMap<String, (Player, Snake)>> {
+    // let living_players = self.state.living_players();
+    // match living_players.len() {
+    // 0 => {
+    // let ref previous_casualties = self.state.turn.casualties;
+    // Some(previous_casualties.iter()
+    // .map(|(player_name, &(_, ref snake))| {
+    // (player_name.clone(),
+    // (self.state.game.players[player_name].clone(), snake.clone()))
+    // })
+    // .collect())
+    // }
+    // 1 => Some(living_players),
+    // _ => None,
+    // }
+    // }
+    //
 
     pub fn turn(&mut self, moves: HashMap<String, Direction>) -> TurnState {
         let mut next_turn: TurnState = self.game.turn.clone();

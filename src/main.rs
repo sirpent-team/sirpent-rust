@@ -7,15 +7,16 @@ extern crate futures;
 extern crate tokio_core;
 extern crate sirpent;
 extern crate serde_json;
+extern crate rand;
 
 use std::cell::RefCell;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::str;
-use std::collections::HashSet;
+use rand::OsRng;
 
-use futures::{Future, Stream};
+use futures::{future, Future, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_core::io::Io;
@@ -39,7 +40,11 @@ fn main() {
 
     println!("Listening on {}", addr);
 
-    let names: Arc<RefCell<HashSet<String>>> = Arc::new(RefCell::new(HashSet::new()));
+    let grid = Grid::new(25);
+    let timeout = None;
+
+    let engine: Arc<RefCell<Engine<OsRng>>> =
+        Arc::new(RefCell::new(Engine::new(OsRng::new().unwrap(), grid)));
 
     let clients = listener.incoming()
         .map_err(|e| ProtocolError::from(e))
@@ -51,30 +56,41 @@ fn main() {
 
     let handle = lp.handle();
     let server = clients.for_each(|(client, addr)| {
-        let names_ref = names.clone();
+        let engine_ref1 = engine.clone();
+        let engine_ref2 = engine.clone();
+        let engine_ref3 = engine.clone();
 
-        handle.spawn(client.map_err(|_| ()).and_then(move |(identify_msg, transport)| {
-            // Find an unused name based upon the desired_name.
-            // Subtly coded to ensure `names` is locked to ensure unique name still free.
-            let mut name = identify_msg.desired_name;
-            loop {
-                let mut names_ref = names_ref.borrow_mut();
-                if names_ref.contains(&name) {
-                    name += "_";
-                } else {
-                    // Reserve the new name.
-                    names_ref.insert(name.clone());
-                    break;
+        let client_future = client.and_then(move |(identify_msg, transport)| {
+                let name = engine_ref1.borrow_mut().add_player(identify_msg.desired_name);
+                // @DEBUG
+                println!("addr={:?} name={:?}", addr, name.clone());
+
+                Client.welcome(transport, name.clone(), grid, timeout)
+            })
+            .and_then(move |transport| {
+                let game: GameState = engine_ref2.borrow().game.game.clone();
+                Client.game(transport, game)
+            })
+            .and_then(move |transport| {
+                let turn: TurnState = engine_ref3.borrow().game.turn.clone();
+                Client.turn(transport, turn)
+            })
+            .and_then(move |(move_msg, transport)| {
+                println!("{:?}", move_msg);
+                Ok(())
+            })
+            .then(|result| {
+                match result {
+                    Ok(_) => Ok(()),
+                    Err(_) => Err(()),
                 }
-            }
-            // @DEBUG
-            println!("addr={:?} name={:?}", addr, name.clone());
+            });
 
-            Client.welcome(transport, name, Grid::new(25), None).then(|_| Ok(()))
-        }));
-
+        handle.spawn(client_future);
         Ok(())
     });
+
+    // move_future --> turn_future --> move_future
 
     lp.run(server).unwrap();
 }
