@@ -6,6 +6,8 @@ use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::fmt::Debug;
 
+use futures::sync::mpsc;
+
 use grid::*;
 use snake::*;
 use state::*;
@@ -179,6 +181,7 @@ pub enum ProtocolError {
     UnexpectedCommand,
     WrongCommand,
     InvalidStateTransition { from_state: String, event: String },
+    Internal,
 }
 
 impl Error for ProtocolError {
@@ -206,6 +209,7 @@ impl Error for ProtocolError {
             // Means: put format strings in fmt::Display and use that for CauseOfDeath.
             ProtocolError::WrongCommand => "Wrong command was read.",
             ProtocolError::InvalidStateTransition { .. } => "Invalid state transition requested.",
+            ProtocolError::Internal => "Unspecified internal error.",
         }
     }
 
@@ -260,6 +264,7 @@ impl Display for ProtocolError {
                         from_state,
                         event)
             }
+            ProtocolError::Internal => "Unspecified internal error.".to_string(),
         };
         f.write_str(&*disp)
     }
@@ -274,6 +279,12 @@ impl From<io::Error> for ProtocolError {
 impl From<serde_json::Error> for ProtocolError {
     fn from(err: serde_json::Error) -> ProtocolError {
         ProtocolError::Serde(err)
+    }
+}
+
+impl From<mpsc::SendError<(String, Direction)>> for ProtocolError {
+    fn from(_: mpsc::SendError<(String, Direction)>) -> ProtocolError {
+        ProtocolError::Internal
     }
 }
 
