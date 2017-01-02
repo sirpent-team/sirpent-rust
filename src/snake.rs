@@ -5,6 +5,7 @@ use protocol::*;
 pub struct Snake {
     pub alive: bool,
     pub segments: Vec<Vector>,
+    #[serde(skip_serializing, skip_deserializing)]
     previous_tail: Option<Vector>,
 }
 
