@@ -70,9 +70,9 @@ fn main() {
             // @DEBUG
             println!("addr={:?} name={:?}", addr, name.clone());
 
-            // future::ok(())
             Client.welcome(transport, name, Grid::new(25), None).then(|_| Ok(()))
         }));
+
         Ok(())
     });
 
