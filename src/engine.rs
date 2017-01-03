@@ -28,25 +28,15 @@ impl<R: Rng> Engine<R> {
         self.game.add_player(desired_name, snake)
     }
 
-    // pub fn concluded(&mut self) -> Option<HashMap<String, (Player, Snake)>> {
-    // let living_players = self.state.living_players();
-    // match living_players.len() {
-    // 0 => {
-    // let ref previous_casualties = self.state.turn.casualties;
-    // Some(previous_casualties.iter()
-    // .map(|(player_name, &(_, ref snake))| {
-    // (player_name.clone(),
-    // (self.state.game.players[player_name].clone(), snake.clone()))
-    // })
-    // .collect())
-    // }
-    // 1 => Some(living_players),
-    // _ => None,
-    // }
-    // }
-    //
+    pub fn concluded(&self) -> bool {
+        let number_of_living_snakes = self.game.turn.snakes.len();
+        match number_of_living_snakes {
+            0 => true,
+            _ => false,
+        }
+    }
 
-    pub fn turn(&mut self, moves: HashMap<String, Direction>) -> TurnState {
+    pub fn advance_turn(&mut self, moves: HashMap<String, Direction>) -> TurnState {
         let mut next_turn: TurnState = self.game.turn.clone();
 
         // N.B. does not free memory.
@@ -74,6 +64,7 @@ impl<R: Rng> Engine<R> {
 
         next_turn.turn_number += 1;
 
+        self.game.turn = next_turn.clone();
         return next_turn;
     }
 
