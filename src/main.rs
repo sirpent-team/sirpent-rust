@@ -17,7 +17,7 @@ use rand::OsRng;
 use std::collections::{HashSet, HashMap};
 use std::time::Duration;
 
-use futures::{future, Future, BoxFuture, Stream};
+use futures::{Future, BoxFuture, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_core::io::Io;
@@ -52,7 +52,7 @@ fn main() {
         .map(move |(socket, addr)| {
             let transport = socket.framed(MsgCodec);
             // Say hello and get a desired_name from the client.
-            (Client.handshake(transport), addr)
+            (tell_handshake(transport, VersionMsg::new()), addr)
         });
 
     let server = clients.for_each(|(client, addr)| {
@@ -74,8 +74,12 @@ fn main() {
                         }
                     }
 
-                    Client.welcome(transport, name.clone(), grid.clone(), timeout)
-                        .map(move |transport| (name, transport))
+                    let welcome_msg = WelcomeMsg {
+                        name: name.clone(),
+                        grid: grid.clone(),
+                        timeout: timeout,
+                    };
+                    tell_welcome(transport, welcome_msg).map(move |transport| (name, transport))
                 })
                 .then(move |result| {
                     match result {
@@ -114,9 +118,9 @@ fn main() {
 }
 
 fn play_game(mut engine: Engine<OsRng>,
-             players: Vec<(String, MsgTransport)>,
+             players: Vec<Client>,
              timeout: Option<Duration>)
-             -> BoxFuture<(State, Vec<(String, MsgTransport)>), ProtocolError> {
+             -> BoxFuture<(State, Vec<Client>), ProtocolError> {
     // Add players to the game.
     for &(ref name, _) in players.iter() {
         engine.add_player(name.clone());
@@ -126,8 +130,8 @@ fn play_game(mut engine: Engine<OsRng>,
     let engine = Arc::new(Mutex::new(engine));
 
     // Issue GameMsg to all players.
-    let game = engine.lock().unwrap().game.game.clone();
-    let game_future = game_future(game, players);
+    let new_game_msg = NewGameMsg { game: engine.lock().unwrap().game.game.clone() };
+    let game_future = tell_new_game(players, new_game_msg);
 
     let loop_future = game_future.and_then(move |players| {
         let turn = engine.lock().unwrap().game.turn.clone();
@@ -139,19 +143,20 @@ fn play_game(mut engine: Engine<OsRng>,
 
 fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
              turn: TurnState,
-             players: Vec<(String, MsgTransport)>)
-             -> BoxFuture<(State, Vec<(String, MsgTransport)>), ProtocolError> {
+             players: Vec<Client>)
+             -> BoxFuture<(State, Vec<Client>), ProtocolError> {
     let engine_ref2 = engine.clone();
     let engine_ref3 = engine.clone();
-    futures::done(Ok((turn, players)))
-        .and_then(|(turn, players)| turn_future(turn, players))
+    let turn_msg = TurnMsg { turn: turn };
+
+    take_turn(players, turn_msg)
         .map(move |mut players_with_move_msgs| {
             // Separate players_with_move_msgs into players and moves.
             // @TODO: Borrow issues are now absent - reimplement functionally.
             let mut moves: HashMap<String, Direction> = HashMap::new();
-            let mut players: Vec<(String, MsgTransport)> = vec![];
-            for (direction, name, transport) in players_with_move_msgs.drain(..) {
-                moves.insert(name.clone(), direction);
+            let mut players: Vec<Client> = vec![];
+            for (move_msg, (name, transport)) in players_with_move_msgs.drain(..) {
+                moves.insert(name.clone(), move_msg.direction);
                 players.push((name, transport));
             }
             println!("{:?}", moves.clone());
@@ -165,7 +170,8 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
             let engine_lock = engine_ref3.lock().unwrap();
             if engine_lock.concluded() {
                 let state = engine_lock.game.clone();
-                game_over_future(state.turn.clone(), players)
+                let game_over_msg = GameOverMsg { turn: state.turn.clone() };
+                tell_game_over(players, game_over_msg)
                     .map(|players| (state, players))
                     .boxed()
             } else {
@@ -173,50 +179,4 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
             }
         })
         .boxed()
-}
-
-fn game_future(game: GameState,
-               players: Vec<(String, MsgTransport)>)
-               -> BoxFuture<Vec<(String, MsgTransport)>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            Client.game(transport, game.clone())
-                .map(move |transport| (name, transport))
-                .boxed()
-        })
-        .boxed()
-}
-
-fn turn_future(turn: TurnState,
-               players: Vec<(String, MsgTransport)>)
-               -> BoxFuture<Vec<(Direction, String, MsgTransport)>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            Client.turn(transport, turn.clone())
-                .map(move |(move_msg, transport)| (move_msg.direction, name, transport))
-                .boxed()
-        })
-        .boxed()
-}
-
-fn game_over_future(turn: TurnState,
-                    players: Vec<(String, MsgTransport)>)
-                    -> BoxFuture<Vec<(String, MsgTransport)>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            Client.game_over(transport, turn.clone())
-                .map(move |transport| (name, transport))
-                .boxed()
-        })
-        .boxed()
-}
-
-// @TODO: Remove Box requirement.
-/// Map a collection to a vector of futures using a provided callback. Then run all those
-/// futures in parallel using future::join_all.
-fn futurise_and_join<I, F, O, E>(items: I, f: F) -> future::JoinAll<Vec<BoxFuture<O, E>>>
-    where I: IntoIterator,
-          F: FnMut(I::Item) -> BoxFuture<O, E>
-{
-    let futurised_items = items.into_iter()
-        .map(f)
-        .collect();
-    future::join_all(futurised_items)
 }

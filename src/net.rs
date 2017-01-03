@@ -39,84 +39,95 @@
 
 use std::io;
 use std::str;
-use std::time::Duration;
 use tokio_core::io::Codec;
 use std::error::Error;
 use std::marker::Send;
 
-use futures::{BoxFuture, Future, Stream, Sink};
+use futures::{future, BoxFuture, Future, Stream, Sink};
 use tokio_core::net::TcpStream;
 use tokio_core::io::{EasyBuf, Framed};
 use serde_json;
 
-use grid::*;
-use state::*;
 use protocol::*;
 
 pub type MsgTransport = Framed<TcpStream, MsgCodec>;
 pub type SendFuture = BoxFuture<MsgTransport, ProtocolError>;
 pub type RecvFuture<M: TypedMsg> = BoxFuture<(M, MsgTransport), ProtocolError>;
+pub type Client = (String, MsgTransport);
 
-// Data used to when processing a client to perform various operations over its
-// lifetime.
-pub struct Client;
+pub fn send_msg<M: TypedMsg>(transport: MsgTransport, typed_msg: M) -> SendFuture
+    where M: Send + 'static
+{
+    let msg = Msg::from_typed(typed_msg);
+    transport.send(msg).map_err(|e| ProtocolError::from(e)).boxed()
+}
 
-// http://aturon.github.io/blog/2016/08/11/futures/
-// https://raw.githubusercontent.com/tokio-rs/tokio-socks5/master/src/main.rs
-impl Client {
-    fn send_msg<M: TypedMsg>(transport: MsgTransport, typed_msg: M) -> SendFuture
-        where M: Send + 'static
-    {
-        let msg = Msg::from_typed(typed_msg);
-        transport.send(msg).map_err(|e| ProtocolError::from(e)).boxed()
-    }
+pub fn recv_msg<M: TypedMsg>(transport: MsgTransport) -> RecvFuture<M>
+    where M: Send + 'static
+{
+    transport.into_future()
+        .map_err(|(e, _)| ProtocolError::from(e))
+        .and_then(|(option_msg, transport)| {
+            option_msg.ok_or(ProtocolError::NoMsgReceived)
+                .and_then(|msg| msg.to_typed().map_err(|e| ProtocolError::from(e)))
+                .and_then(|typed_msg| Ok((typed_msg, transport)))
+        })
+        .boxed()
+}
 
-    fn recv_msg<M: TypedMsg>(transport: MsgTransport) -> RecvFuture<M>
-        where M: Send + 'static
-    {
-        transport.into_future()
-            .map_err(|(e, _)| ProtocolError::from(e))
-            .and_then(|(option_msg, transport)| {
-                option_msg.ok_or(ProtocolError::NoMsgReceived)
-                    .and_then(|msg| msg.to_typed().map_err(|e| ProtocolError::from(e)))
-                    .and_then(|typed_msg| Ok((typed_msg, transport)))
-            })
-            .boxed()
-    }
+pub fn tell_handshake(transport: MsgTransport, version_msg: VersionMsg) -> RecvFuture<IdentifyMsg> {
+    send_msg(transport, version_msg).and_then(recv_msg).boxed()
+}
 
-    pub fn handshake(self, transport: MsgTransport) -> RecvFuture<IdentifyMsg> {
-        let version_msg = VersionMsg::new();
-        Self::send_msg(transport, version_msg).and_then(Self::recv_msg).boxed()
-    }
+pub fn tell_welcome(transport: MsgTransport, welcome_msg: WelcomeMsg) -> SendFuture {
+    send_msg(transport, welcome_msg)
+}
 
-    pub fn welcome(self,
-                   transport: MsgTransport,
-                   name: String,
-                   grid: Grid,
-                   timeout: Option<Duration>)
-                   -> SendFuture {
-        let welcome_msg = WelcomeMsg {
-            name: name,
-            grid: grid,
-            timeout: timeout,
-        };
-        Self::send_msg(transport, welcome_msg)
-    }
+pub fn tell_new_game(players: Vec<Client>,
+                     new_game_msg: NewGameMsg)
+                     -> BoxFuture<Vec<Client>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            send_msg(transport, new_game_msg.clone())
+                .map(move |transport| (name, transport))
+                .boxed()
+        })
+        .boxed()
+}
 
-    pub fn game(self, transport: MsgTransport, game: GameState) -> SendFuture {
-        let new_game_msg = NewGameMsg { game: game };
-        Self::send_msg(transport, new_game_msg).boxed()
-    }
+pub fn take_turn(players: Vec<Client>,
+                 turn_msg: TurnMsg)
+                 -> BoxFuture<Vec<(MoveMsg, Client)>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            send_msg(transport, turn_msg.clone())
+                .and_then(recv_msg)
+                .map(move |(move_msg, transport)| (move_msg, (name, transport)))
+                .boxed()
+        })
+        .boxed()
+}
 
-    pub fn turn(self, transport: MsgTransport, turn: TurnState) -> RecvFuture<MoveMsg> {
-        let turn_msg = TurnMsg { turn: turn };
-        Self::send_msg(transport, turn_msg).and_then(Self::recv_msg).boxed()
-    }
+pub fn tell_game_over(players: Vec<Client>,
+                      game_over_msg: GameOverMsg)
+                      -> BoxFuture<Vec<Client>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            send_msg(transport, game_over_msg.clone())
+                .map(move |transport| (name, transport))
+                .boxed()
+        })
+        .boxed()
+}
 
-    pub fn game_over(self, transport: MsgTransport, turn: TurnState) -> SendFuture {
-        let game_over_msg = GameOverMsg { turn: turn };
-        Self::send_msg(transport, game_over_msg).boxed()
-    }
+// @TODO: Remove Box requirement.
+/// Map a collection to a vector of futures using a provided callback. Then run all those
+/// futures in parallel using future::join_all.
+pub fn futurise_and_join<I, F, O, E>(items: I, f: F) -> future::JoinAll<Vec<BoxFuture<O, E>>>
+    where I: IntoIterator,
+          F: FnMut(I::Item) -> BoxFuture<O, E>
+{
+    let futurised_items = items.into_iter()
+        .map(f)
+        .collect();
+    future::join_all(futurised_items)
 }
 
 // https://github.com/tokio-rs/tokio-line/blob/master/src/framed_transport.rs
