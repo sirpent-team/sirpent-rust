@@ -147,16 +147,21 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
              -> BoxFuture<(State, Vec<Client>), ProtocolError> {
     let engine_ref2 = engine.clone();
     let engine_ref3 = engine.clone();
-    let turn_msg = TurnMsg { turn: turn };
 
+    let turn_msg = TurnMsg { turn: turn };
     take_turn(players, turn_msg)
         .map(move |mut players_with_move_msgs| {
             // Separate players_with_move_msgs into players and moves.
             // @TODO: Borrow issues are now absent - reimplement functionally.
             let mut moves: HashMap<String, Direction> = HashMap::new();
             let mut players: Vec<Client> = vec![];
-            for (move_msg, (name, transport)) in players_with_move_msgs.drain(..) {
-                moves.insert(name.clone(), move_msg.direction);
+            for (opt_move_msg, (name, transport)) in players_with_move_msgs.drain(..) {
+                match opt_move_msg {
+                    Some(move_msg) => {
+                        moves.insert(name.clone(), move_msg.direction);
+                    }
+                    _ => {}
+                };
                 players.push((name, transport));
             }
             println!("{:?}", moves.clone());

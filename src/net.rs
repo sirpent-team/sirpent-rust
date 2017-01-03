@@ -94,14 +94,25 @@ pub fn tell_new_game(players: Vec<Client>,
         .boxed()
 }
 
+// @TODO: This only takes MoveMsgs from living players, but sends TurnMsg to all.
+//        Implementing that restriction at this level is unpleasant. It makes a lot
+//        of sense to do in the wrapper vs composing one future for living players
+//        and one future for dead ones. But it's too high-level to keep here.
+// @TODO: In any case for God's sake test this, and equivalent restriction in Engine.
 pub fn take_turn(players: Vec<Client>,
                  turn_msg: TurnMsg)
-                 -> BoxFuture<Vec<(MoveMsg, Client)>, ProtocolError> {
+                 -> BoxFuture<Vec<(Option<MoveMsg>, Client)>, ProtocolError> {
     futurise_and_join(players, |(name, transport)| {
-            send_msg(transport, turn_msg.clone())
-                .and_then(recv_msg)
-                .map(move |(move_msg, transport)| (move_msg, (name, transport)))
-                .boxed()
+            if turn_msg.turn.snakes.contains_key(&name) {
+                send_msg(transport, turn_msg.clone())
+                    .and_then(recv_msg)
+                    .map(move |(move_msg, transport)| (Some(move_msg), (name, transport)))
+                    .boxed()
+            } else {
+                send_msg(transport, turn_msg.clone())
+                    .map(move |transport| (None, (name, transport)))
+                    .boxed()
+            }
         })
         .boxed()
 }
