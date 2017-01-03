@@ -16,8 +16,10 @@ use std::str;
 use rand::OsRng;
 use std::collections::{HashSet, HashMap};
 use std::time::Duration;
+use std::iter;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use futures::{future, Future, BoxFuture, Stream};
+use futures::{future, stream, Future, BoxFuture, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Remote};
 use tokio_core::io::Io;
@@ -60,11 +62,13 @@ fn main() {
     // * Once game is concluded return player clients to the pool.
     // * After a short wait duration play a new game, as before with all pooled player clients.
     // * Continue indefinitely.
-    handle.spawn(games(lp.remote(),
-                       names.clone(),
+    lp.run(games(names.clone(),
                        grid.clone(),
                        timeout.clone(),
-                       players.clone()));
+                       players.clone())
+        .into_future()
+        .map(|_| ())
+        .map_err(|_| ())).unwrap();
 
     // Poll event loop to keep program running.
     loop {
@@ -137,25 +141,37 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
     }
 }
 
-fn games(remote_handle: Remote,
-         names: Arc<Mutex<HashSet<String>>>,
+fn games(names: Arc<Mutex<HashSet<String>>>,
          grid: Grid,
          timeout: Option<Duration>,
          players: Arc<Mutex<Vec<Client>>>)
-         -> BoxFuture<(), ()> {
+         -> stream::BoxStream<(), ()> {
     let grid_ref = grid.clone();
-    let players_ref = players.clone();
+    let players_ref1 = players.clone();
     let timeout_ref = timeout.clone();
-    future::done(Ok(()))
-        .map(move |_| {
-            let engine = Engine::new(OsRng::new().unwrap(), grid_ref);
-            let mut players_lock = players_ref.lock().unwrap();
-            let game_players = players_lock.drain(..).collect();
-            play_game(engine, game_players, timeout_ref)
-        })
+    let playing = Arc::new(AtomicBool::new(false));
+    let playing_ref1 = playing.clone();
+    let playing_ref2 = playing.clone();
+    stream::iter(iter::repeat(()).map(Ok))
+        .skip_while(move |_| Ok(playing_ref1.load(Ordering::Relaxed)))
         .and_then(move |_| {
-            // @TODO: This recursive call will cause a stack overflow.
-            games(remote_handle, names, grid, timeout, players)
+            let playing_ref3 = playing_ref2.clone();
+            playing_ref2.store(true, Ordering::Relaxed);
+            let players_ref2 = players_ref1.clone();
+            let engine = Engine::new(OsRng::new().unwrap(), grid_ref);
+            let mut players_lock = players_ref1.lock().unwrap();
+            let game_players = players_lock.drain(..).collect();
+            play_game(engine, game_players, timeout_ref).and_then(move |(state, mut players)| {
+                println!("End of game! {:?}", state);
+                let mut players_lock = players_ref2.lock().unwrap();
+                players_lock.append(&mut players);
+                playing_ref3.store(false, Ordering::Relaxed);
+                future::done(Ok(()))
+            })
+        })
+        .map_err(|e| {
+            println!("Error bubbled up to games: {:?}", e);
+            ()
         })
         .boxed()
 }
@@ -169,60 +185,50 @@ fn play_game(mut engine: Engine<OsRng>,
         engine.add_player(name.clone());
     }
 
-    // Wrap engine in sync primitives.
-    let engine = Arc::new(Mutex::new(engine));
-
     // Issue GameMsg to all players.
-    let game = engine.lock().unwrap().game.game.clone();
+    let game = engine.game.game.clone();
     let new_game_msg = NewGameMsg { game: game };
-    let game_future = tell_new_game(players, new_game_msg);
+    tell_new_game(players, new_game_msg)
+        .and_then(|players| {
+            let concluded = Arc::new(AtomicBool::new(false));
+            let concluded_ref1 = concluded.clone();
+            stream::iter(iter::repeat(()).map(Ok))
+                .take_while(move |_| Ok(concluded_ref1.load(Ordering::Relaxed)))
+                .fold((engine, players), move |(mut engine, players), _| {
+                    let concluded_ref2 = concluded.clone();
+                    let turn_msg = TurnMsg { turn: engine.game.turn.clone() };
+                    take_turn(players, turn_msg)
+                        .map(move |mut players_with_move_msgs| {
+                            // Separate players_with_move_msgs into players and moves.
+                            let mut moves: HashMap<String, Direction> = HashMap::new();
+                            let players: Vec<Client> = players_with_move_msgs.drain(..)
+                                .map(|(opt_move_msg, (name, transport))| {
+                                    if opt_move_msg.is_some() {
+                                        moves.insert(name.clone(), opt_move_msg.unwrap().direction);
+                                    }
+                                    (name, transport)
+                                })
+                                .collect();
+                            println!("{:?}", moves.clone());
 
-    let loop_future = game_future.and_then(move |players| {
-        // @TODO: This recursive call may cause a stack overflow.
-        play_loop(players, engine.clone())
-    });
+                            // Compute and save the next turn.
+                            engine.advance_turn(moves);
+                            concluded_ref2.store(engine.concluded(), Ordering::Relaxed);
 
-    return loop_future.boxed();
-}
-
-fn play_loop(players: Vec<Client>,
-             engine: Arc<Mutex<Engine<OsRng>>>)
-             -> BoxFuture<(State, Vec<Client>), ProtocolError> {
-    let turn = engine.lock().unwrap().game.turn.clone();
-
-    let turn_msg = TurnMsg { turn: turn };
-    take_turn(players, turn_msg)
-        .and_then(move |mut players_with_move_msgs| {
-            // Separate players_with_move_msgs into players and moves.
-            let mut moves: HashMap<String, Direction> = HashMap::new();
-            let players: Vec<Client> = players_with_move_msgs.drain(..)
-                .map(|(opt_move_msg, (name, transport))| {
-                    if opt_move_msg.is_some() {
-                        moves.insert(name.clone(), opt_move_msg.unwrap().direction);
-                    }
-                    (name, transport)
+                            (engine, players)
+                        })
+                        .and_then(|(engine, players)| {
+                            let turn = engine.game.turn.clone();
+                            tell_dead(players, turn).map(|players| (engine, players))
+                        })
                 })
-                .collect();
-            println!("{:?}", moves.clone());
-
-            let engine_ref = engine.clone();
-            let mut engine_lock = engine_ref.lock().unwrap();
-
-            // Compute and save the next turn.
-            let new_turn = engine_lock.advance_turn(moves);
-
-            let state = engine_lock.game.clone();
-            if engine_lock.concluded() {
-                let game_over_msg = GameOverMsg { turn: new_turn.clone() };
-                tell_game_over(players, game_over_msg)
-                    .and_then(move |players| tell_winners(players, new_turn))
-                    .map(move |players| (state.clone(), players))
-                    .boxed()
-            } else {
-                tell_dead(players, new_turn)
-                    .and_then(move |players| play_loop(players, engine).boxed())
-                    .boxed()
-            }
+                .and_then(|(engine, players)| {
+                    let turn = engine.game.turn.clone();
+                    let game_over_msg = GameOverMsg { turn: turn.clone() };
+                    tell_game_over(players, game_over_msg)
+                        .and_then(move |players| tell_winners(players, turn))
+                        .map(move |players| (engine.game, players))
+                })
         })
         .boxed()
 }
