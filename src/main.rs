@@ -130,37 +130,33 @@ fn play_game(mut engine: Engine<OsRng>,
     let engine = Arc::new(Mutex::new(engine));
 
     // Issue GameMsg to all players.
-    let new_game_msg = NewGameMsg { game: engine.lock().unwrap().game.game.clone() };
+    let game = engine.lock().unwrap().game.game.clone();
+    let new_game_msg = NewGameMsg { game: game };
     let game_future = tell_new_game(players, new_game_msg);
 
-    let loop_future = game_future.and_then(move |players| {
-        let turn = engine.lock().unwrap().game.turn.clone();
-        play_loop(engine.clone(), turn, players)
-    });
+    let loop_future = game_future.and_then(move |players| play_loop(players, engine.clone()));
 
     return loop_future.boxed();
 }
 
-fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
-             turn: TurnState,
-             players: Vec<Client>)
+fn play_loop(players: Vec<Client>,
+             engine: Arc<Mutex<Engine<OsRng>>>)
              -> BoxFuture<(State, Vec<Client>), ProtocolError> {
+    let turn = engine.lock().unwrap().game.turn.clone();
+
     let turn_msg = TurnMsg { turn: turn };
     take_turn(players, turn_msg)
         .and_then(move |mut players_with_move_msgs| {
             // Separate players_with_move_msgs into players and moves.
-            // @TODO: Borrow issues are now absent - reimplement functionally.
             let mut moves: HashMap<String, Direction> = HashMap::new();
-            let mut players: Vec<Client> = vec![];
-            for (opt_move_msg, (name, transport)) in players_with_move_msgs.drain(..) {
-                match opt_move_msg {
-                    Some(move_msg) => {
-                        moves.insert(name.clone(), move_msg.direction);
+            let players: Vec<Client> = players_with_move_msgs.drain(..)
+                .map(|(opt_move_msg, (name, transport))| {
+                    if opt_move_msg.is_some() {
+                        moves.insert(name.clone(), opt_move_msg.unwrap().direction);
                     }
-                    _ => {}
-                };
-                players.push((name, transport));
-            }
+                    (name, transport)
+                })
+                .collect();
             println!("{:?}", moves.clone());
 
             let engine_ref = engine.clone();
@@ -177,8 +173,8 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
                     .map(move |players| (state.clone(), players))
                     .boxed()
             } else {
-                tell_dead(players, new_turn.clone())
-                    .and_then(move |players| play_loop(engine, new_turn, players).boxed())
+                tell_dead(players, new_turn)
+                    .and_then(move |players| play_loop(players, engine).boxed())
                     .boxed()
             }
         })
