@@ -16,9 +16,8 @@ use std::str;
 use rand::OsRng;
 use std::collections::{HashSet, HashMap};
 use std::time::Duration;
-use std::thread;
 
-use futures::{Future, BoxFuture, Stream};
+use futures::{future, Future, BoxFuture, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Remote};
 use tokio_core::io::Io;
@@ -49,7 +48,6 @@ fn main() {
     let players = Arc::new(Mutex::new(vec![]));
 
     // Run TCP server to welcome clients and register them as players.
-    let handle = lp.handle();
     handle.spawn(server(listener,
                         lp.remote(),
                         names.clone(),
@@ -57,27 +55,16 @@ fn main() {
                         timeout.clone(),
                         players.clone()));
 
-    // @TODO: As the server is only being spawned there is no *need* for a second thread.
-    // The integration of games with the rest of the program is unclear but bear the above in mind.
-    //
-    // Game requirements:
+    // @TODO: Game requirements:
     // * Take existing player clients and play a game of sirpent with them until completion.
     // * Once game is concluded return player clients to the pool.
     // * After a short wait duration play a new game, as before with all pooled player clients.
     // * Continue indefinitely.
-    //let names_ref = names.clone();
-    let players_ref = players.clone();
-    //let timeout_ref = timeout.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_secs(10));
-
-        let engine = Engine::new(OsRng::new().unwrap(), grid.clone());
-        let mut players_lock = players_ref.lock().unwrap();
-        let games = play_game(engine, players_lock.drain(..).collect(), timeout);
-
-        let mut lp = Core::new().unwrap();
-        lp.run(games).unwrap();
-    });
+    handle.spawn(games(lp.remote(),
+                       names.clone(),
+                       grid.clone(),
+                       timeout.clone(),
+                       players.clone()));
 
     // Poll event loop to keep program running.
     loop {
@@ -150,6 +137,29 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
     }
 }
 
+fn games(remote_handle: Remote,
+         names: Arc<Mutex<HashSet<String>>>,
+         grid: Grid,
+         timeout: Option<Duration>,
+         players: Arc<Mutex<Vec<Client>>>)
+         -> BoxFuture<(), ()> {
+    let grid_ref = grid.clone();
+    let players_ref = players.clone();
+    let timeout_ref = timeout.clone();
+    future::done(Ok(()))
+        .map(move |_| {
+            let engine = Engine::new(OsRng::new().unwrap(), grid_ref);
+            let mut players_lock = players_ref.lock().unwrap();
+            let game_players = players_lock.drain(..).collect();
+            play_game(engine, game_players, timeout_ref)
+        })
+        .and_then(move |_| {
+            // @TODO: This recursive call will cause a stack overflow.
+            games(remote_handle, names, grid, timeout, players)
+        })
+        .boxed()
+}
+
 fn play_game(mut engine: Engine<OsRng>,
              players: Vec<Client>,
              timeout: Option<Duration>)
@@ -167,7 +177,10 @@ fn play_game(mut engine: Engine<OsRng>,
     let new_game_msg = NewGameMsg { game: game };
     let game_future = tell_new_game(players, new_game_msg);
 
-    let loop_future = game_future.and_then(move |players| play_loop(players, engine.clone()));
+    let loop_future = game_future.and_then(move |players| {
+        // @TODO: This recursive call may cause a stack overflow.
+        play_loop(players, engine.clone())
+    });
 
     return loop_future.boxed();
 }
