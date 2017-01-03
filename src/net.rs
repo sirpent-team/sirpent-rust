@@ -112,6 +112,11 @@ impl Client {
         let turn_msg = TurnMsg { turn: turn };
         Self::send_msg(transport, turn_msg).and_then(Self::recv_msg).boxed()
     }
+
+    pub fn game_over(self, transport: MsgTransport, turn: TurnState) -> SendFuture {
+        let game_over_msg = GameOverMsg { turn: turn };
+        Self::send_msg(transport, game_over_msg).boxed()
+    }
 }
 
 // https://github.com/tokio-rs/tokio-line/blob/master/src/framed_transport.rs

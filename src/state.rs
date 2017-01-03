@@ -4,7 +4,7 @@ use std::collections::{HashSet, HashMap};
 use grid::*;
 use snake::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct State {
     pub game: GameState,
     pub turn: TurnState,

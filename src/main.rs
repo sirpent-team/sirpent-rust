@@ -9,18 +9,15 @@ extern crate sirpent;
 extern crate serde_json;
 extern crate rand;
 
-use std::cell::RefCell;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::rc::Rc;
 use std::str;
 use rand::OsRng;
 use std::collections::{HashSet, HashMap};
 use std::time::Duration;
 
-use futures::{future, Async, Poll, Future, BoxFuture, Stream, Sink, IntoFuture};
-use futures::sync::{oneshot, mpsc};
+use futures::{future, Future, BoxFuture, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_core::io::Io;
@@ -82,7 +79,6 @@ fn main() {
     let server = clients.for_each(|(client, addr)| {
         let names_ref = names.clone();
         let players_ref = players.clone();
-        let handle_ref = handle.clone();
         let client_future = client.and_then(move |(identify_msg, transport)| {
                 // Find an unused name based upon the desired_name.
                 // Subtly coded to ensure `names` is locked to ensure unique name still free.
@@ -105,28 +101,29 @@ fn main() {
                 match result {
                     Ok((name, transport)) => {
                         players_ref.lock().unwrap().push((name, transport));
-                    },
+                    }
                     Err(e) => println!("Error welcoming client: {:?}", e),
                 };
-//                Ok(futures::done(Ok(5)))
-//            })
-//            .and_then(|_| {
-                //if players_ref.lock().unwrap().len() > 3 {
-                    let mut players_lock = players_ref.lock().unwrap();
-                    let mut game_players = vec![];
-                    for (msg, transport) in players_lock.drain(..) {
-                        game_players.push(futures::done(Ok((msg, transport))));
-                    }
-                    let game_players_future: BoxFuture<Vec<(String, MsgTransport)>, ProtocolError> =
-                        future::join_all(game_players).boxed();
-                    let grid_ref = grid.clone();
-                    let timeout_ref = timeout.clone();
-                    let play_game_future = game_players_future.and_then(move |game_player2s| {
-                        play_game(grid_ref.clone(), timeout_ref, game_player2s)
-                    });
-                    return play_game_future.map_err(|_| ());
-                //}
-                //Ok(())
+                //                Ok(futures::done(Ok(5)))
+                //            })
+                //            .and_then(|_| {
+                // if players_ref.lock().unwrap().len() > 3 {
+                let mut players_lock = players_ref.lock().unwrap();
+                let mut game_players = vec![];
+                for (msg, transport) in players_lock.drain(..) {
+                    game_players.push(futures::done(Ok((msg, transport))));
+                }
+                let game_players_future: BoxFuture<Vec<(String, MsgTransport)>, ProtocolError> =
+                    future::join_all(game_players).boxed();
+                let grid_ref = grid.clone();
+                let timeout_ref = timeout.clone();
+                let play_game_future = game_players_future.and_then(move |game_player2s| {
+                    let engine = Engine::new(OsRng::new().unwrap(), grid_ref.clone());
+                    play_game(engine, game_player2s, timeout_ref)
+                });
+                return play_game_future.map_err(|_| ()).map(|_| ());
+                // }
+                // Ok(())
             })
             .boxed();
 
@@ -134,106 +131,99 @@ fn main() {
         Ok(())
     });
 
-    /*
-    // println!("{:?}", players.drain(..).map(|player| futures::done(player)));
-    let zz = players.clone();
-    let mut players_drained = zz.lock().unwrap();
-    let mut game_players = vec![];
-    for (msg, transport) in players_drained.drain(..) {
-        game_players.push(futures::done(Ok((msg, transport))));
-    }
-    let game_players_future: BoxFuture<Vec<(String, MsgTransport)>, ProtocolError> =
-        future::join_all(game_players).boxed();
-    let play_game_future = game_players_future.and_then(|game_player2s| {
-        play_game(grid.clone(), timeout, game_player2s)
-    });
-    //handle.spawn(play_game_future);
-    */
-
-    // move_future --> turn_future --> move_future
-
     lp.run(server).unwrap();
 }
 
-fn play_game(grid: Grid,
-             timeout: Option<Duration>,
-             players_vec: Vec<(String, MsgTransport)>) -> BoxFuture<(), ProtocolError> {
-    let game_engine = Arc::new(Mutex::new(Engine::new(OsRng::new().unwrap(), grid)));
-    for &(ref name, _) in players_vec.iter() {
-        game_engine.lock().unwrap().add_player(name.clone());
+fn play_game(mut engine: Engine<OsRng>,
+             players: Vec<(String, MsgTransport)>,
+             timeout: Option<Duration>)
+             -> BoxFuture<(State, Vec<(String, MsgTransport)>), ProtocolError> {
+    // Add players to the game.
+    for &(ref name, _) in players.iter() {
+        engine.add_player(name.clone());
     }
-    let game_engine_lock = game_engine.lock().unwrap();
-    play_turn(game_engine.clone(), game_engine_lock.game.turn.clone(), players_vec)
+
+    // Wrap engine in sync primitives.
+    let engine = Arc::new(Mutex::new(engine));
+
+    // Issue GameMsg to all players.
+    let game_future = future::join_all(players.into_iter()
+        .map(|(name, transport)| {
+            let game = engine.lock().unwrap().game.game.clone();
+            Client.game(transport, game).map(move |transport| (name, transport))
+        })
+        .collect::<Vec<_>>());
+
+    let loop_future = game_future.and_then(move |players| {
+        let turn = engine.lock().unwrap().game.turn.clone();
+        play_loop(engine.clone(), turn, players)
+    });
+
+    return loop_future.boxed();
 }
 
-fn play_turn(game_engine: Arc<Mutex<Engine<OsRng>>>, turn: TurnState, players: Vec<(String, MsgTransport)>) -> BoxFuture<(), ProtocolError> {
+fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
+             turn: TurnState,
+             players: Vec<(String, MsgTransport)>)
+             -> BoxFuture<(State, Vec<(String, MsgTransport)>), ProtocolError> {
+    let engine_ref2 = engine.clone();
+    let engine_ref3 = engine.clone();
+    futures::done(Ok((turn, players)))
+        .and_then(|(turn, players)| play_turn(turn, players))
+        .map(move |(moves, players)| {
+            println!("{:?}", moves.clone());
+            // Compute and save the next turn.
+            let new_turn = engine_ref2.lock().unwrap().turn(moves);
+            engine_ref2.lock().unwrap().game.turn = new_turn.clone();
+            (new_turn, players)
+        })
+        .and_then(move |(new_turn, players)| {
+            if new_turn.snakes.len() > 0 {
+                // Get new moves from players for this new turn.
+                play_loop(engine, new_turn, players).boxed()
+            } else {
+                future::join_all(players.into_iter()
+                        .map(|(name, transport)| {
+                            Client.game_over(transport, new_turn.clone())
+                                .map(move |transport| (name, transport))
+                        })
+                        .collect::<Vec<_>>())
+                    .map(move |players| {
+                        let el = engine_ref3.lock().unwrap();
+                        (el.game.clone(), players)
+                    })
+                    .boxed()
+            }
+        })
+        .boxed()
+}
+
+fn play_turn
+    (turn: TurnState,
+     players: Vec<(String, MsgTransport)>)
+     -> BoxFuture<(HashMap<String, Direction>, Vec<(String, MsgTransport)>), ProtocolError> {
     println!("{:?}", turn.clone());
-    let game_engine_ref1 = game_engine.clone();
-    let game_engine_ref2 = game_engine.clone();
-    futures::done(Ok(turn)).and_then(|turn| {
-        future::join_all(
-            players.into_iter().map(|(name, transport)| {
-                Client.turn(transport, turn.clone())
-                    .map(move |(move_msg, transport)| {
-                        (move_msg, name, transport)
-                    })
-            }).collect::<Vec<_>>()
-        )
-    }).and_then(move |mut players_with_move_msgs| {
-        let mut moves: HashMap<String, Direction> = HashMap::new();
-        let mut players: Vec<(String, MsgTransport)> = vec![];
-        for (move_msg, name, transport) in players_with_move_msgs.drain(..) {
-            moves.insert(name.clone(), move_msg.direction);
-            players.push((name, transport));
-        }
-        println!("{:?}", moves.clone());
 
-        let mut locked_game_engine = game_engine_ref1.lock().unwrap();
-
-        // Compute and save the next turn.
-        let new_turn = locked_game_engine.turn(moves);
-        locked_game_engine.game.turn = new_turn.clone();
-
-        future::ok((new_turn, players))
-    }).and_then(move |(new_turn, players)| {
-        // Get new moves from players for this new turn.
-        play_turn(game_engine_ref2, new_turn, players)
-    }).boxed()
-    /*
-
-    // When a message is received we're ready to begin getting new moves from players.
-    // The fold cleverly preserves players and their updated MsgTransports between each iteration.
-    // @TODO: This does not allow for inserting new players once it has begun!
-    let turn_future = turns_rx.fold(players_vec, |players_vec, turn: TurnState| {
-        future::join_all(
-            players_vec.into_iter().map(|(name, transport)| {
-                Client.turn(transport, turn.clone())
-                    .map(move |(move_msg, transport)| {
-                        moves.lock().unwrap().insert(name.clone(), move_msg.direction);
-                        (name, transport)
-                    })
-            }).collect()
-        )
-    }).and_then(|_| {
-        moved_tx.send(true).map(|_| ()).map_err(|_| ())
-    }).boxed();
-
-    // When a message is received we've completed receiving moves from players and are
-    // ready to perform those moves and advance to the next turn.
-    let transition_future = moved_rx.map_err(|_| ()).and_then(|_| {
-        let locked_game_engine = game_engine.lock().unwrap();
-        let locked_moves = moves.lock().unwrap();
-
-        // Compute and save the next turn.
-        let new_turn = locked_game_engine.turn(locked_moves.clone());
-        locked_game_engine.game.turn = new_turn.clone();
-
-        // Remove this turn's moves before beginning the next.
-        locked_moves.drain();
-
-        // Get new moves from players for this new turn.
-        turns_tx.send(new_turn).map_err(|_| ())
-    }).boxed();
-
-    turn_future.join(transition_future).into_future().boxed()*/
+    futures::done(Ok(turn))
+        .and_then(|turn| {
+            // Collect moves from players.
+            future::join_all(players.into_iter()
+                .map(|(name, transport)| {
+                    Client.turn(transport, turn.clone())
+                        .map(move |(move_msg, transport)| (move_msg, name, transport))
+                })
+                .collect::<Vec<_>>())
+        })
+        .map(move |mut players_with_move_msgs| {
+            // Separate players_with_move_msgs into players and moves.
+            // @TODO: Borrow issues are now absent - reimplement functionally.
+            let mut moves: HashMap<String, Direction> = HashMap::new();
+            let mut players: Vec<(String, MsgTransport)> = vec![];
+            for (move_msg, name, transport) in players_with_move_msgs.drain(..) {
+                moves.insert(name.clone(), move_msg.direction);
+                players.push((name, transport));
+            }
+            (moves, players)
+        })
+        .boxed()
 }

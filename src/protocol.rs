@@ -157,7 +157,9 @@ impl TypedMsg for WonMsg {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GameOverMsg {}
+pub struct GameOverMsg {
+    pub turn: TurnState,
+}
 
 impl TypedMsg for GameOverMsg {
     const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::GameOver;
@@ -326,7 +328,7 @@ mod tests {
             cause_of_death: CauseOfDeath::NoMoveMade("ghi".to_string()),
         });
         convert_typedmsg_to_msg(WonMsg {});
-        convert_typedmsg_to_msg(GameOverMsg {});
+        convert_typedmsg_to_msg(GameOverMsg { turn: TurnState::new() });
 
         let identify_msg = IdentifyMsg { desired_name: "jkl".to_string() };
 
