@@ -48,8 +48,11 @@ use tokio_core::net::TcpStream;
 use tokio_core::io::{EasyBuf, Framed};
 use serde_json;
 
+use state::*;
 use protocol::*;
 
+// @TODO: Would it help my code to implement by own MsgTransport rather than using
+// the Request-Response Service-focused one in tokio?
 pub type MsgTransport = Framed<TcpStream, MsgCodec>;
 pub type SendFuture = BoxFuture<MsgTransport, ProtocolError>;
 pub type RecvFuture<M: TypedMsg> = BoxFuture<(M, MsgTransport), ProtocolError>;
@@ -117,6 +120,20 @@ pub fn take_turn(players: Vec<Client>,
         .boxed()
 }
 
+pub fn tell_dead(players: Vec<Client>, turn: TurnState) -> BoxFuture<Vec<Client>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            if turn.casualties.contains_key(&name) {
+                let died_msg = DiedMsg { cause_of_death: turn.casualties[&*name].0.clone() };
+                send_msg(transport, died_msg)
+                    .map(move |transport| (name, transport))
+                    .boxed()
+            } else {
+                future::done(Ok((name, transport))).boxed()
+            }
+        })
+        .boxed()
+}
+
 pub fn tell_game_over(players: Vec<Client>,
                       game_over_msg: GameOverMsg)
                       -> BoxFuture<Vec<Client>, ProtocolError> {
@@ -124,6 +141,22 @@ pub fn tell_game_over(players: Vec<Client>,
             send_msg(transport, game_over_msg.clone())
                 .map(move |transport| (name, transport))
                 .boxed()
+        })
+        .boxed()
+}
+
+pub fn tell_winners(players: Vec<Client>,
+                    turn: TurnState)
+                    -> BoxFuture<Vec<Client>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            if turn.snakes.contains_key(&name) {
+                let won_msg = WonMsg {};
+                send_msg(transport, won_msg)
+                    .map(move |transport| (name, transport))
+                    .boxed()
+            } else {
+                future::done(Ok((name, transport))).boxed()
+            }
         })
         .boxed()
 }

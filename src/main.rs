@@ -145,12 +145,9 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
              turn: TurnState,
              players: Vec<Client>)
              -> BoxFuture<(State, Vec<Client>), ProtocolError> {
-    let engine_ref2 = engine.clone();
-    let engine_ref3 = engine.clone();
-
     let turn_msg = TurnMsg { turn: turn };
     take_turn(players, turn_msg)
-        .map(move |mut players_with_move_msgs| {
+        .and_then(move |mut players_with_move_msgs| {
             // Separate players_with_move_msgs into players and moves.
             // @TODO: Borrow issues are now absent - reimplement functionally.
             let mut moves: HashMap<String, Direction> = HashMap::new();
@@ -166,21 +163,23 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
             }
             println!("{:?}", moves.clone());
 
-            // Compute and save the next turn.
-            let new_turn = engine_ref2.lock().unwrap().advance_turn(moves);
+            let engine_ref = engine.clone();
+            let mut engine_lock = engine_ref.lock().unwrap();
 
-            (new_turn, players)
-        })
-        .and_then(move |(new_turn, players)| {
-            let engine_lock = engine_ref3.lock().unwrap();
+            // Compute and save the next turn.
+            let new_turn = engine_lock.advance_turn(moves);
+
+            let state = engine_lock.game.clone();
             if engine_lock.concluded() {
-                let state = engine_lock.game.clone();
-                let game_over_msg = GameOverMsg { turn: state.turn.clone() };
+                let game_over_msg = GameOverMsg { turn: new_turn.clone() };
                 tell_game_over(players, game_over_msg)
-                    .map(|players| (state, players))
+                    .and_then(move |players| tell_winners(players, new_turn))
+                    .map(move |players| (state.clone(), players))
                     .boxed()
             } else {
-                play_loop(engine, new_turn, players).boxed()
+                tell_dead(players, new_turn.clone())
+                    .and_then(move |players| play_loop(engine, new_turn, players).boxed())
+                    .boxed()
             }
         })
         .boxed()
