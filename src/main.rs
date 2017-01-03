@@ -41,27 +41,6 @@ fn main() {
 
     println!("Listening on {}", addr);
 
-    // @TODO steps. Try committing as each one approaches done.
-    // (1) Fix any type errors in play_game.
-    // (2) Bring back the old name-deduplication code that went here.
-    //     Without clever code we can't easily track clients as they Err and remove their
-    //     names from the used list. Leave for later.
-    // (3) Use that to drive Client.welcome.
-    // (4) Find how to start play_game going once we have a few players.
-    //     Run it in a separate thread to keep things a little separated?
-    //     Build a vec of player futures (dumb ones - use futures::done() or whatever the
-    //     tiny precompleted one is called) then use join_all to get it ready for play_game?
-    // (5) Bring back an end condition to the game.
-    // (6) Figure out how to retrieve players from an ended game.
-    // (7) (Implement telling players when they die, win, etc.)
-    // (8) Consider sensible refactoring, error types, whether Client methods should be passed
-    //     TypedMsgs rather than parameters - given they *return* TypedMsgs it seems silly to
-    //     pass lots of parameters in. Removing return of TypedMsgs sounds a recipe for pain.
-    //     Try to remove client names from used name list when the client connections drop.
-    //     Client type with fields to wrap around (name:String, TypedMessage)?
-    // (9) Consider what tests are possible. Could we test the futures individually? Engine and
-    //     such are totally free to be tested.
-
     let grid = Grid::new(25);
     let timeout: Option<Duration> = None;
 
@@ -147,10 +126,8 @@ fn play_game(mut engine: Engine<OsRng>,
     let engine = Arc::new(Mutex::new(engine));
 
     // Issue GameMsg to all players.
-    let game_future = futurise_and_join(players, |(name, transport)| {
-        let game = engine.lock().unwrap().game.game.clone();
-        Client.game(transport, game).map(move |transport| (name, transport)).boxed()
-    });
+    let game = engine.lock().unwrap().game.game.clone();
+    let game_future = game_future(game, players);
 
     let loop_future = game_future.and_then(move |players| {
         let turn = engine.lock().unwrap().game.turn.clone();
@@ -167,23 +144,28 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
     let engine_ref2 = engine.clone();
     let engine_ref3 = engine.clone();
     futures::done(Ok((turn, players)))
-        .and_then(|(turn, players)| play_turn(turn, players))
-        .map(move |(moves, players)| {
+        .and_then(|(turn, players)| turn_future(turn, players))
+        .map(move |mut players_with_move_msgs| {
+            // Separate players_with_move_msgs into players and moves.
+            // @TODO: Borrow issues are now absent - reimplement functionally.
+            let mut moves: HashMap<String, Direction> = HashMap::new();
+            let mut players: Vec<(String, MsgTransport)> = vec![];
+            for (direction, name, transport) in players_with_move_msgs.drain(..) {
+                moves.insert(name.clone(), direction);
+                players.push((name, transport));
+            }
             println!("{:?}", moves.clone());
+
             // Compute and save the next turn.
             let new_turn = engine_ref2.lock().unwrap().advance_turn(moves);
+
             (new_turn, players)
         })
         .and_then(move |(new_turn, players)| {
             let engine_lock = engine_ref3.lock().unwrap();
             if engine_lock.concluded() {
                 let state = engine_lock.game.clone();
-
-                futurise_and_join(players, |(name, transport)| {
-                        Client.game_over(transport, new_turn.clone())
-                            .map(move |transport| (name, transport))
-                            .boxed()
-                    })
+                game_over_future(state.turn.clone(), players)
                     .map(|players| (state, players))
                     .boxed()
             } else {
@@ -193,37 +175,42 @@ fn play_loop(engine: Arc<Mutex<Engine<OsRng>>>,
         .boxed()
 }
 
-fn play_turn
-    (turn: TurnState,
-     players: Vec<(String, MsgTransport)>)
-     -> BoxFuture<(HashMap<String, Direction>, Vec<(String, MsgTransport)>), ProtocolError> {
-    println!("{:?}", turn.clone());
-
-    futures::done(Ok(turn))
-        .and_then(|turn| {
-            // Collect moves from players.
-            futurise_and_join(players, |(name, transport)| {
-                Client.turn(transport, turn.clone())
-                    .map(move |(move_msg, transport)| (move_msg, name, transport))
-                    .boxed()
-            })
+fn game_future(game: GameState,
+               players: Vec<(String, MsgTransport)>)
+               -> BoxFuture<Vec<(String, MsgTransport)>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            Client.game(transport, game.clone())
+                .map(move |transport| (name, transport))
+                .boxed()
         })
-        .map(move |mut players_with_move_msgs| {
-            // Separate players_with_move_msgs into players and moves.
-            // @TODO: Borrow issues are now absent - reimplement functionally.
-            let mut moves: HashMap<String, Direction> = HashMap::new();
-            let mut players: Vec<(String, MsgTransport)> = vec![];
-            for (move_msg, name, transport) in players_with_move_msgs.drain(..) {
-                moves.insert(name.clone(), move_msg.direction);
-                players.push((name, transport));
-            }
-            (moves, players)
+        .boxed()
+}
+
+fn turn_future(turn: TurnState,
+               players: Vec<(String, MsgTransport)>)
+               -> BoxFuture<Vec<(Direction, String, MsgTransport)>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            Client.turn(transport, turn.clone())
+                .map(move |(move_msg, transport)| (move_msg.direction, name, transport))
+                .boxed()
+        })
+        .boxed()
+}
+
+fn game_over_future(turn: TurnState,
+                    players: Vec<(String, MsgTransport)>)
+                    -> BoxFuture<Vec<(String, MsgTransport)>, ProtocolError> {
+    futurise_and_join(players, |(name, transport)| {
+            Client.game_over(transport, turn.clone())
+                .map(move |transport| (name, transport))
+                .boxed()
         })
         .boxed()
 }
 
 // @TODO: Remove Box requirement.
-///  Apply a mapping function
+/// Map a collection to a vector of futures using a provided callback. Then run all those
+/// futures in parallel using future::join_all.
 fn futurise_and_join<I, F, O, E>(items: I, f: F) -> future::JoinAll<Vec<BoxFuture<O, E>>>
     where I: IntoIterator,
           F: FnMut(I::Item) -> BoxFuture<O, E>
