@@ -3,7 +3,6 @@ use protocol::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct Snake {
-    pub alive: bool,
     pub segments: Vec<Vector>,
     #[serde(skip_serializing, skip_deserializing)]
     previous_tail: Option<Vector>,
@@ -12,7 +11,6 @@ pub struct Snake {
 impl Snake {
     pub fn new(segments: Vec<Vector>) -> Snake {
         Snake {
-            alive: true,
             segments: segments,
             previous_tail: None,
         }
@@ -78,7 +76,6 @@ mod tests {
 
     impl Arbitrary for Snake {
         fn arbitrary<G: Gen>(g: &mut G) -> Snake {
-            let alive = Arbitrary::arbitrary(g);
             let size = {
                 let s = g.size();
                 g.gen_range(0, s)
@@ -92,7 +89,6 @@ mod tests {
                 })
                 .collect();
             return Snake {
-                alive: alive,
                 segments: segments,
                 previous_tail: None,
             };
@@ -102,7 +98,6 @@ mod tests {
             let mut shrinks = Vec::new();
             for i in 0..self.segments.len() {
                 shrinks.push(Snake {
-                    alive: self.alive,
                     segments: self.segments[..i].to_vec(),
                     previous_tail: None,
                 })
