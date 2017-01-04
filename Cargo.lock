@@ -55,7 +55,7 @@ dependencies = [
 [[package]]
 name = "futures"
 version = "0.1.7"
-source = "git+https://github.com/sirpent-team/futures-rs?branch=sirpent#e7581d5d90ac8fc882c7646ae09a54d117569e82"
+source = "git+https://github.com/sirpent-team/futures-rs?branch=sirpent#b8b75ec48cde6d704e6f0027f3aa29136975e0b5"
 dependencies = [
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

@@ -16,10 +16,9 @@ use std::str;
 use rand::OsRng;
 use std::collections::{HashSet, HashMap};
 use std::time::Duration;
-use std::iter;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
-use futures::{future, stream, Future, BoxFuture, Stream};
+use futures::{future, stream, Future, BoxFuture, Stream, IntoFuture};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Remote};
 use tokio_core::io::Io;
@@ -62,13 +61,14 @@ fn main() {
     // * Once game is concluded return player clients to the pool.
     // * After a short wait duration play a new game, as before with all pooled player clients.
     // * Continue indefinitely.
-    lp.run(games(names.clone(),
-                       grid.clone(),
-                       timeout.clone(),
-                       players.clone())
-        .into_future()
-        .map(|_| ())
-        .map_err(|_| ())).unwrap();
+    thread::spawn(move || {
+        let mut lp = Core::new().unwrap();
+        lp.run(play_games(names.clone(),
+                            grid.clone(),
+                            timeout.clone(),
+                            players.clone()))
+            .unwrap();
+    });
 
     // Poll event loop to keep program running.
     loop {
@@ -141,45 +141,81 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
     }
 }
 
-fn games(names: Arc<Mutex<HashSet<String>>>,
-         grid: Grid,
-         timeout: Option<Duration>,
-         players: Arc<Mutex<Vec<Client>>>)
-         -> stream::BoxStream<(), ()> {
-    let grid_ref = grid.clone();
-    let players_ref1 = players.clone();
-    let timeout_ref = timeout.clone();
-    let playing = Arc::new(AtomicBool::new(false));
-    let playing_ref1 = playing.clone();
-    let playing_ref2 = playing.clone();
-    stream::iter(iter::repeat(()).map(Ok))
-        .skip_while(move |_| Ok(playing_ref1.load(Ordering::Relaxed)))
-        .and_then(move |_| {
-            let playing_ref3 = playing_ref2.clone();
-            playing_ref2.store(true, Ordering::Relaxed);
-            let players_ref2 = players_ref1.clone();
-            let engine = Engine::new(OsRng::new().unwrap(), grid_ref);
-            let mut players_lock = players_ref1.lock().unwrap();
-            let game_players = players_lock.drain(..).collect();
-            play_game(engine, game_players, timeout_ref).and_then(move |(state, mut players)| {
-                println!("End of game! {:?}", state);
-                let mut players_lock = players_ref2.lock().unwrap();
-                players_lock.append(&mut players);
-                playing_ref3.store(false, Ordering::Relaxed);
-                future::done(Ok(()))
-            })
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- //
+// use futures::future::{ok, loop_fn, Future, Ok, Loop};
+// use std::io::Error;
+//
+// struct Client {
+// ping_count: u8,
+// }
+//
+// impl Client {
+// fn new() -> Self {
+// Client { ping_count: 0 }
+// }
+//
+// fn send_ping(self) -> Ok<Self, Error> {
+// ok(Client { ping_count: self.ping_count + 1 })
+// }
+//
+// fn receive_pong(self) -> Ok<(Self, bool), Error> {
+// let done = self.ping_count >= 5;
+// ok((self, done))
+// }
+// }
+//
+// let ping_til_done = loop_fn(Client::new(), |client| {
+// client.send_ping()
+// .and_then(|client| client.receive_pong())
+// .and_then(|(client, done)| {
+// if done {
+// Ok(Loop::Break(client))
+// } else {
+// Ok(Loop::Continue(client))
+// }
+// })
+// });
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- */
+
+fn play_games(names: Arc<Mutex<HashSet<String>>>,
+              grid: Grid,
+              timeout: Option<Duration>,
+              players_pool: Arc<Mutex<Vec<Client>>>)
+              -> BoxFuture<(), ()> {
+    future::loop_fn((), move |_| {
+            let engine = Engine::new(OsRng::new().unwrap(), grid);
+
+            let players_ref = players_pool.clone();
+            let mut players_lock = players_pool.lock().unwrap();
+            if players_lock.len() < 2 {
+                println!("Not enough players yet.");
+                return Ok(future::Loop::Continue(())).into_future().boxed();
+            }
+
+            let players = players_lock.drain(..).collect();
+            play_game(engine, timeout, players)
+                .and_then(move |(engine, mut players)| {
+                    let state = engine.game.clone();
+                    println!("End of game! {:?}", state);
+
+                    let mut players_lock = players_ref.lock().unwrap();
+                    players_lock.append(&mut players);
+                    Ok(future::Loop::Continue(()))
+                })
+                .map_err(|e| {
+                    println!("error {:?}", e);
+                    e
+                })
+                .boxed()
         })
-        .map_err(|e| {
-            println!("Error bubbled up to games: {:?}", e);
-            ()
-        })
+        .map_err(|_| ())
         .boxed()
 }
 
 fn play_game(mut engine: Engine<OsRng>,
-             players: Vec<Client>,
-             timeout: Option<Duration>)
-             -> BoxFuture<(State, Vec<Client>), ProtocolError> {
+             timeout: Option<Duration>,
+             players: Vec<Client>)
+             -> BoxFuture<(Engine<OsRng>, Vec<Client>), ProtocolError> {
     // Add players to the game.
     for &(ref name, _) in players.iter() {
         engine.add_player(name.clone());
@@ -189,46 +225,49 @@ fn play_game(mut engine: Engine<OsRng>,
     let game = engine.game.game.clone();
     let new_game_msg = NewGameMsg { game: game };
     tell_new_game(players, new_game_msg)
-        .and_then(|players| {
-            let concluded = Arc::new(AtomicBool::new(false));
-            let concluded_ref1 = concluded.clone();
-            stream::iter(iter::repeat(()).map(Ok))
-                .take_while(move |_| Ok(concluded_ref1.load(Ordering::Relaxed)))
-                .fold((engine, players), move |(mut engine, players), _| {
-                    let concluded_ref2 = concluded.clone();
-                    let turn_msg = TurnMsg { turn: engine.game.turn.clone() };
-                    take_turn(players, turn_msg)
-                        .map(move |mut players_with_move_msgs| {
-                            // Separate players_with_move_msgs into players and moves.
-                            let mut moves: HashMap<String, Direction> = HashMap::new();
-                            let players: Vec<Client> = players_with_move_msgs.drain(..)
-                                .map(|(opt_move_msg, (name, transport))| {
-                                    if opt_move_msg.is_some() {
-                                        moves.insert(name.clone(), opt_move_msg.unwrap().direction);
-                                    }
-                                    (name, transport)
-                                })
-                                .collect();
-                            println!("{:?}", moves.clone());
+        .and_then(move |players| {
+            future::loop_fn((engine, players), move |(mut engine, players)| {
+                let turn_msg = TurnMsg { turn: engine.game.turn.clone() };
+                take_turn(players, turn_msg)
+                    .map(move |mut players_with_move_msgs| {
+                        // Separate players_with_move_msgs into players and moves.
+                        // @TODO: This should be handled by `take_turn`.
+                        let mut moves: HashMap<String, Direction> = HashMap::new();
+                        let players: Vec<Client> = players_with_move_msgs.drain(..)
+                            .map(|(opt_move_msg, (name, transport))| {
+                                if opt_move_msg.is_some() {
+                                    moves.insert(name.clone(), opt_move_msg.unwrap().direction);
+                                }
+                                (name, transport)
+                            })
+                            .collect();
+                        println!("{:?}", moves.clone());
 
-                            // Compute and save the next turn.
-                            engine.advance_turn(moves);
-                            concluded_ref2.store(engine.concluded(), Ordering::Relaxed);
-
-                            (engine, players)
-                        })
-                        .and_then(|(engine, players)| {
+                        // Compute and save the next turn.
+                        engine.advance_turn(moves);
+                        (engine, players)
+                    })
+                    .and_then(|(engine, players)| {
+                        let turn = engine.game.turn.clone();
+                        tell_dead(players, turn).map(|players| (engine, players))
+                    })
+                    .and_then(|(engine, players)| {
+                        if engine.concluded() {
                             let turn = engine.game.turn.clone();
-                            tell_dead(players, turn).map(|players| (engine, players))
-                        })
-                })
-                .and_then(|(engine, players)| {
-                    let turn = engine.game.turn.clone();
-                    let game_over_msg = GameOverMsg { turn: turn.clone() };
-                    tell_game_over(players, game_over_msg)
-                        .and_then(move |players| tell_winners(players, turn))
-                        .map(move |players| (engine.game, players))
-                })
+                            let game_over_msg = GameOverMsg { turn: turn.clone() };
+                            tell_game_over(players, game_over_msg)
+                                .and_then(move |players| tell_winners(players, turn))
+                                .map(move |players| future::Loop::Break((engine, players)))
+                                .boxed()
+                        } else {
+                            future::ok(future::Loop::Continue((engine, players))).boxed()
+                        }
+                    })
+            })
+        })
+        .map_err(|e| {
+            println!("error {:?}", e);
+            e
         })
         .boxed()
 }
