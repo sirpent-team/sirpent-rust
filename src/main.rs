@@ -1,3 +1,5 @@
+#![feature(conservative_impl_trait)]
+
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -9,6 +11,7 @@ extern crate sirpent;
 extern crate serde_json;
 extern crate rand;
 
+use std::io;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -18,7 +21,8 @@ use std::collections::{HashSet, HashMap};
 use std::time::Duration;
 use std::thread;
 
-use futures::{future, stream, Future, BoxFuture, Stream, IntoFuture};
+use futures::{future, stream, Future, BoxFuture, Stream, IntoFuture, Sink, Map};
+use futures::stream::{SplitStream, SplitSink};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Remote};
 use tokio_core::io::Io;
@@ -46,7 +50,8 @@ fn main() {
     let timeout: Option<Duration> = None;
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players = Arc::new(Mutex::new(vec![]));
+    let players: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>> =
+        Arc::new(Mutex::new(vec![]));
 
     // Run TCP server to welcome clients and register them as players.
     handle.spawn(server(listener,
@@ -81,34 +86,28 @@ fn server(listener: TcpListener,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
           timeout: Option<Duration>,
-          players: Arc<Mutex<Vec<Client>>>)
-          -> BoxFuture<(), ()> {
+          players: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>>)
+          -> impl Future<Item = (), Error = ()> {
     let clients = listener.incoming()
         .map_err(|e| ProtocolError::from(e))
-        .map(move |(socket, addr)| {
-            let transport = socket.framed(MsgCodec);
-            // Say hello and get a desired_name from the client.
-            (tell_handshake(transport, VersionMsg::new()), addr)
-        });
+        .map(|(socket, addr)| Client::from_incoming(socket, addr).handshake());
 
-    let server = clients.for_each(move |(transport, _)| {
+    let server = clients.for_each(move |client_future| {
             // @TODO: If and when I build a client object, keep addr handy in it.
             let mut names_ref = names.clone();
             let players_ref = players.clone();
 
+            // Close clients with unsuccessful handshakes.
+            let client_future = client_future.map_err(|(e, _)| e);
+
             // Find a unique name for the Client and then send WelcomeMsg.
-            let client_future = transport.and_then(move |(identify_msg, transport)| {
+            let client_future = client_future.and_then(move |(identify_msg, client)| {
                 let name = find_unique_name(&mut names_ref, identify_msg.desired_name);
-                let welcome_msg = WelcomeMsg {
-                    name: name.clone(),
-                    grid: grid,
-                    timeout: timeout,
-                };
-                tell_welcome(transport, welcome_msg).map(|transport| (name, transport))
+                client.welcome(name, grid, timeout)
             });
             // Queue the Client as a new player.
-            let client_future = client_future.map(move |(name, transport)| {
-                    players_ref.lock().unwrap().push((name, transport));
+            let client_future = client_future.map(move |client| {
+                    players_ref.lock().unwrap().push(client);
                     ()
                 })
                 .map_err(|e| {
@@ -141,47 +140,14 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
     }
 }
 
-// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- //
-// use futures::future::{ok, loop_fn, Future, Ok, Loop};
-// use std::io::Error;
-//
-// struct Client {
-// ping_count: u8,
-// }
-//
-// impl Client {
-// fn new() -> Self {
-// Client { ping_count: 0 }
-// }
-//
-// fn send_ping(self) -> Ok<Self, Error> {
-// ok(Client { ping_count: self.ping_count + 1 })
-// }
-//
-// fn receive_pong(self) -> Ok<(Self, bool), Error> {
-// let done = self.ping_count >= 5;
-// ok((self, done))
-// }
-// }
-//
-// let ping_til_done = loop_fn(Client::new(), |client| {
-// client.send_ping()
-// .and_then(|client| client.receive_pong())
-// .and_then(|(client, done)| {
-// if done {
-// Ok(Loop::Break(client))
-// } else {
-// Ok(Loop::Continue(client))
-// }
-// })
-// });
-// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- */
-
-fn play_games(names: Arc<Mutex<HashSet<String>>>,
-              grid: Grid,
-              timeout: Option<Duration>,
-              players_pool: Arc<Mutex<Vec<Client>>>)
-              -> BoxFuture<(), ()> {
+fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
+                    grid: Grid,
+                    timeout: Option<Duration>,
+                    players_pool: Arc<Mutex<Vec<Client<S, T>>>>)
+                    -> impl Future<Item = (), Error = ()>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
+          T: Stream<Item = Msg, Error = io::Error> + Send
+{
     future::loop_fn((), move |_| {
             let engine = Engine::new(OsRng::new().unwrap(), grid);
 
@@ -189,7 +155,7 @@ fn play_games(names: Arc<Mutex<HashSet<String>>>,
             let mut players_lock = players_pool.lock().unwrap();
             if players_lock.len() < 2 {
                 println!("Not enough players yet.");
-                return Ok(future::Loop::Continue(())).into_future().boxed();
+                return Ok(future::Loop::Continue(())).into_future();
             }
 
             let players = players_lock.drain(..).collect();
@@ -206,39 +172,42 @@ fn play_games(names: Arc<Mutex<HashSet<String>>>,
                     println!("error {:?}", e);
                     e
                 })
-                .boxed()
         })
+        //.map(|_| ())
         .map_err(|_| ())
-        .boxed()
 }
 
-fn play_game(mut engine: Engine<OsRng>,
-             timeout: Option<Duration>,
-             players: Vec<Client>)
-             -> BoxFuture<(Engine<OsRng>, Vec<Client>), ProtocolError> {
+fn play_game<S, T>
+    (mut engine: Engine<OsRng>,
+     timeout: Option<Duration>,
+     players: Vec<Client<S, T>>)
+     -> impl Future<Item = (Engine<OsRng>, Vec<Client<S, T>>), Error = ProtocolError>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
+          T: Stream<Item = Msg, Error = io::Error> + Send
+{
     // Add players to the game.
-    for &(ref name, _) in players.iter() {
-        engine.add_player(name.clone());
+    for player in players.iter() {
+        engine.add_player(player.name.unwrap().clone());
     }
 
     // Issue GameMsg to all players.
     let game = engine.game.game.clone();
-    let new_game_msg = NewGameMsg { game: game };
-    tell_new_game(players, new_game_msg)
+    // @TODO: Determine if Collect will stop accumulating if a client errored.
+    stream::futures_unordered(players.iter().map(|client| client.new_game(game.clone())))
+        .collect()
         .and_then(move |players| {
             future::loop_fn((engine, players), move |(mut engine, players)| {
-                let turn_msg = TurnMsg { turn: engine.game.turn.clone() };
-                take_turn(players, turn_msg)
+                let turn = engine.game.turn.clone();
+                stream::futures_unordered(players.iter().map(|client| client.turn(turn.clone())))
+                    .collect()
                     .map(move |mut players_with_move_msgs| {
                         // Separate players_with_move_msgs into players and moves.
                         // @TODO: This should be handled by `take_turn`.
                         let mut moves: HashMap<String, Direction> = HashMap::new();
-                        let players: Vec<Client> = players_with_move_msgs.drain(..)
-                            .map(|(opt_move_msg, (name, transport))| {
-                                if opt_move_msg.is_some() {
-                                    moves.insert(name.clone(), opt_move_msg.unwrap().direction);
-                                }
-                                (name, transport)
+                        let players: Vec<Client<S, T>> = players_with_move_msgs.drain(..)
+                            .map(|(move_msg, client)| {
+                                moves.insert(client.name.unwrap().clone(), move_msg.direction);
+                                client
                             })
                             .collect();
                         println!("{:?}", moves.clone());
@@ -249,18 +218,36 @@ fn play_game(mut engine: Engine<OsRng>,
                     })
                     .and_then(|(engine, players)| {
                         let turn = engine.game.turn.clone();
-                        tell_dead(players, turn).map(|players| (engine, players))
+                        stream::futures_unordered(players.iter().map(|client| {
+                                if turn.casualties.contains_key(&client.name.unwrap()) {
+                                    client.die(turn.casualties[&client.name.unwrap()].0)
+                                } else {
+                                    future::done(Ok(client))
+                                }
+                            }))
+                            .collect()
+                            .map(|players| (engine, players))
                     })
                     .and_then(|(engine, players)| {
                         if engine.concluded() {
                             let turn = engine.game.turn.clone();
-                            let game_over_msg = GameOverMsg { turn: turn.clone() };
-                            tell_game_over(players, game_over_msg)
-                                .and_then(move |players| tell_winners(players, turn))
+                            stream::futures_unordered(players.iter()
+                                    .map(|client| client.end_game(turn)))
+                                .collect()
+                                .and_then(move |players| {
+                                    stream::futures_unordered(players.iter()
+                                            .map(|client| {
+                                                if turn.snakes.contains_key(&client.name.unwrap()) {
+                                                    client.win()
+                                                } else {
+                                                    future::done(Ok(client))
+                                                }
+                                            }))
+                                        .collect()
+                                })
                                 .map(move |players| future::Loop::Break((engine, players)))
-                                .boxed()
                         } else {
-                            future::ok(future::Loop::Continue((engine, players))).boxed()
+                            future::ok(future::Loop::Continue((engine, players)))
                         }
                     })
             })
@@ -269,5 +256,4 @@ fn play_game(mut engine: Engine<OsRng>,
             println!("error {:?}", e);
             e
         })
-        .boxed()
 }

@@ -1,178 +1,158 @@
-//! An example [SOCKSv5] proxy server on top of futures
-//!
-//! [SOCKSv5]: https://www.ietf.org/rfc/rfc1928.txt
-//!
-//! This program is intended to showcase many aspects of the futures crate and
-//! I/O integration, explaining how many of the features can interact with one
-//! another and also provide a concrete example to see how easily pieces can
-//! interoperate with one another.
-//!
-//! A SOCKS proxy is a relatively easy protocol to work with. Each TCP
-//! connection made to a server does a quick handshake to determine where data
-//! is going to be proxied to, another TCP socket is opened up to this
-//! destination, and then bytes are shuffled back and forth between the two
-//! sockets until EOF is reached.
-//!
-//! This server implementation is relatively straightforward, but
-//! architecturally has a few interesting pieces:
-//!
-//! * The entire server only has one buffer to read/write data from. This global
-//!   buffer is shared by all connections and each proxy pair simply reads
-//!   through it. This is achieved by waiting for both ends of the proxy to be
-//!   ready, and then the transfer is done.
-//!
-//! * Initiating a SOCKS proxy connection may involve a DNS lookup, which
-//!   is done with the TRust-DNS futures-based resolver. This demonstrates the
-//!   ease of integrating a third-party futures-based library into our futures
-//!   chain.
-//!
-//! * The entire SOCKS handshake is implemented using the various combinators in
-//!   the `futures` crate as well as the `tokio_core::io` module. The actual
-//!   proxying of data, however, is implemented through a manual implementation
-//!   of `Future`. This shows how it's easy to transition back and forth between
-//!   the two, choosing whichever is the most appropriate for the situation at
-//!   hand.
-//!
-//! You can try out this server with `cargo test` or just `cargo run` and
-//! throwing connections at it yourself, and there should be plenty of comments
-//! below to help walk you through the implementation as well!
-
 use std::io;
 use std::str;
 use tokio_core::io::Codec;
 use std::error::Error;
+use std::net::SocketAddr;
+use std::time::Duration;
 use std::marker::Send;
 
-use futures::{future, BoxFuture, Future, Stream, Sink};
+use futures::{Future, Stream, Sink};
+use futures::stream::{SplitStream, SplitSink};
 use tokio_core::net::TcpStream;
-use tokio_core::io::{EasyBuf, Framed};
+use tokio_core::io::{Io, EasyBuf, Framed};
 use serde_json;
 
+use grid::*;
+use snake::*;
 use state::*;
 use protocol::*;
+
+pub struct Client<S, T>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
+          T: Stream<Item = Msg, Error = io::Error> + Send
+{
+    pub name: Option<String>,
+    pub addr: Option<SocketAddr>,
+    msg_tx: S,
+    msg_rx: T,
+}
+
+impl<S, T> Client<S, T>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
+          T: Stream<Item = Msg, Error = io::Error> + Send
+{
+    pub fn new(name: Option<String>,
+               addr: Option<SocketAddr>,
+               msg_tx: S,
+               msg_rx: T)
+               -> Client<S, T> {
+        Client {
+            name: name,
+            addr: addr,
+            msg_tx: msg_tx,
+            msg_rx: msg_rx,
+        }
+    }
+
+    pub fn from_incoming(stream: TcpStream,
+                         addr: SocketAddr)
+                         -> Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>> {
+        let msg_transport = stream.framed(MsgCodec);
+        let (msg_tx, msg_rx) = msg_transport.split();
+        Client::new(None, Some(addr), msg_tx, msg_rx)
+    }
+
+    fn send<M: TypedMsg>(self, typed_msg: M) -> impl Future<Item = Self, Error = ProtocolError> {
+        let name = self.name;
+        let addr = self.addr;
+        let msg_rx = self.msg_rx;
+        let msg = Msg::from_typed(typed_msg);
+        self.msg_tx
+            .send(msg)
+            .map_err(|e| ProtocolError::from(e))
+            .map(move |msg_tx| Client::new(name, addr, msg_tx, msg_rx))
+    }
+
+    fn receive<M: TypedMsg>(self) -> impl Future<Item = (M, Self), Error = (ProtocolError, Self)> {
+        let name = self.name;
+        let addr = self.addr;
+        let msg_tx = self.msg_tx;
+        self.msg_rx
+            .into_future()
+            .map_err(|(e, msg_rx)| (ProtocolError::from(e), msg_rx))
+            .and_then(|(maybe_msg, msg_rx)| {
+                let msg = maybe_msg.ok_or(ProtocolError::NoMsgReceived);
+                match msg.and_then(|msg| Msg::to_typed(msg)) {
+                    Ok(typed_msg) => Ok((typed_msg, msg_rx)),
+                    Err(e) => Err((e, msg_rx)),
+                }
+            })
+            .then(move |result| {
+                match result {
+                    Ok((typed_msg, msg_rx)) => {
+                        Ok((typed_msg, Client::new(name, addr, msg_tx, msg_rx)))
+                    }
+                    Err((e, msg_rx)) => Err((e, Client::new(name, addr, msg_tx, msg_rx))),
+                }
+            })
+    }
+
+    /// Tell the client our protocol version and expect them to send back a name to use.
+    /// A Client will be included with the ProtocolError unless sending the VersionMsg failed.
+    pub fn handshake
+        (self)
+         -> impl Future<Item = (IdentifyMsg, Self), Error = (ProtocolError, Option<Self>)> {
+        self.send(VersionMsg::new())
+            .map_err(|e| (e, None))
+            .and_then(|client| client.receive().map_err(|(e, client)| (e, Some(client))))
+    }
+
+    pub fn welcome(mut self,
+                   name: String,
+                   grid: Grid,
+                   timeout: Option<Duration>)
+                   -> impl Future<Item = Self, Error = ProtocolError> {
+        self.name = Some(name.clone());
+        self.send(WelcomeMsg {
+            name: name,
+            grid: grid,
+            timeout: timeout,
+        })
+    }
+
+    pub fn new_game(self, game: GameState) -> impl Future<Item = Self, Error = ProtocolError> {
+        self.send(NewGameMsg { game: game })
+    }
+
+    pub fn turn(self,
+                turn: TurnState)
+                -> impl Future<Item = (MoveMsg, Self), Error = (ProtocolError, Option<Self>)> {
+        self.send(TurnMsg { turn: turn })
+            .map_err(|e| (e, None))
+            .and_then(|client| client.receive().map_err(|(e, client)| (e, Some(client))))
+    }
+
+    pub fn die(self,
+               cause_of_death: CauseOfDeath)
+               -> impl Future<Item = Self, Error = ProtocolError> {
+        self.send(DiedMsg { cause_of_death: cause_of_death })
+    }
+
+    pub fn end_game(self, turn: TurnState) -> impl Future<Item = Self, Error = ProtocolError> {
+        self.send(GameOverMsg { turn: turn })
+    }
+
+    pub fn win(self) -> impl Future<Item = Self, Error = ProtocolError> {
+        self.send(WonMsg {})
+    }
+}
 
 // @TODO: Would it help my code to implement by own MsgTransport rather than using
 // the Request-Response Service-focused one in tokio?
 pub type MsgTransport = Framed<TcpStream, MsgCodec>;
-pub type SendFuture = BoxFuture<MsgTransport, ProtocolError>;
-pub type RecvFuture<M: TypedMsg> = BoxFuture<(M, MsgTransport), ProtocolError>;
-pub type Client = (String, MsgTransport);
-
-pub fn send_msg<M: TypedMsg>(transport: MsgTransport, typed_msg: M) -> SendFuture
-    where M: Send + 'static
-{
-    let msg = Msg::from_typed(typed_msg);
-    transport.send(msg).map_err(|e| ProtocolError::from(e)).boxed()
-}
-
-pub fn recv_msg<M: TypedMsg>(transport: MsgTransport) -> RecvFuture<M>
-    where M: Send + 'static
-{
-    transport.into_future()
-        .map_err(|(e, _)| ProtocolError::from(e))
-        .and_then(|(option_msg, transport)| {
-            option_msg.ok_or(ProtocolError::NoMsgReceived)
-                .and_then(|msg| msg.to_typed().map_err(|e| ProtocolError::from(e)))
-                .and_then(|typed_msg| Ok((typed_msg, transport)))
-        })
-        .boxed()
-}
-
-pub fn tell_handshake(transport: MsgTransport, version_msg: VersionMsg) -> RecvFuture<IdentifyMsg> {
-    send_msg(transport, version_msg).and_then(recv_msg).boxed()
-}
-
-pub fn tell_welcome(transport: MsgTransport, welcome_msg: WelcomeMsg) -> SendFuture {
-    send_msg(transport, welcome_msg)
-}
-
-pub fn tell_new_game(players: Vec<Client>,
-                     new_game_msg: NewGameMsg)
-                     -> BoxFuture<Vec<Client>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            send_msg(transport, new_game_msg.clone())
-                .map(move |transport| (name, transport))
-                .boxed()
-        })
-        .boxed()
-}
-
-// @TODO: This only takes MoveMsgs from living players, but sends TurnMsg to all.
-//        Implementing that restriction at this level is unpleasant. It makes a lot
-//        of sense to do in the wrapper vs composing one future for living players
-//        and one future for dead ones. But it's too high-level to keep here.
-// @TODO: In any case for God's sake test this, and equivalent restriction in Engine.
-pub fn take_turn(players: Vec<Client>,
-                 turn_msg: TurnMsg)
-                 -> BoxFuture<Vec<(Option<MoveMsg>, Client)>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            if turn_msg.turn.snakes.contains_key(&name) {
-                send_msg(transport, turn_msg.clone())
-                    .and_then(recv_msg)
-                    .map(move |(move_msg, transport)| (Some(move_msg), (name, transport)))
-                    .boxed()
-            } else {
-                send_msg(transport, turn_msg.clone())
-                    .map(move |transport| (None, (name, transport)))
-                    .boxed()
-            }
-        })
-        .boxed()
-}
-
-pub fn tell_dead(players: Vec<Client>, turn: TurnState) -> BoxFuture<Vec<Client>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            if turn.casualties.contains_key(&name) {
-                let died_msg = DiedMsg { cause_of_death: turn.casualties[&*name].0.clone() };
-                send_msg(transport, died_msg)
-                    .map(move |transport| (name, transport))
-                    .boxed()
-            } else {
-                future::done(Ok((name, transport))).boxed()
-            }
-        })
-        .boxed()
-}
-
-pub fn tell_game_over(players: Vec<Client>,
-                      game_over_msg: GameOverMsg)
-                      -> BoxFuture<Vec<Client>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            send_msg(transport, game_over_msg.clone())
-                .map(move |transport| (name, transport))
-                .boxed()
-        })
-        .boxed()
-}
-
-pub fn tell_winners(players: Vec<Client>,
-                    turn: TurnState)
-                    -> BoxFuture<Vec<Client>, ProtocolError> {
-    futurise_and_join(players, |(name, transport)| {
-            if turn.snakes.contains_key(&name) {
-                let won_msg = WonMsg {};
-                send_msg(transport, won_msg)
-                    .map(move |transport| (name, transport))
-                    .boxed()
-            } else {
-                future::done(Ok((name, transport))).boxed()
-            }
-        })
-        .boxed()
-}
 
 // @TODO: Remove Box requirement.
-/// Map a collection to a vector of futures using a provided callback. Then run all those
-/// futures in parallel using future::join_all.
-pub fn futurise_and_join<I, F, O, E>(items: I, f: F) -> future::JoinAll<Vec<BoxFuture<O, E>>>
-    where I: IntoIterator,
-          F: FnMut(I::Item) -> BoxFuture<O, E>
-{
-    let futurised_items = items.into_iter()
-        .map(f)
-        .collect();
-    future::join_all(futurised_items)
-}
+// Map a collection to a vector of futures using a provided callback. Then run all those
+// futures in parallel using future::join_all.
+// pub fn futurise_and_join<I, F, O, E>(items: I, f: F) -> impl Future<Item = Vec<O>, Error = ()>
+//     where I: IntoIterator,
+//           F: FnMut(I::Item) -> BoxFuture<O, E>
+// {
+//     let futurised_items = items.into_iter()
+//         .map(f)
+//         .collect();
+//     future::join_all(futurised_items)
+// }
 
 // https://github.com/tokio-rs/tokio-line/blob/master/src/framed_transport.rs
 pub struct MsgCodec;

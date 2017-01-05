@@ -1,4 +1,4 @@
-#![feature(proc_macro, associated_consts)]
+#![feature(proc_macro, associated_consts, conservative_impl_trait)]
 
 // UUID is used to give unique identifiers to each game.
 extern crate uuid;
