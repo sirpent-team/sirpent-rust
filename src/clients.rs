@@ -200,14 +200,9 @@ impl<S, T> Clients<S, T>
         self.send_to_all(GameOverMsg { turn: turn })
     }
 
-    fn send_to_all<M: TypedMsg>(mut self, typed_msg: M) -> BoxFutureNotSend<Clients<S, T>, ()>
-        where M: 'static
-    {
-        // Build an iterator of futures, each having a living client send the message.
-        let futures = self.clients.drain().map(|(_, client)| {
-            let client: Client<S, T> = client;
-            client.send(typed_msg.clone())
-        });
+    fn returnless_on_all(self,
+                         futures: Vec<BoxFuture<Client<S, T>, (ProtocolError, Client<S, T>)>>)
+                         -> BoxFutureNotSend<Self, ()> {
         // Run futures concurrently.
         // Collect Result<Client, (ProtocolError, Client)> iterator.
         let joined_future = futures_unordered(futures).collect_results();
@@ -234,12 +229,54 @@ impl<S, T> Clients<S, T>
         return Box::new(reconstruct_future);
     }
 
-    fn send_to_some<M: TypedMsg, F>(self,
-                                    typed_msg: M,
-                                    filter_fn: F)
-                                    -> BoxFutureNotSend<Clients<S, T>, ()>
+    fn returns_on_all<R>(self,
+                         futures: Vec<BoxFuture<(R, Client<S, T>),
+                                                (ProtocolError, Client<S, T>)>>)
+                         -> BoxFutureNotSend<(HashMap<String, R>, Self), ()>
+        where R: 'static
+    {
+        // Run futures concurrently.
+        // Collect Result<(M, Client), (ProtocolError, Client)> iterator.
+        let joined_future = futures_unordered(futures).collect_results();
+        // Process each future's returned Result<(M, Client), (ProtocolError, Client)>.
+        let reconstruct_future = joined_future.map(move |client_results| {
+            let mut clients = HashMap::new();
+            let mut failures = HashMap::new();
+            let mut returned = HashMap::new();
+            for client_result in client_results {
+                // Retain successful clients and record the message read.
+                // Drop failed clients and retain their ProtocolError.
+                // @TODO: Determine good approach to dropping clients.
+                match client_result {
+                    Ok((return_, client)) => {
+                        returned.insert(client.name.clone().unwrap(), return_);
+                        clients.insert(client.name.clone().unwrap(), client);
+                    }
+                    Err((e, client)) => {
+                        failures.insert(client.name.clone().unwrap(), e);
+                    }
+                }
+            }
+            // Return the received messages and updated Clients.
+            (returned, Self::new(clients, failures))
+        });
+        return Box::new(reconstruct_future);
+    }
+
+    fn send_to_all<M: TypedMsg>(mut self, typed_msg: M) -> BoxFutureNotSend<Self, ()>
+        where M: 'static
+    {
+        // Build an iterator of futures, each having a living client send the message.
+        let futures = self.clients
+            .drain()
+            .map(|(_, client)| client.send(typed_msg.clone()))
+            .collect::<Vec<_>>();
+        return self.returnless_on_all(futures);
+    }
+
+    fn send_to_some<M: TypedMsg, F>(self, typed_msg: M, filter_fn: F) -> BoxFutureNotSend<Self, ()>
         where F: FnMut(&Client<S, T>) -> bool,
-              M: 'static
+              M: 'static + Send
     {
         let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
         let subset_send_future = subset.send_to_all(typed_msg);
@@ -249,44 +286,17 @@ impl<S, T> Clients<S, T>
         return Box::new(rejoin_future);
     }
 
-    fn receive_from_all<M: TypedMsg>(mut self)
-                                     -> BoxFutureNotSend<(HashMap<String, M>, Clients<S, T>), ()>
+    fn receive_from_all<M: TypedMsg>(mut self) -> BoxFutureNotSend<(HashMap<String, M>, Self), ()>
         where M: 'static
     {
         // Build an iterator of futures, each having a living client try to receive a message.
-        let futures = self.clients.drain().map(|(_, client)| client.receive());
-        // Run futures concurrently.
-        // Collect Result<(M, Client), (ProtocolError, Client)> iterator.
-        let joined_future = futures_unordered(futures).collect_results();
-        // Process each future's returned Result<(M, Client), (ProtocolError, Client)>.
-        let reconstruct_future = joined_future.map(move |client_results| {
-            let mut clients = HashMap::new();
-            let mut failures = HashMap::new();
-            let mut typed_msgs = HashMap::new();
-            for client_result in client_results {
-                // Retain successful clients and record the message read.
-                // Drop failed clients and retain their ProtocolError.
-                // @TODO: Determine good approach to dropping clients.
-                match client_result {
-                    Ok((typed_msg, client)) => {
-                        typed_msgs.insert(client.name.clone().unwrap(), typed_msg);
-                        clients.insert(client.name.clone().unwrap(), client);
-                    }
-                    Err((e, client)) => {
-                        failures.insert(client.name.clone().unwrap(), e);
-                    }
-                }
-            }
-            // Return the received messages and updated Clients.
-            (typed_msgs, Self::new(clients, failures))
-        });
-        return Box::new(reconstruct_future);
+        let futures = self.clients.drain().map(|(_, client)| client.receive()).collect();
+        return self.returns_on_all(futures);
     }
 
-    fn receive_from_some<M: TypedMsg, F>
-        (self,
-         filter_fn: F)
-         -> BoxFutureNotSend<(HashMap<String, M>, Clients<S, T>), ()>
+    fn receive_from_some<M: TypedMsg, F>(self,
+                                         filter_fn: F)
+                                         -> BoxFutureNotSend<(HashMap<String, M>, Self), ()>
         where F: FnMut(&Client<S, T>) -> bool,
               M: 'static
     {
