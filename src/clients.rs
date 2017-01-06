@@ -1,11 +1,12 @@
 use std::io;
-use std::iter::FromIterator;
+use std::iter::{self, FromIterator};
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::marker::Send;
 use std::collections::{HashSet, HashMap};
+use std::collections::hash_map::Keys;
 
-use futures::{future, Future, BoxFuture, Stream, Sink};
+use futures::{Future, BoxFuture, Stream, Sink};
 use futures::stream::{SplitStream, SplitSink, futures_unordered};
 use tokio_core::net::TcpStream;
 use tokio_core::io::Io;
@@ -17,7 +18,6 @@ use state::*;
 use protocol::*;
 
 pub type BoxFutureNotSend<I, E> = Box<Future<Item = I, Error = E>>;
-pub type ClientErr<S, T> = (ProtocolError, Option<Client<S, T>>);
 
 pub struct Client<S, T>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
@@ -64,7 +64,7 @@ impl<S, T> Client<S, T>
         return self;
     }
 
-    fn send<M: TypedMsg>(mut self, typed_msg: M) -> BoxFuture<Self, (ProtocolError, Option<Self>)>
+    fn send<M: TypedMsg>(mut self, typed_msg: M) -> BoxFuture<Self, (ProtocolError, Self)>
         where M: 'static
     {
         let msg = Msg::from_typed(typed_msg);
@@ -72,12 +72,16 @@ impl<S, T> Client<S, T>
             .take()
             .unwrap()
             .send(msg)
-            .map_err(|e| (ProtocolError::from(e), None))
-            .map(|msg_tx| self.with_new_msg_tx(msg_tx))
+            .then(|result| {
+                match result {
+                    Ok(msg_tx) => Ok(self.with_new_msg_tx(msg_tx)),
+                    Err(e) => Err((ProtocolError::from(e), self)),
+                }
+            })
             .boxed()
     }
 
-    fn receive<M: TypedMsg>(mut self) -> BoxFuture<(M, Self), (ProtocolError, Option<Self>)>
+    fn receive<M: TypedMsg>(mut self) -> BoxFuture<(M, Self), (ProtocolError, Self)>
         where M: 'static
     {
         self.msg_rx
@@ -95,7 +99,7 @@ impl<S, T> Client<S, T>
             .then(|result| {
                 match result {
                     Ok((typed_msg, msg_rx)) => Ok((typed_msg, self.with_new_msg_rx(msg_rx))),
-                    Err((e, msg_rx)) => Err((e, Some(self.with_new_msg_rx(msg_rx)))),
+                    Err((e, msg_rx)) => Err((e, self.with_new_msg_rx(msg_rx))),
                 }
             })
             .boxed()
@@ -103,7 +107,7 @@ impl<S, T> Client<S, T>
 
     /// Tell the client our protocol version and expect them to send back a name to use.
     /// A Client will be included with the ProtocolError unless sending the VersionMsg failed.
-    pub fn handshake(self) -> BoxFuture<(IdentifyMsg, Self), (ProtocolError, Option<Self>)> {
+    pub fn handshake(self) -> BoxFuture<(IdentifyMsg, Self), (ProtocolError, Self)> {
         self.send(VersionMsg::new())
             .and_then(|client| client.receive())
             .boxed()
@@ -113,7 +117,7 @@ impl<S, T> Client<S, T>
                    name: String,
                    grid: Grid,
                    timeout: Option<Duration>)
-                   -> BoxFuture<Self, (ProtocolError, Option<Self>)> {
+                   -> BoxFuture<Self, (ProtocolError, Self)> {
         self.name = Some(name.clone());
         self.send(WelcomeMsg {
                 name: name,
@@ -123,29 +127,27 @@ impl<S, T> Client<S, T>
             .boxed()
     }
 
-    pub fn new_game(self, game: GameState) -> BoxFuture<Self, (ProtocolError, Option<Self>)> {
+    pub fn new_game(self, game: GameState) -> BoxFuture<Self, (ProtocolError, Self)> {
         self.send(NewGameMsg { game: game }).boxed()
     }
 
-    pub fn new_turn(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Option<Self>)> {
+    pub fn new_turn(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
         self.send(TurnMsg { turn: turn }).boxed()
     }
 
-    pub fn ask_move(self) -> BoxFuture<(MoveMsg, Self), (ProtocolError, Option<Self>)> {
+    pub fn ask_move(self) -> BoxFuture<(MoveMsg, Self), (ProtocolError, Self)> {
         self.receive().boxed()
     }
 
-    pub fn die(self,
-               cause_of_death: CauseOfDeath)
-               -> BoxFuture<Self, (ProtocolError, Option<Self>)> {
+    pub fn die(self, cause_of_death: CauseOfDeath) -> BoxFuture<Self, (ProtocolError, Self)> {
         self.send(DiedMsg { cause_of_death: cause_of_death }).boxed()
     }
 
-    pub fn win(self) -> BoxFuture<Self, (ProtocolError, Option<Self>)> {
+    pub fn win(self) -> BoxFuture<Self, (ProtocolError, Self)> {
         self.send(WonMsg {}).boxed()
     }
 
-    pub fn end_game(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Option<Self>)> {
+    pub fn end_game(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
         self.send(GameOverMsg { turn: turn }).boxed()
     }
 }
@@ -164,125 +166,147 @@ pub struct Clients<S, T>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static
 {
-    ok_clients: Vec<Client<S, T>>,
-    err_clients: Vec<ClientErr<S, T>>,
+    clients: HashMap<String, Client<S, T>>,
+    failures: HashMap<String, ProtocolError>,
 }
 
 impl<S, T> Clients<S, T>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static
 {
-    pub fn ok_names(&self) -> Vec<String> {
-        let mut names = Vec::new();
-        for ok_client in self.ok_clients.iter() {
-            names.push(ok_client.name.clone().unwrap());
+    /// Typically one creates Clients from an iterator rather than with new.
+    pub fn new(clients: HashMap<String, Client<S, T>>,
+               failures: HashMap<String, ProtocolError>)
+               -> Self {
+        Clients {
+            clients: clients,
+            failures: failures,
         }
-        return names;
     }
 
-    fn new_from_map<F>(mut self, client_to_future_fn: F) -> BoxFutureNotSend<Clients<S, T>, ()>
-        where F: FnMut(Client<S, T>) -> BoxFuture<Client<S, T>, ClientErr<S, T>>
+    pub fn names(&self) -> Keys<String, Client<S, T>> {
+        self.clients.keys()
+    }
+
+    fn send_to_all<M: TypedMsg>(mut self, typed_msg: M) -> BoxFutureNotSend<Clients<S, T>, ()>
+        where M: 'static
     {
-        let mut err_clients = self.err_clients;
-        let futures = self.ok_clients.drain(..).map(client_to_future_fn);
-        Box::new(futures_unordered(futures)
-            .collect_results()
-            .map(move |items| {
-                let mut ok_clients = Vec::new();
-                for item in items {
-                    match item {
-                        Ok(o) => ok_clients.push(o),
-                        Err(e) => err_clients.push(e),
-                    };
+        // Build an iterator of futures, each having a living client send the message.
+        let futures = self.clients.drain().map(|(_, client)| {
+            let client: Client<S, T> = client;
+            client.send(typed_msg.clone())
+        });
+        // Run futures concurrently.
+        // Collect Result<Client, (ProtocolError, Client)> iterator.
+        let joined_future = futures_unordered(futures).collect_results();
+        // Process each future's returned Result<Client, (ProtocolError, Client)>.
+        let reconstruct_future = joined_future.map(move |client_results| {
+            let mut clients = HashMap::new();
+            let mut failures = HashMap::new();
+            for client_result in client_results {
+                // Retain successful clients.
+                // Drop failed clients and retain their ProtocolError.
+                // @TODO: Determine good approach to dropping clients.
+                match client_result {
+                    Ok(client) => {
+                        clients.insert(client.name.clone().unwrap(), client);
+                    }
+                    Err((e, client)) => {
+                        failures.insert(client.name.clone().unwrap(), e);
+                    }
                 }
-                Clients {
-                    ok_clients: ok_clients,
-                    err_clients: err_clients,
-                }
-            }))
+            }
+            // Return the updated Clients.
+            Self::new(clients, failures)
+        });
+        return Box::new(reconstruct_future);
     }
 
-    fn new_from_map_receive<F, M>
-        (mut self,
-         client_to_future_fn: F)
-         -> BoxFutureNotSend<(HashMap<String, Option<M>>, Clients<S, T>), ()>
-        where F: FnMut(Client<S, T>) -> BoxFuture<(Option<M>, Client<S, T>), ClientErr<S, T>>,
+    fn send_to_some<M: TypedMsg, F>(self,
+                                    typed_msg: M,
+                                    filter_fn: F)
+                                    -> BoxFutureNotSend<Clients<S, T>, ()>
+        where F: FnMut(&Client<S, T>) -> bool,
               M: 'static
     {
-        let mut err_clients = self.err_clients;
-        let futures = self.ok_clients.drain(..).map(client_to_future_fn);
-        Box::new(futures_unordered(futures)
-            .collect_results()
-            .map(move |items| {
-                let mut ok_clients = Vec::new();
-                let mut msgs = HashMap::new();
-                for item in items {
-                    match item {
-                        Ok((msg, client)) => {
-                            let name = client.name.clone().unwrap();
-                            msgs.insert(name, msg);
-                            ok_clients.push(client);
-                        }
-                        Err(e) => err_clients.push(e),
-                    };
+        let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
+        let subset_send_future = subset.send_to_all(typed_msg);
+        let rejoin_future = subset_send_future.map(|subset| {
+            subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>()
+        });
+        return Box::new(rejoin_future);
+    }
+
+    fn receive_from_all<M: TypedMsg>(mut self)
+                                     -> BoxFutureNotSend<(HashMap<String, M>, Clients<S, T>), ()>
+        where M: 'static
+    {
+        // Build an iterator of futures, each having a living client try to receive a message.
+        let futures = self.clients.drain().map(|(_, client)| client.receive());
+        // Run futures concurrently.
+        // Collect Result<(M, Client), (ProtocolError, Client)> iterator.
+        let joined_future = futures_unordered(futures).collect_results();
+        // Process each future's returned Result<(M, Client), (ProtocolError, Client)>.
+        let reconstruct_future = joined_future.map(move |client_results| {
+            let mut clients = HashMap::new();
+            let mut failures = HashMap::new();
+            let mut typed_msgs = HashMap::new();
+            for client_result in client_results {
+                // Retain successful clients and record the message read.
+                // Drop failed clients and retain their ProtocolError.
+                // @TODO: Determine good approach to dropping clients.
+                match client_result {
+                    Ok((typed_msg, client)) => {
+                        typed_msgs.insert(client.name.clone().unwrap(), typed_msg);
+                        clients.insert(client.name.clone().unwrap(), client);
+                    }
+                    Err((e, client)) => {
+                        failures.insert(client.name.clone().unwrap(), e);
+                    }
                 }
-                (msgs,
-                 Clients {
-                     ok_clients: ok_clients,
-                     err_clients: err_clients,
-                 })
-            }))
-    }
-
-    pub fn new_game(self, game: GameState) -> BoxFutureNotSend<Self, ()> {
-        Box::new(self.new_from_map(|client| client.new_game(game.clone())))
-    }
-
-    pub fn new_turn(self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
-        Box::new(self.new_from_map(|client| client.new_turn(turn.clone())))
-    }
-
-    pub fn ask_moves(self,
-                     moving_player_names: HashSet<String>)
-                     -> BoxFutureNotSend<(HashMap<String, Option<MoveMsg>>, Self), ()> {
-        Box::new(self.new_from_map_receive(|client| {
-            let name = client.name.clone().unwrap();
-            if moving_player_names.contains(&name) {
-                Box::new(client.ask_move().map(|(move_msg, client)| (Some(move_msg), client)))
-            } else {
-                Box::new(future::done(Ok((None, client))))
             }
-        }))
+            // Return the received messages and updated Clients.
+            (typed_msgs, Self::new(clients, failures))
+        });
+        return Box::new(reconstruct_future);
     }
 
-    pub fn notify_dead(self,
-                       casualties: &HashMap<String, (CauseOfDeath, Snake)>)
-                       -> BoxFutureNotSend<Self, ()> {
-        Box::new(self.new_from_map(|client| {
-            let name = client.name.clone().unwrap();
-            if casualties.contains_key(&name) {
-                client.die(casualties[&name].0.clone())
-            } else {
-                Box::new(future::done(Ok(client)))
-            }
-        }))
+    fn receive_from_some<M: TypedMsg, F>
+        (self,
+         filter_fn: F)
+         -> BoxFutureNotSend<(HashMap<String, M>, Clients<S, T>), ()>
+        where F: FnMut(&Client<S, T>) -> bool,
+              M: 'static
+    {
+        let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
+        let subset_receive_future = subset.receive_from_all();
+        let rejoin_future = subset_receive_future.map(|(subset_typed_msgs, subset)| {
+            let rejoined = subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>();
+            (subset_typed_msgs, rejoined)
+        });
+        return Box::new(rejoin_future);
     }
+}
 
-    pub fn notify_winners(self,
-                          winning_player_names: HashSet<String>)
-                          -> BoxFutureNotSend<Self, ()> {
-        Box::new(self.new_from_map(|client| {
-            let name = client.name.clone().unwrap();
-            if winning_player_names.contains(&name) {
-                client.win()
-            } else {
-                Box::new(future::done(Ok(client)))
-            }
-        }))
-    }
+impl<S, T> IntoIterator for Clients<S, T>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+{
+    type Item = Client<S, T>;
+    type IntoIter = ::std::vec::IntoIter<Client<S, T>>;
 
-    pub fn end_game(self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
-        Box::new(self.new_from_map(|client| client.end_game(turn.clone())))
+    fn into_iter(self) -> Self::IntoIter {
+        // Consume into an iterator and drop the name key.
+        // Dropping the name key loses no information (it's in client.name) and means that
+        // we serialise and deserialise perfectly.
+        // @TODO: Experiment with type signatures of implementing IntoIter/FromIter with and
+        // without name.
+        // @TODO: HashMap::values does not take ownership. Try rewrite this using IntoIter::map.
+        let mut values = Vec::new();
+        for (_, value) in self.clients {
+            values.push(value);
+        }
+        return values.into_iter();
     }
 }
 
@@ -291,13 +315,31 @@ impl<S, T> FromIterator<Client<S, T>> for Clients<S, T>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static
 {
     fn from_iter<I: IntoIterator<Item = Client<S, T>>>(iter: I) -> Self {
-        let mut items = Vec::new();
-        for client in iter {
-            items.push(client);
-        }
         Clients {
-            ok_clients: items,
-            err_clients: Vec::new(),
+            clients: iter.into_iter()
+                .map(|client| (client.name.clone().unwrap(), client))
+                .collect(),
+            failures: HashMap::new(),
+        }
+    }
+}
+
+impl<S, T> Default for Clients<S, T>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+{
+    fn default() -> Clients<S, T> {
+        Clients::new(HashMap::new(), HashMap::new())
+    }
+}
+
+impl<S, T> Extend<Client<S, T>> for Clients<S, T>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+{
+    fn extend<I: IntoIterator<Item = Client<S, T>>>(&mut self, iter: I) {
+        for client in iter {
+            self.clients.insert(client.name.clone().unwrap(), client);
         }
     }
 }

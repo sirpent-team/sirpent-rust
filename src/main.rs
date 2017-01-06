@@ -179,11 +179,10 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
         .map_err(|_| ())
 }
 
-fn play_game<S, T>
-    (engine: Rc<RefCell<Engine<OsRng>>>,
-     timeout: Option<Duration>,
-     players: Clients<S, T>)
-     -> BoxFutureNotSend<(Engine<OsRng>, Vec<Client<S, T>>), ProtocolError>
+fn play_game<S, T>(engine: Rc<RefCell<Engine<OsRng>>>,
+                   timeout: Option<Duration>,
+                   players: Clients<S, T>)
+                   -> BoxFutureNotSend<(Engine<OsRng>, Vec<Client<S, T>>), ProtocolError>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
           T: Stream<Item = Msg, Error = io::Error> + Send
 {
@@ -195,33 +194,35 @@ fn play_game<S, T>
     // Tell players about the new GameState.
     // @TODO: Determine if Collect will stop accumulating if a client errored.
     let game = engine.borrow().state.game.clone();
-    players.new_game(game).and_then(|players| {
-        // Take turns in a loop until game has finished.
-        let loop_callback = |players| {
-            // Tell players the current turn and ask for their next move.
-            let turn = engine.borrow().state.turn.clone();
-            players.new_turn(turn)
-                .and_then(|players| players.ask_moves(turn.snakes.keys().collect()))
-                .and_then(|(moves, players)| {
-                    // Transition to the next turn and tell the players whom died.
-                    let new_turn = engine.borrow_mut().advance_turn(moves);
-                    players.notify_dead(&new_turn.casualties)
-                })
-                .and_then(|players| {
-                    // Decide whether game is complete or further turns will be made.
-                    let new_turn = engine.borrow().state.turn.clone();
-                    if engine.borrow().concluded() {
-                        // Notify winners and inform all players the game is over.
-                        players.notify_winners(new_turn.snakes.keys().collect())
-                            .and_then(|players| players.end_game(new_turn))
-                            .map(|players| future::Loop::Break((engine, players)))
-                    } else {
-                        // Continue playing.
-                        future::ok(future::Loop::Continue((engine, players)))
-                    }
-                })
-                .boxed()
-        };
-        future::loop_fn(players, loop_callback)
-    }).boxed()
+    players.new_game(game)
+        .and_then(|players| {
+            // Take turns in a loop until game has finished.
+            let loop_callback = |players| {
+                // Tell players the current turn and ask for their next move.
+                let turn = engine.borrow().state.turn.clone();
+                players.new_turn(turn)
+                    .and_then(|players| players.ask_moves(turn.snakes.keys().collect()))
+                    .and_then(|(moves, players)| {
+                        // Transition to the next turn and tell the players whom died.
+                        let new_turn = engine.borrow_mut().advance_turn(moves);
+                        players.notify_dead(&new_turn.casualties)
+                    })
+                    .and_then(|players| {
+                        // Decide whether game is complete or further turns will be made.
+                        let new_turn = engine.borrow().state.turn.clone();
+                        if engine.borrow().concluded() {
+                            // Notify winners and inform all players the game is over.
+                            players.notify_winners(new_turn.snakes.keys().collect())
+                                .and_then(|players| players.end_game(new_turn))
+                                .map(|players| future::Loop::Break((engine, players)))
+                        } else {
+                            // Continue playing.
+                            future::ok(future::Loop::Continue((engine, players)))
+                        }
+                    })
+                    .boxed()
+            };
+            future::loop_fn(players, loop_callback)
+        })
+        .boxed()
 }
