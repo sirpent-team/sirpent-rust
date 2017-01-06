@@ -127,6 +127,30 @@ impl<S, T> Client<S, T>
             })
             .boxed()
     }
+
+    pub fn new_game(self, game: GameState) -> BoxFuture<Self, (ProtocolError, Self)> {
+        self.send(NewGameMsg { game: game }).boxed()
+    }
+
+    pub fn new_turn(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
+        self.send(TurnMsg { turn: turn }).boxed()
+    }
+
+    pub fn ask_move(self) -> BoxFuture<(MoveMsg, Self), (ProtocolError, Self)> {
+        self.receive().boxed()
+    }
+
+    pub fn die(self, cause_of_death: CauseOfDeath) -> BoxFuture<Self, (ProtocolError, Self)> {
+        self.send(DiedMsg { cause_of_death: cause_of_death }).boxed()
+    }
+
+    pub fn win(self) -> BoxFuture<Self, (ProtocolError, Self)> {
+        self.send(WonMsg {}).boxed()
+    }
+
+    pub fn end_game(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
+        self.send(GameOverMsg { turn: turn }).boxed()
+    }
 }
 
 // Clients
@@ -169,40 +193,70 @@ impl<S, T> Clients<S, T>
         self.failures.drain()
     }
 
-    pub fn new_game(self, game: GameState) -> BoxFutureNotSend<Self, ()> {
-        self.send_to_all(NewGameMsg { game: game })
+    pub fn new_game(mut self, game: GameState) -> BoxFutureNotSend<Self, ()> {
+        let futures =
+            self.clients.drain().map(|(_, client)| client.new_game(game.clone())).collect();
+        self.clients_dataless_future(futures)
     }
 
-    pub fn new_turn(self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
-        self.send_to_all(TurnMsg { turn: turn })
+    pub fn new_turn(mut self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
+        let futures =
+            self.clients.drain().map(|(_, client)| client.new_turn(turn.clone())).collect();
+        self.clients_dataless_future(futures)
     }
 
-    pub fn ask_moves(self,
-                     movers: HashSet<String>)
+    pub fn ask_moves(mut self,
+                     movers: &HashSet<String>)
                      -> BoxFutureNotSend<(HashMap<String, MoveMsg>, Self), ()> {
-        self.receive_from_some::<MoveMsg, _>(|client| movers.contains(&client.name.clone().unwrap()))
+        let mut futures = Vec::new();
+        for name in movers {
+            match self.clients.remove(name) {
+                Some(client) => {
+                    futures.push(client.ask_move());
+                }
+                None => continue,
+            }
+        }
+        self.clients_dataful_future(futures)
     }
 
-    // @TODO: Implement. Needs to send specific messages to specific players.
-    pub fn die(self, casualties: HashMap<String, CauseOfDeath>) -> BoxFutureNotSend<Self, ()> {
-        unimplemented!();
-        // self.send_to_all(DiedMsg { cause_of_death: cause_of_death }).boxed()
-        // self.receive_from_some(|client| living_names.contains(&client.name.clone().unwrap()))
+    pub fn die(mut self, casualties: &HashMap<String, CauseOfDeath>) -> BoxFutureNotSend<Self, ()> {
+        let mut futures = Vec::new();
+        for (name, cause_of_death) in casualties {
+            match self.clients.remove(name) {
+                Some(client) => {
+                    futures.push(client.die(cause_of_death.clone()));
+                }
+                None => continue,
+            }
+        }
+        self.clients_dataless_future(futures)
     }
 
-    // @TODO: Implement. Needs to send specific messages to specific players.
-    pub fn win(self) -> BoxFutureNotSend<Self, ()> {
-        unimplemented!();
-        // self.send_to_all(WonMsg {}).boxed()
+    pub fn win(mut self, winners: &HashSet<String>) -> BoxFutureNotSend<Self, ()> {
+        let mut futures = Vec::new();
+        for name in winners {
+            match self.clients.remove(name) {
+                Some(client) => {
+                    futures.push(client.win());
+                }
+                None => continue,
+            }
+        }
+        self.clients_dataless_future(futures)
     }
 
-    pub fn end_game(self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
-        self.send_to_all(GameOverMsg { turn: turn })
+    pub fn end_game(mut self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
+        let futures =
+            self.clients.drain().map(|(_, client)| client.end_game(turn.clone())).collect();
+        self.clients_dataless_future(futures)
     }
 
-    fn returnless_on_all(self,
-                         futures: Vec<BoxFuture<Client<S, T>, (ProtocolError, Client<S, T>)>>)
-                         -> BoxFutureNotSend<Self, ()> {
+    // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
+    fn clients_dataless_future(self,
+                               futures: Vec<BoxFuture<Client<S, T>,
+                                                      (ProtocolError, Client<S, T>)>>)
+                               -> BoxFutureNotSend<Self, ()> {
         // Run futures concurrently.
         // Collect Result<Client, (ProtocolError, Client)> iterator.
         let joined_future = futures_unordered(futures).collect_results();
@@ -229,10 +283,11 @@ impl<S, T> Clients<S, T>
         return Box::new(reconstruct_future);
     }
 
-    fn returns_on_all<R>(self,
-                         futures: Vec<BoxFuture<(R, Client<S, T>),
-                                                (ProtocolError, Client<S, T>)>>)
-                         -> BoxFutureNotSend<(HashMap<String, R>, Self), ()>
+    // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
+    fn clients_dataful_future<R>(self,
+                                 futures: Vec<BoxFuture<(R, Client<S, T>),
+                                                        (ProtocolError, Client<S, T>)>>)
+                                 -> BoxFutureNotSend<(HashMap<String, R>, Self), ()>
         where R: 'static
     {
         // Run futures concurrently.
@@ -263,51 +318,33 @@ impl<S, T> Clients<S, T>
         return Box::new(reconstruct_future);
     }
 
-    fn send_to_all<M: TypedMsg>(mut self, typed_msg: M) -> BoxFutureNotSend<Self, ()>
-        where M: 'static
-    {
-        // Build an iterator of futures, each having a living client send the message.
-        let futures = self.clients
-            .drain()
-            .map(|(_, client)| client.send(typed_msg.clone()))
-            .collect::<Vec<_>>();
-        return self.returnless_on_all(futures);
-    }
-
-    fn send_to_some<M: TypedMsg, F>(self, typed_msg: M, filter_fn: F) -> BoxFutureNotSend<Self, ()>
-        where F: FnMut(&Client<S, T>) -> bool,
-              M: 'static + Send
-    {
-        let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
-        let subset_send_future = subset.send_to_all(typed_msg);
-        let rejoin_future = subset_send_future.map(|subset| {
-            subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>()
-        });
-        return Box::new(rejoin_future);
-    }
-
-    fn receive_from_all<M: TypedMsg>(mut self) -> BoxFutureNotSend<(HashMap<String, M>, Self), ()>
-        where M: 'static
-    {
-        // Build an iterator of futures, each having a living client try to receive a message.
-        let futures = self.clients.drain().map(|(_, client)| client.receive()).collect();
-        return self.returns_on_all(futures);
-    }
-
-    fn receive_from_some<M: TypedMsg, F>(self,
-                                         filter_fn: F)
-                                         -> BoxFutureNotSend<(HashMap<String, M>, Self), ()>
-        where F: FnMut(&Client<S, T>) -> bool,
-              M: 'static
-    {
-        let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
-        let subset_receive_future = subset.receive_from_all();
-        let rejoin_future = subset_receive_future.map(|(subset_typed_msgs, subset)| {
-            let rejoined = subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>();
-            (subset_typed_msgs, rejoined)
-        });
-        return Box::new(rejoin_future);
-    }
+    // fn send_to_some<M: TypedMsg, F>(self, typed_msg: M, filter_fn: F) -> BoxFutureNotSend<Self, ()>
+    // where F: FnMut(&Client<S, T>) -> bool,
+    // M: 'static + Send
+    // {
+    // let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
+    // let subset_send_future = subset.send_to_all(typed_msg);
+    // let rejoin_future = subset_send_future.map(|subset| {
+    // subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>()
+    // });
+    // return Box::new(rejoin_future);
+    // }
+    //
+    // fn receive_from_some<M: TypedMsg, F>(self,
+    // filter_fn: F)
+    // -> BoxFutureNotSend<(HashMap<String, M>, Self), ()>
+    // where F: FnMut(&Client<S, T>) -> bool,
+    // M: 'static
+    // {
+    // let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
+    // let subset_receive_future = subset.receive_from_all();
+    // let rejoin_future = subset_receive_future.map(|(subset_typed_msgs, subset)| {
+    // let rejoined = subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>();
+    // (subset_typed_msgs, rejoined)
+    // });
+    // return Box::new(rejoin_future);
+    // }
+    //
 }
 
 impl<S, T> IntoIterator for Clients<S, T>
