@@ -7,29 +7,29 @@ use state::*;
 
 pub struct Engine<R: Rng> {
     pub rng: Box<R>,
-    pub game: State,
+    pub state: State,
 }
 
 impl<R: Rng> Engine<R> {
     pub fn new(rng: R, grid: Grid) -> Engine<R> {
         let mut engine = Engine {
             rng: Box::new(rng),
-            game: State::new(grid),
+            state: State::new(grid),
         };
-        let mut replacement_turn = engine.game.turn.clone();
+        let mut replacement_turn = engine.state.turn.clone();
         engine.manage_food(&mut replacement_turn);
-        engine.game.turn = replacement_turn;
+        engine.state.turn = replacement_turn;
         return engine;
     }
 
     pub fn add_player(&mut self, desired_name: String) -> String {
-        let head = self.game.game.grid.random_cell(&mut *self.rng);
+        let head = self.state.game.grid.random_cell(&mut *self.rng);
         let snake = Snake::new(vec![head]);
-        self.game.add_player(desired_name, snake)
+        self.state.add_player(desired_name, snake)
     }
 
     pub fn concluded(&self) -> bool {
-        let number_of_living_snakes = self.game.turn.snakes.len();
+        let number_of_living_snakes = self.state.turn.snakes.len();
         match number_of_living_snakes {
             0 => true,
             _ => false,
@@ -37,7 +37,7 @@ impl<R: Rng> Engine<R> {
     }
 
     pub fn advance_turn(&mut self, moves: HashMap<String, Direction>) -> TurnState {
-        let mut next_turn: TurnState = self.game.turn.clone();
+        let mut next_turn: TurnState = self.state.turn.clone();
 
         // N.B. does not free memory.
         next_turn.eaten.clear();
@@ -64,7 +64,7 @@ impl<R: Rng> Engine<R> {
 
         next_turn.turn_number += 1;
 
-        self.game.turn = next_turn.clone();
+        self.state.turn = next_turn.clone();
         return next_turn;
     }
 
@@ -118,7 +118,7 @@ impl<R: Rng> Engine<R> {
     fn snake_grid_bounds(&mut self, next_turn: &mut TurnState) {
         for (name, snake) in next_turn.snakes.iter() {
             for &segment in snake.segments.iter() {
-                if !self.game.game.grid.is_within_bounds(segment) {
+                if !self.state.game.grid.is_within_bounds(segment) {
                     next_turn.casualties.insert(name.clone(),
                                                 (CauseOfDeath::CollidedWithBounds(segment),
                                                  snake.clone()));
@@ -139,7 +139,7 @@ impl<R: Rng> Engine<R> {
                     // Only retain segments if within grid.
                     // @TODO: Move this to food management?
                     let corpse_food: Vec<&Vector> = headless_segments.iter()
-                        .filter(|&s| self.game.game.grid.is_within_bounds(*s))
+                        .filter(|&s| self.state.game.grid.is_within_bounds(*s))
                         .collect();
                     next_turn.food.extend(corpse_food);
                 }
@@ -153,7 +153,7 @@ impl<R: Rng> Engine<R> {
         }
 
         if next_turn.food.len() < 1 {
-            let new_food = self.game.game.grid.random_cell(&mut *self.rng);
+            let new_food = self.state.game.grid.random_cell(&mut *self.rng);
             next_turn.food.insert(new_food);
         }
     }

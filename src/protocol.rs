@@ -36,7 +36,7 @@ pub enum MsgTypeName {
     GameOver,
 }
 
-pub trait TypedMsg: Debug + Clone + Sized + Serialize + Deserialize {
+pub trait TypedMsg: Debug + Clone + Sized + Serialize + Deserialize + Send {
     const MSG_TYPE_NAME: MsgTypeName;
 }
 
