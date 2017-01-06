@@ -194,30 +194,20 @@ impl<S, T> Clients<S, T>
     }
 
     pub fn new_game(mut self, game: GameState) -> BoxFutureNotSend<Self, ()> {
-        let futures =
-            self.clients.drain().map(|(_, client)| client.new_game(game.clone())).collect();
-        self.clients_dataless_future(futures)
+        let futures = self.all_to_futures(|_, client| client.new_game(game.clone()));
+        self.dataless_future(futures)
     }
 
     pub fn new_turn(mut self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
-        let futures =
-            self.clients.drain().map(|(_, client)| client.new_turn(turn.clone())).collect();
-        self.clients_dataless_future(futures)
+        let futures = self.all_to_futures(|_, client| client.new_turn(turn.clone()));
+        self.dataless_future(futures)
     }
 
     pub fn ask_moves(mut self,
                      movers: &HashSet<String>)
                      -> BoxFutureNotSend<(HashMap<String, MoveMsg>, Self), ()> {
-        let mut futures = Vec::new();
-        for name in movers {
-            match self.clients.remove(name) {
-                Some(client) => {
-                    futures.push(client.ask_move());
-                }
-                None => continue,
-            }
-        }
-        self.clients_dataful_future(futures)
+        let futures = self.named_to_futures(movers, |_, client| client.ask_move());
+        self.dataful_future(futures)
     }
 
     pub fn die(mut self, casualties: &HashMap<String, CauseOfDeath>) -> BoxFutureNotSend<Self, ()> {
@@ -230,33 +220,47 @@ impl<S, T> Clients<S, T>
                 None => continue,
             }
         }
-        self.clients_dataless_future(futures)
+        self.dataless_future(futures)
     }
 
     pub fn win(mut self, winners: &HashSet<String>) -> BoxFutureNotSend<Self, ()> {
+        let futures = self.named_to_futures(winners, |_, client| client.win());
+        self.dataless_future(futures)
+    }
+
+    pub fn end_game(mut self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
+        let futures = self.all_to_futures(|_, client| client.end_game(turn.clone()));
+        self.dataless_future(futures)
+    }
+
+    fn all_to_futures<F, A, B>(&mut self, client_to_future_fn: F) -> Vec<BoxFuture<A, B>>
+        where F: Fn(String, Client<S, T>) -> BoxFuture<A, B>
+    {
+        self.clients.drain().map(|(name, client)| client_to_future_fn(name, client)).collect()
+    }
+
+    fn named_to_futures<F, A, B>(&mut self,
+                                 names: &HashSet<String>,
+                                 client_to_future_fn: F)
+                                 -> Vec<BoxFuture<A, B>>
+        where F: Fn(String, Client<S, T>) -> BoxFuture<A, B>
+    {
         let mut futures = Vec::new();
-        for name in winners {
+        for name in names {
             match self.clients.remove(name) {
                 Some(client) => {
-                    futures.push(client.win());
+                    futures.push(client_to_future_fn(name.clone(), client));
                 }
                 None => continue,
             }
         }
-        self.clients_dataless_future(futures)
-    }
-
-    pub fn end_game(mut self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
-        let futures =
-            self.clients.drain().map(|(_, client)| client.end_game(turn.clone())).collect();
-        self.clients_dataless_future(futures)
+        return futures;
     }
 
     // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
-    fn clients_dataless_future(self,
-                               futures: Vec<BoxFuture<Client<S, T>,
-                                                      (ProtocolError, Client<S, T>)>>)
-                               -> BoxFutureNotSend<Self, ()> {
+    fn dataless_future(self,
+                       futures: Vec<BoxFuture<Client<S, T>, (ProtocolError, Client<S, T>)>>)
+                       -> BoxFutureNotSend<Self, ()> {
         // Run futures concurrently.
         // Collect Result<Client, (ProtocolError, Client)> iterator.
         let joined_future = futures_unordered(futures).collect_results();
@@ -284,10 +288,10 @@ impl<S, T> Clients<S, T>
     }
 
     // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
-    fn clients_dataful_future<R>(self,
-                                 futures: Vec<BoxFuture<(R, Client<S, T>),
-                                                        (ProtocolError, Client<S, T>)>>)
-                                 -> BoxFutureNotSend<(HashMap<String, R>, Self), ()>
+    fn dataful_future<R>(self,
+                         futures: Vec<BoxFuture<(R, Client<S, T>),
+                                                (ProtocolError, Client<S, T>)>>)
+                         -> BoxFutureNotSend<(HashMap<String, R>, Self), ()>
         where R: 'static
     {
         // Run futures concurrently.
@@ -317,34 +321,20 @@ impl<S, T> Clients<S, T>
         });
         return Box::new(reconstruct_future);
     }
+}
 
-    // fn send_to_some<M: TypedMsg, F>(self, typed_msg: M, filter_fn: F) -> BoxFutureNotSend<Self, ()>
-    // where F: FnMut(&Client<S, T>) -> bool,
-    // M: 'static + Send
-    // {
-    // let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
-    // let subset_send_future = subset.send_to_all(typed_msg);
-    // let rejoin_future = subset_send_future.map(|subset| {
-    // subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>()
-    // });
-    // return Box::new(rejoin_future);
-    // }
-    //
-    // fn receive_from_some<M: TypedMsg, F>(self,
-    // filter_fn: F)
-    // -> BoxFutureNotSend<(HashMap<String, M>, Self), ()>
-    // where F: FnMut(&Client<S, T>) -> bool,
-    // M: 'static
-    // {
-    // let (subset, rest): (Clients<S, T>, Clients<S, T>) = self.into_iter().partition(filter_fn);
-    // let subset_receive_future = subset.receive_from_all();
-    // let rejoin_future = subset_receive_future.map(|(subset_typed_msgs, subset)| {
-    // let rejoined = subset.into_iter().chain(rest.into_iter()).collect::<Clients<S, T>>();
-    // (subset_typed_msgs, rejoined)
-    // });
-    // return Box::new(rejoin_future);
-    // }
-    //
+impl<S, T> FromIterator<Client<S, T>> for Clients<S, T>
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+{
+    fn from_iter<I: IntoIterator<Item = Client<S, T>>>(iter: I) -> Self {
+        Clients {
+            clients: iter.into_iter()
+                .map(|client| (client.name.clone().unwrap(), client))
+                .collect(),
+            failures: HashMap::new(),
+        }
+    }
 }
 
 impl<S, T> IntoIterator for Clients<S, T>
@@ -369,36 +359,28 @@ impl<S, T> IntoIterator for Clients<S, T>
     }
 }
 
-impl<S, T> FromIterator<Client<S, T>> for Clients<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
-{
-    fn from_iter<I: IntoIterator<Item = Client<S, T>>>(iter: I) -> Self {
-        Clients {
-            clients: iter.into_iter()
-                .map(|client| (client.name.clone().unwrap(), client))
-                .collect(),
-            failures: HashMap::new(),
-        }
-    }
-}
-
-impl<S, T> Default for Clients<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
-{
-    fn default() -> Clients<S, T> {
-        Clients::new(HashMap::new(), HashMap::new())
-    }
-}
-
-impl<S, T> Extend<Client<S, T>> for Clients<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
-{
-    fn extend<I: IntoIterator<Item = Client<S, T>>>(&mut self, iter: I) {
-        for client in iter {
-            self.clients.insert(client.name.clone().unwrap(), client);
-        }
-    }
-}
+// These are disabled because the Iterators do not preserve failures.
+// These make it easy to do certain ways to deconstructing and reconstructing Clients that
+// would discard failures silently.
+// @TODO: Have the option of preserving failures on Iterators. Use Iterator<Item=Result<...>>.
+//
+// impl<S, T> Default for Clients<S, T>
+// where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
+// T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+// {
+// fn default() -> Clients<S, T> {
+// Clients::new(HashMap::new(), HashMap::new())
+// }
+// }
+//
+// impl<S, T> Extend<Client<S, T>> for Clients<S, T>
+// where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
+// T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+// {
+// fn extend<I: IntoIterator<Item = Client<S, T>>>(&mut self, iter: I) {
+// for client in iter {
+// self.clients.insert(client.name.clone().unwrap(), client);
+// }
+// }
+// }
+//
