@@ -1,10 +1,11 @@
 use std::io;
-use std::iter::{self, FromIterator};
+use std::vec;
+use std::iter::FromIterator;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::marker::Send;
 use std::collections::{HashSet, HashMap};
-use std::collections::hash_map::Keys;
+use std::collections::hash_map::{Keys, Drain};
 
 use futures::{Future, BoxFuture, Stream, Sink};
 use futures::stream::{SplitStream, SplitSink, futures_unordered};
@@ -126,30 +127,6 @@ impl<S, T> Client<S, T>
             })
             .boxed()
     }
-
-    pub fn new_game(self, game: GameState) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(NewGameMsg { game: game }).boxed()
-    }
-
-    pub fn new_turn(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(TurnMsg { turn: turn }).boxed()
-    }
-
-    pub fn ask_move(self) -> BoxFuture<(MoveMsg, Self), (ProtocolError, Self)> {
-        self.receive().boxed()
-    }
-
-    pub fn die(self, cause_of_death: CauseOfDeath) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(DiedMsg { cause_of_death: cause_of_death }).boxed()
-    }
-
-    pub fn win(self) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(WonMsg {}).boxed()
-    }
-
-    pub fn end_game(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(GameOverMsg { turn: turn }).boxed()
-    }
 }
 
 // Clients
@@ -186,6 +163,41 @@ impl<S, T> Clients<S, T>
 
     pub fn names(&self) -> Keys<String, Client<S, T>> {
         self.clients.keys()
+    }
+
+    pub fn drain_failures(&mut self) -> Drain<String, ProtocolError> {
+        self.failures.drain()
+    }
+
+    pub fn new_game(self, game: GameState) -> BoxFutureNotSend<Self, ()> {
+        self.send_to_all(NewGameMsg { game: game })
+    }
+
+    pub fn new_turn(self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
+        self.send_to_all(TurnMsg { turn: turn })
+    }
+
+    pub fn ask_moves(self,
+                     movers: HashSet<String>)
+                     -> BoxFutureNotSend<(HashMap<String, MoveMsg>, Self), ()> {
+        self.receive_from_some::<MoveMsg, _>(|client| movers.contains(&client.name.clone().unwrap()))
+    }
+
+    // @TODO: Implement. Needs to send specific messages to specific players.
+    pub fn die(self, casualties: HashMap<String, CauseOfDeath>) -> BoxFutureNotSend<Self, ()> {
+        unimplemented!();
+        // self.send_to_all(DiedMsg { cause_of_death: cause_of_death }).boxed()
+        // self.receive_from_some(|client| living_names.contains(&client.name.clone().unwrap()))
+    }
+
+    // @TODO: Implement. Needs to send specific messages to specific players.
+    pub fn win(self) -> BoxFutureNotSend<Self, ()> {
+        unimplemented!();
+        // self.send_to_all(WonMsg {}).boxed()
+    }
+
+    pub fn end_game(self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
+        self.send_to_all(GameOverMsg { turn: turn })
     }
 
     fn send_to_all<M: TypedMsg>(mut self, typed_msg: M) -> BoxFutureNotSend<Clients<S, T>, ()>
@@ -293,7 +305,7 @@ impl<S, T> IntoIterator for Clients<S, T>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static
 {
     type Item = Client<S, T>;
-    type IntoIter = ::std::vec::IntoIter<Client<S, T>>;
+    type IntoIter = vec::IntoIter<Client<S, T>>;
 
     fn into_iter(self) -> Self::IntoIter {
         // Consume into an iterator and drop the name key.
