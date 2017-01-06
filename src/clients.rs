@@ -6,6 +6,7 @@ use std::time::Duration;
 use std::marker::Send;
 use std::collections::{HashSet, HashMap};
 use std::collections::hash_map::{Keys, Drain};
+use std::fmt::Debug;
 
 use futures::{Future, BoxFuture, Stream, Sink};
 use futures::stream::{SplitStream, SplitSink, futures_unordered};
@@ -30,6 +31,16 @@ pub struct Client<S, T>
     msg_rx: Option<T>,
 }
 
+impl Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>> {
+    pub fn from_incoming(stream: TcpStream,
+                         addr: SocketAddr)
+                         -> Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>> {
+        let msg_transport = stream.framed(MsgCodec);
+        let (msg_tx, msg_rx) = msg_transport.split();
+        Client::new(None, Some(addr), msg_tx, msg_rx)
+    }
+}
+
 impl<S, T> Client<S, T>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static
@@ -45,14 +56,6 @@ impl<S, T> Client<S, T>
             msg_tx: Some(msg_tx),
             msg_rx: Some(msg_rx),
         }
-    }
-
-    pub fn from_incoming(stream: TcpStream,
-                         addr: SocketAddr)
-                         -> Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>> {
-        let msg_transport = stream.framed(MsgCodec);
-        let (msg_tx, msg_rx) = msg_transport.split();
-        Client::new(None, Some(addr), msg_tx, msg_rx)
     }
 
     fn with_new_msg_tx(mut self, msg_tx: S) -> Self {
@@ -258,7 +261,7 @@ impl<S, T> Clients<S, T>
     }
 
     // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
-    fn dataless_future(self,
+    fn dataless_future(mut self,
                        futures: Vec<BoxFuture<Client<S, T>, (ProtocolError, Client<S, T>)>>)
                        -> BoxFutureNotSend<Self, ()> {
         // Run futures concurrently.
@@ -266,41 +269,37 @@ impl<S, T> Clients<S, T>
         let joined_future = futures_unordered(futures).collect_results();
         // Process each future's returned Result<Client, (ProtocolError, Client)>.
         let reconstruct_future = joined_future.map(move |client_results| {
-            let mut clients = HashMap::new();
-            let mut failures = HashMap::new();
             for client_result in client_results {
                 // Retain successful clients.
                 // Drop failed clients and retain their ProtocolError.
                 // @TODO: Determine good approach to dropping clients.
                 match client_result {
                     Ok(client) => {
-                        clients.insert(client.name.clone().unwrap(), client);
+                        self.clients.insert(client.name.clone().unwrap(), client);
                     }
                     Err((e, client)) => {
-                        failures.insert(client.name.clone().unwrap(), e);
+                        self.failures.insert(client.name.clone().unwrap(), e);
                     }
                 }
             }
             // Return the updated Clients.
-            Self::new(clients, failures)
+            Self::new(self.clients, self.failures)
         });
         return Box::new(reconstruct_future);
     }
 
     // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
-    fn dataful_future<R>(self,
+    fn dataful_future<R>(mut self,
                          futures: Vec<BoxFuture<(R, Client<S, T>),
                                                 (ProtocolError, Client<S, T>)>>)
                          -> BoxFutureNotSend<(HashMap<String, R>, Self), ()>
-        where R: 'static
+        where R: Clone + Debug + 'static
     {
         // Run futures concurrently.
         // Collect Result<(M, Client), (ProtocolError, Client)> iterator.
         let joined_future = futures_unordered(futures).collect_results();
         // Process each future's returned Result<(M, Client), (ProtocolError, Client)>.
         let reconstruct_future = joined_future.map(move |client_results| {
-            let mut clients = HashMap::new();
-            let mut failures = HashMap::new();
             let mut returned = HashMap::new();
             for client_result in client_results {
                 // Retain successful clients and record the message read.
@@ -309,15 +308,15 @@ impl<S, T> Clients<S, T>
                 match client_result {
                     Ok((return_, client)) => {
                         returned.insert(client.name.clone().unwrap(), return_);
-                        clients.insert(client.name.clone().unwrap(), client);
+                        self.clients.insert(client.name.clone().unwrap(), client);
                     }
                     Err((e, client)) => {
-                        failures.insert(client.name.clone().unwrap(), e);
+                        self.failures.insert(client.name.clone().unwrap(), e);
                     }
                 }
             }
             // Return the received messages and updated Clients.
-            (returned, Self::new(clients, failures))
+            (returned, Self::new(self.clients, self.failures))
         });
         return Box::new(reconstruct_future);
     }

@@ -23,11 +23,10 @@ use std::thread;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use futures::{future, stream, Future, BoxFuture, Stream, IntoFuture, Sink, Map};
+use futures::{future, Future, Stream, Sink};
 use futures::stream::{SplitStream, SplitSink};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Remote};
-use tokio_core::io::Io;
 
 use sirpent::*;
 
@@ -99,9 +98,6 @@ fn server(listener: TcpListener,
             let mut names_ref = names.clone();
             let players_ref = players.clone();
 
-            // Close clients with unsuccessful handshakes.
-            let client_future = client_future.map_err(|(e, _)| (e, None));
-
             // Find a unique name for the Client and then send WelcomeMsg.
             let client_future = client_future.and_then(move |(identify_msg, client)| {
                 let name = find_unique_name(&mut names_ref, identify_msg.desired_name);
@@ -109,13 +105,15 @@ fn server(listener: TcpListener,
             });
             // Queue the Client as a new player.
             let client_future = client_future.map(move |client| {
-                    players_ref.lock().unwrap().push(client);
-                    ()
-                })
-                .map_err(|(e, _)| {
-                    println!("Error welcoming client: {:?}", e);
-                    ()//(e, None)
-                });
+                players_ref.lock().unwrap().push(client);
+                ()
+            });
+
+            // Close clients with unsuccessful handshakes.
+            let client_future = client_future.map_err(|(e, _)| {
+                println!("Error welcoming client: {:?}", e);
+                ()
+            });
 
             remote_handle.spawn(|_| client_future.boxed());
             Ok(())
@@ -146,83 +144,102 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
                     grid: Grid,
                     timeout: Option<Duration>,
                     players_pool: Arc<Mutex<Vec<Client<S, T>>>>)
-                    -> impl Future<Item = (), Error = ()>
+                    -> BoxFutureNotSend<(), ()>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
           T: Stream<Item = Msg, Error = io::Error> + Send
 {
-    future::loop_fn((), move |_| {
+    Box::new(future::loop_fn((), move |_| {
             let engine = Engine::new(OsRng::new().unwrap(), grid);
 
             let players_ref = players_pool.clone();
-            let mut players_lock = players_pool.lock().unwrap();
-            if players_lock.len() < 2 {
-                println!("Not enough players yet.");
-                return Ok(future::Loop::Continue(())).into_future();
+            while players_pool.lock().unwrap().len() < 2 {
+                //println!("Not enough players yet.");
+                //return future::ok(future::Loop::Continue(()));
             }
 
+            let mut players_lock = players_pool.lock().unwrap();
             let players = players_lock.drain(..).collect();
             play_game(Rc::new(RefCell::new(engine)), timeout, players)
-                .and_then(move |(engine, mut players)| {
-                    let state = engine.state.clone();
+                .map(move |(engine, players)| {
+                    let state = engine.borrow().state.clone();
                     println!("End of game! {:?}", state);
 
                     let mut players_lock = players_ref.lock().unwrap();
+                    let mut players = players.into_iter().collect::<Vec<_>>();
                     players_lock.append(&mut players);
-                    Ok(future::Loop::Continue(()))
-                })
-                .map_err(|e| {
-                    println!("error {:?}", e);
-                    e
+                    future::Loop::Continue(())
                 })
         })
         //.map(|_| ())
-        .map_err(|_| ())
+        .map_err(|_| ()))
 }
 
 fn play_game<S, T>(engine: Rc<RefCell<Engine<OsRng>>>,
                    timeout: Option<Duration>,
                    players: Clients<S, T>)
-                   -> BoxFutureNotSend<(Engine<OsRng>, Vec<Client<S, T>>), ProtocolError>
+                   -> BoxFutureNotSend<(Rc<RefCell<Engine<OsRng>>>, Clients<S, T>), ()>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
           T: Stream<Item = Msg, Error = io::Error> + Send
 {
     // Add players to the game.
-    for name in players.ok_names() {
-        engine.borrow_mut().add_player(name);
+    for name in players.names() {
+        engine.borrow_mut().add_player(name.clone());
     }
+    let engine4 = engine.clone();
 
     // Tell players about the new GameState.
     // @TODO: Determine if Collect will stop accumulating if a client errored.
     let game = engine.borrow().state.game.clone();
-    players.new_game(game)
-        .and_then(|players| {
+    Box::new(players.new_game(game)
+        .and_then(move |players| {
+            let engine = engine4.clone();
             // Take turns in a loop until game has finished.
-            let loop_callback = |players| {
+            future::loop_fn(players, move |players| {
+                let engine1 = engine.clone();
+                let engine2 = engine.clone();
+                let engine3 = engine.clone();
                 // Tell players the current turn and ask for their next move.
-                let turn = engine.borrow().state.turn.clone();
-                players.new_turn(turn)
-                    .and_then(|players| players.ask_moves(turn.snakes.keys().collect()))
-                    .and_then(|(moves, players)| {
-                        // Transition to the next turn and tell the players whom died.
-                        let new_turn = engine.borrow_mut().advance_turn(moves);
-                        players.notify_dead(&new_turn.casualties)
+                let turn = engine1.borrow().state.turn.clone();
+                println!("{:?}", turn.clone());
+                players.new_turn(turn.clone())
+                    .and_then(move |players| {
+                        let movers =
+                            turn.snakes.keys().map(|name| name.clone()).collect::<HashSet<_>>();
+                        println!("ask for moves {:?}", movers.clone());
+                        players.ask_moves(&movers)
                     })
-                    .and_then(|players| {
+                    .and_then(move |(mut move_msgs, players)| {
+                        let moves = move_msgs.drain()
+                            .map(|(name, move_msg)| (name, move_msg.direction))
+                            .collect();
+                        // Transition to the next turn and tell the players whom died.
+                        let new_turn = engine2.borrow_mut().advance_turn(moves);
+                        println!("{:?}", new_turn.clone());
+                        let casualty_names = new_turn.casualties
+                            .iter()
+                            .map(|(name, &(ref cause_of_death, _))| {
+                                (name.clone(), cause_of_death.clone())
+                            });
+                        players.die(&casualty_names.collect())
+                    })
+                    .map(move |players| {
+                        // @TODO: This works around a nasty `if and else have incompatible types'
+                        // error I was having but is nasty.
                         // Decide whether game is complete or further turns will be made.
-                        let new_turn = engine.borrow().state.turn.clone();
-                        if engine.borrow().concluded() {
-                            // Notify winners and inform all players the game is over.
-                            players.notify_winners(new_turn.snakes.keys().collect())
-                                .and_then(|players| players.end_game(new_turn))
-                                .map(|players| future::Loop::Break((engine, players)))
+                        if engine3.borrow().concluded() {
+                            future::Loop::Break(players)
                         } else {
-                            // Continue playing.
-                            future::ok(future::Loop::Continue((engine, players)))
+                            future::Loop::Continue(players)
                         }
                     })
-                    .boxed()
-            };
-            future::loop_fn(players, loop_callback)
+            })
         })
-        .boxed()
+        .and_then(|players| {
+            // Notify winners and inform all players the game is over.
+            let new_turn = engine.borrow().state.turn.clone();
+            let winner_names = new_turn.snakes.clone().keys().map(|name| name.clone()).collect();
+            players.win(&winner_names)
+                .and_then(|players| players.end_game(new_turn))
+                .map(|players| (engine, players))
+        }))
 }
