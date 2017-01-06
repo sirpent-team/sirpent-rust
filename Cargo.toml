@@ -10,13 +10,19 @@ hexagon = []
 triangle = []
 
 [dependencies]
+futures = "0.1.7"
+tokio-core = "0.1"
+log = "0.3.6"
+env_logger = "0.3.5"
 ansi_term = "0.9"
 uuid = { version = "0.3", features = ["v4", "serde"] }
 rand = "0.3"
-rayon = "0.5"
 serde = "0.8"
 serde_json = "0.8"
 serde_derive = "0.8"
 
 [dev-dependencies]
 quickcheck = "0.2.*"
+
+[replace]
+"futures:0.1.7" = { git = "https://github.com/sirpent-team/futures-rs", branch = "sirpent" }

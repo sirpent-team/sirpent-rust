@@ -10,7 +10,8 @@ fn main() {
     println!("{}", Yellow.bold().paint("Sirpent"));
 
     println!("{:?}", serde_json::to_string(&VersionMessage::new()));
-    println!("{:?}", serde_json::to_string(&PlainMessage::from_typed(VersionMessage::new())));
+    println!("{:?}",
+             serde_json::to_string(&PlainMessage::from_typed(VersionMessage::new())));
 
     let s = serde_json::to_string(&PlainMessage::from_typed(VersionMessage::new())).unwrap();
     let p: PlainMessage = serde_json::from_str(&*s).unwrap();

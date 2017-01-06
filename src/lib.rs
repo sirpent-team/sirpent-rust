@@ -4,8 +4,6 @@
 extern crate uuid;
 // Rand is used to generate OS-level random numbers.
 extern crate rand;
-// Rayon's par_iter() is used to do things in parallel.
-extern crate rayon;
 // Serde is used to Serialise/Deserialise game data.
 extern crate serde;
 #[macro_use]
@@ -14,20 +12,25 @@ extern crate serde_json;
 // Quickcheck is used for property-based testing.
 #[cfg(test)]
 extern crate quickcheck;
+#[macro_use]
+extern crate futures;
+#[macro_use]
+extern crate tokio_core;
 
-mod net;
-mod grid;
-mod grids;
-mod snake;
-mod player;
-mod protocol;
-mod state;
-mod engine;
+pub mod grid;
+pub mod grids;
+pub mod snake;
+pub mod clients;
+pub mod net;
+pub mod protocol;
+pub mod state;
+pub mod engine;
 
-pub use net::*;
+// pub use net::*;
 pub use grid::*;
 pub use snake::*;
-pub use player::*;
+pub use clients::*;
+pub use net::*;
 pub use protocol::*;
 pub use state::*;
 pub use engine::*;

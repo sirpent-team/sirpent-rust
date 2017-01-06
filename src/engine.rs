@@ -2,135 +2,111 @@ use rand::Rng;
 use std::collections::HashMap;
 
 use grid::*;
-use state::*;
 use snake::*;
-use player::*;
+use state::*;
 
 pub struct Engine<R: Rng> {
     pub rng: Box<R>,
     pub state: State,
-    pub new_turn: TurnState,
 }
 
 impl<R: Rng> Engine<R> {
     pub fn new(rng: R, grid: Grid) -> Engine<R> {
-        let state = State::new(grid);
-        Engine {
+        let mut engine = Engine {
             rng: Box::new(rng),
-            new_turn: state.turn.clone(),
-            state: state,
+            state: State::new(grid),
+        };
+        let mut replacement_turn = engine.state.turn.clone();
+        engine.manage_food(&mut replacement_turn);
+        engine.state.turn = replacement_turn;
+        return engine;
+    }
+
+    pub fn add_player(&mut self, desired_name: String) -> String {
+        let head = self.state.game.grid.random_cell(&mut *self.rng);
+        let snake = Snake::new(vec![head]);
+        self.state.add_player(desired_name, snake)
+    }
+
+    pub fn concluded(&self) -> bool {
+        let number_of_living_snakes = self.state.turn.snakes.len();
+        match number_of_living_snakes {
+            0 => true,
+            _ => false,
         }
     }
 
-    pub fn new_game(&mut self, potential_players: Vec<PlayerConnection>) {
-        let living_player_names = self.state.add_players(potential_players);
-        let snakes: HashMap<PlayerName, Snake> = living_player_names.iter()
-            .map(|player_name| {
-                (player_name.clone(),
-                 Snake::new(vec![self.state.game.grid.random_cell(&mut *self.rng)]))
-            })
-            .collect();
+    pub fn advance_turn(&mut self, moves: HashMap<String, Direction>) -> TurnState {
+        let mut next_turn: TurnState = self.state.turn.clone();
 
-        self.manage_food();
-        self.state.new_game(snakes);
-    }
-
-    pub fn concluded(&mut self) -> Option<HashMap<PlayerName, (Player, Snake)>> {
-        let living_players = self.state.living_players();
-        match living_players.len() {
-            0 => {
-                let ref previous_casualties = self.state.turn.casualties;
-                Some(previous_casualties.iter()
-                    .map(|(player_name, &(_, ref snake))| {
-                        (player_name.clone(),
-                         (self.state.game.players[player_name].clone(), snake.clone()))
-                    })
-                    .collect())
-            }
-            1 => Some(living_players),
-            _ => None,
-        }
-    }
-
-    pub fn turn(&mut self) -> TurnState {
-        let moves = self.state.request_moves();
-        // @TODO: Detect players who died during this turn+move comms.
-
-        self.new_turn = self.state.turn.clone();
         // N.B. does not free memory.
-        self.new_turn.eaten.clear();
-        self.new_turn.directions.clear();
-        self.new_turn.casualties.clear();
+        next_turn.eaten.clear();
+        next_turn.directions.clear();
+        next_turn.casualties.clear();
 
         // Apply movement and remove snakes that did not move.
-        self.snake_movement(moves);
-        self.remove_snakes();
+        self.snake_movement(&mut next_turn, moves);
+        self.remove_snakes(&mut next_turn);
 
         // Grow snakes whose heads collided with a food.
-        self.snake_eating();
-        self.manage_food();
+        self.snake_eating(&mut next_turn);
+        self.manage_food(&mut next_turn);
 
         // Detect collisions with snakes and remove colliding snakes.
-        self.snake_collisions();
-        self.remove_snakes();
+        self.snake_collisions(&mut next_turn);
+        self.remove_snakes(&mut next_turn);
 
         // Detect snakes outside grid and remove them.
         // @TODO: I think it is sound to move this to being straight after applying movement,
         // so long as snakes are not removed before collision detection.
-        self.snake_grid_bounds();
-        self.remove_snakes();
+        self.snake_grid_bounds(&mut next_turn);
+        self.remove_snakes(&mut next_turn);
 
-        self.new_turn.turn_number += 1;
+        next_turn.turn_number += 1;
 
-        self.state.turn = self.new_turn.clone();
-        self.new_turn.clone()
+        self.state.turn = next_turn.clone();
+        return next_turn;
     }
 
-    fn snake_movement(&mut self, moves: HashMap<PlayerName, Move>) {
+    fn snake_movement(&mut self, next_turn: &mut TurnState, moves: HashMap<String, Direction>) {
         // Apply movement and remove snakes that did not move.
         // Snake plans are Result<Direction, MoveError>. MoveError = String.
         // So we can specify an underlying error rather than just omitting any move.
         // Then below if no snake plan is set, we use a default error message.
         // While intricate this very neatly leads to CauseOfDeath.
 
-        for (player_name, snake) in self.new_turn.snakes.iter_mut() {
-            // Retrieve snake plan if one exists.
-            let ref move_ = moves[player_name];
-
-            // Move if a direction provided else use MoveError for CauseOfDeath.
-            match *move_ {
-                Ok(direction) => {
-                    snake.step_in_direction(direction);
-                    self.new_turn.directions.insert(player_name.clone(), direction);
-                }
-                Err(ref cause_of_death) => {
-                    self.new_turn
-                        .casualties
-                        .insert(player_name.clone(), (cause_of_death.clone(), snake.clone()));
-                }
+        for (name, snake) in next_turn.snakes.iter_mut() {
+            // Move if a direction provided else kill the snake.
+            if moves.contains_key(name) {
+                let move_ = moves[name];
+                snake.step_in_direction(move_);
+                next_turn.directions.insert(name.clone(), move_);
+            } else {
+                let cause_of_death = CauseOfDeath::NoMoveMade("".to_string());
+                next_turn.casualties
+                    .insert(name.clone(), (cause_of_death, snake.clone()));
             }
         }
     }
 
-    fn snake_eating(&mut self) {
-        for (player_name, snake) in self.new_turn.snakes.iter_mut() {
-            if self.new_turn.food.contains(&snake.segments[0]) {
+    fn snake_eating(&mut self, next_turn: &mut TurnState) {
+        for (name, snake) in next_turn.snakes.iter_mut() {
+            if next_turn.food.contains(&snake.segments[0]) {
                 // Remove this food only after the full loop, such that N snakes colliding on top of a
                 // food all grow. They immediately die but this way collision with growth of both snakes
                 // is possible.
                 snake.grow();
-                self.new_turn.eaten.insert(player_name.clone(), snake.segments[0]);
+                next_turn.eaten.insert(name.clone(), snake.segments[0]);
             }
         }
     }
 
-    fn snake_collisions(&mut self) {
-        for (player_name, snake) in self.new_turn.snakes.iter() {
-            for (coll_player_name, coll_snake) in self.new_turn.snakes.iter() {
+    fn snake_collisions(&mut self, next_turn: &mut TurnState) {
+        for (name, snake) in next_turn.snakes.iter() {
+            for (coll_player_name, coll_snake) in next_turn.snakes.iter() {
                 if snake != coll_snake && snake.has_collided_into(coll_snake) {
-                    self.new_turn
-                        .casualties
-                        .insert(player_name.clone(),
+                    next_turn.casualties
+                        .insert(name.clone(),
                                 (CauseOfDeath::CollidedWithSnake(coll_player_name.clone()),
                                  snake.clone()));
                     break;
@@ -139,27 +115,25 @@ impl<R: Rng> Engine<R> {
         }
     }
 
-    fn snake_grid_bounds(&mut self) {
-        for (player_name, snake) in self.new_turn.snakes.iter() {
+    fn snake_grid_bounds(&mut self, next_turn: &mut TurnState) {
+        for (name, snake) in next_turn.snakes.iter() {
             for &segment in snake.segments.iter() {
                 if !self.state.game.grid.is_within_bounds(segment) {
-                    self.new_turn.casualties.insert(player_name.clone(),
-                                                    (CauseOfDeath::CollidedWithBounds(segment),
-                                                     snake.clone()));
+                    next_turn.casualties.insert(name.clone(),
+                                                (CauseOfDeath::CollidedWithBounds(segment),
+                                                 snake.clone()));
                 }
             }
         }
     }
 
-    fn remove_snakes(&mut self) {
+    fn remove_snakes(&mut self, next_turn: &mut TurnState) {
         // N.B. At one point we .drain()ed the dead_snakes Set. This was removed so it
         // can be used to track which players were killed.
-        for (player_name, &(ref cause_of_death, _)) in self.new_turn.casualties.iter() {
-            self.state.kill_player(player_name.clone(), cause_of_death.clone());
-
+        for (name, _) in next_turn.casualties.iter() {
             // Kill snake if not already killed, and drop food at non-head segments within the grid.
             // @TODO: This code is much cleaner than the last draft but still lots goes on here.
-            if let Some(dead_snake) = self.new_turn.snakes.remove(player_name) {
+            if let Some(dead_snake) = next_turn.snakes.remove(name) {
                 // Get segments[1..] safely. Directly slicing panics if the Vec had <2 elements.
                 if let Some((_, headless_segments)) = dead_snake.segments.split_first() {
                     // Only retain segments if within grid.
@@ -167,20 +141,20 @@ impl<R: Rng> Engine<R> {
                     let corpse_food: Vec<&Vector> = headless_segments.iter()
                         .filter(|&s| self.state.game.grid.is_within_bounds(*s))
                         .collect();
-                    self.new_turn.food.extend(corpse_food);
+                    next_turn.food.extend(corpse_food);
                 }
             }
         }
     }
 
-    fn manage_food(&mut self) {
-        for (_, food) in self.new_turn.eaten.iter() {
-            self.new_turn.food.remove(&food);
+    fn manage_food(&mut self, next_turn: &mut TurnState) {
+        for (_, food) in next_turn.eaten.iter() {
+            next_turn.food.remove(&food);
         }
 
-        if self.new_turn.food.len() < 1 {
+        if next_turn.food.len() < 1 {
             let new_food = self.state.game.grid.random_cell(&mut *self.rng);
-            self.new_turn.food.insert(new_food);
+            next_turn.food.insert(new_food);
         }
     }
 }
