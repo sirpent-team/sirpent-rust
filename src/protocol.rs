@@ -63,7 +63,7 @@ impl Msg {
         }
     }
 
-    pub fn to_typed<T: TypedMsg>(self) -> ProtocolResult<T> {
+    pub fn try_into_typed<T: TypedMsg>(self) -> ProtocolResult<T> {
         if self.msg_type_name != T::MSG_TYPE_NAME {
             return Err(ProtocolError::WrongCommand);
         }
@@ -74,6 +74,29 @@ impl Msg {
     }
 }
 
+// conflicting implementations of trait `std::convert::TryInto<_>` for type `protocol::Msg`
+// impl<T> TryInto<T> for Msg where T: TypedMsg {
+//     type Err = ProtocolError;
+//
+//     fn try_into(self: Msg) -> ProtocolResult<T> {
+//         if self.msg_type_name != T::MSG_TYPE_NAME {
+//             return Err(ProtocolError::WrongCommand);
+//         }
+//         match serde_json::from_value(self.data) {
+//             Ok(msg_typed) => Ok(msg_typed),
+//             Err(e) => Err(ProtocolError::from(e)),
+//         }
+//     }
+// }
+//
+// impl<T> From<T> for Msg where T: TypedMsg {
+//     fn from(msg_typed: T) -> Msg {
+//         Msg {
+//             msg_type_name: T::MSG_TYPE_NAME,
+//             data: serde_json::to_value(msg_typed),
+//         }
+//     }
+// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VersionMsg {
@@ -294,7 +317,6 @@ impl From<mpsc::SendError<(String, Direction)>> for ProtocolError {
 
 pub type ProtocolResult<T> = Result<T, ProtocolError>;
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,7 +377,7 @@ mod tests {
                    serde_json::Value::String(desired_name.clone()));
         let register_msg2: RegisterMsg = Msg::new(MsgTypeName::Register,
                                                   serde_json::Value::Object(map))
-            .to_typed()
+            .try_into_typed()
             .unwrap();
 
         assert_eq!(format!("{:?}", register_msg2),

@@ -103,7 +103,7 @@ impl<S, T> Client<S, T>
             .map_err(|(e, msg_rx)| (ProtocolError::from(e), msg_rx))
             .and_then(|(maybe_msg, msg_rx)| {
                 let msg = maybe_msg.ok_or(ProtocolError::NoMsgReceived);
-                match msg.and_then(|msg| Msg::to_typed(msg)) {
+                match msg.and_then(|msg| Msg::try_into_typed(msg)) {
                     Ok(typed_msg) => Ok((typed_msg, msg_rx)),
                     Err(e) => Err((e, msg_rx)),
                 }
