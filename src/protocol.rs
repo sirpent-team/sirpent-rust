@@ -56,6 +56,8 @@ impl Msg {
         }
     }
 
+    /// As try_into_typed cannot be implemented using TryInto I've chosen to keep this as a
+    /// method rather than a From.
     pub fn from_typed<T: TypedMsg>(msg_typed: T) -> Msg {
         Msg {
             msg_type_name: T::MSG_TYPE_NAME,
@@ -63,6 +65,12 @@ impl Msg {
         }
     }
 
+    /// Ideally this would be implemented using a blanket TryInto. Sadly this is not possible.
+    /// https://users.rust-lang.org/t/conflicting-implementations-of-trait-std-convert-into--/8661/3
+    ///
+    /// @TODO: But... I could use a macro to quietly generated each TypedMsg implementation.
+    /// Custom Derive (RFC #1681) would work beautifully. Of course I still would prefer not
+    /// having to go via Msg at all - but the relaxed requirements of Msg are very useful.
     pub fn try_into_typed<T: TypedMsg>(self) -> ProtocolResult<T> {
         if self.msg_type_name != T::MSG_TYPE_NAME {
             return Err(ProtocolError::WrongCommand);
@@ -73,30 +81,6 @@ impl Msg {
         }
     }
 }
-
-// conflicting implementations of trait `std::convert::TryInto<_>` for type `protocol::Msg`
-// impl<T> TryInto<T> for Msg where T: TypedMsg {
-//     type Err = ProtocolError;
-//
-//     fn try_into(self: Msg) -> ProtocolResult<T> {
-//         if self.msg_type_name != T::MSG_TYPE_NAME {
-//             return Err(ProtocolError::WrongCommand);
-//         }
-//         match serde_json::from_value(self.data) {
-//             Ok(msg_typed) => Ok(msg_typed),
-//             Err(e) => Err(ProtocolError::from(e)),
-//         }
-//     }
-// }
-//
-// impl<T> From<T> for Msg where T: TypedMsg {
-//     fn from(msg_typed: T) -> Msg {
-//         Msg {
-//             msg_type_name: T::MSG_TYPE_NAME,
-//             data: serde_json::to_value(msg_typed),
-//         }
-//     }
-// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VersionMsg {
