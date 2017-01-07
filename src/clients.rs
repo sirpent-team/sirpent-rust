@@ -14,9 +14,9 @@ use tokio_core::net::TcpStream;
 use tokio_core::io::Io;
 
 use net::*;
-use grid::*;
+use grids::*;
 use snake::*;
-use state::*;
+use game::*;
 use protocol::*;
 
 pub type BoxFutureNotSend<I, E> = Box<Future<Item = I, Error = E>>;

@@ -5,7 +5,7 @@ use rand::Rng;
 
 use futures::{future, Async, Future, Stream, Sink, Poll};
 
-use engine::*;
+use game::*;
 use clients::*;
 use protocol::*;
 
@@ -14,7 +14,7 @@ pub struct GameFuture<S, T, R>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static,
           R: Rng
 {
-    game: Option<Engine<R>>,
+    game: Option<Game<R>>,
     players: Option<Clients<S, T>>,
     current_stage: Option<GameFutureStage<S, T>>,
 }
@@ -48,7 +48,7 @@ impl<S, T, R> GameFuture<S, T, R>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static,
           R: Rng
 {
-    pub fn new(mut game: Engine<R>, players: Clients<S, T>) -> Self {
+    pub fn new(mut game: Game<R>, players: Clients<S, T>) -> Self {
         for name in players.names() {
             game.add_player(name.clone());
         }
@@ -61,7 +61,7 @@ impl<S, T, R> GameFuture<S, T, R>
     }
 
     fn poll_start_of_game(&mut self) -> GameFuturePollReturn<S, T> {
-        let game = self.game.as_ref().unwrap().state.game.clone();
+        let game = self.game.as_ref().unwrap().game_state.clone();
         let new_game_future = self.players
             .take()
             .unwrap()
@@ -77,7 +77,7 @@ impl<S, T, R> GameFuture<S, T, R>
             _ => return (GameFutureStage::ReadyForTurn(future), Suspend),
         };
 
-        let turn = self.game.as_ref().unwrap().state.turn.clone();
+        let turn = self.game.as_ref().unwrap().turn_state.clone();
         let new_turn_future = self.players
             .take()
             .unwrap()
@@ -95,7 +95,7 @@ impl<S, T, R> GameFuture<S, T, R>
 
         // @TODO: Have ask_moves take keys() directly.
         let living_player_names =
-            self.game.as_ref().unwrap().state.turn.snakes.keys().cloned().collect();
+            self.game.as_ref().unwrap().turn_state.snakes.keys().cloned().collect();
         let ask_moves_future = self.players.take().unwrap().ask_moves(&living_player_names);
         return (GameFutureStage::AskMoves(ask_moves_future), Continue);
     }
@@ -120,7 +120,7 @@ impl<S, T, R> GameFuture<S, T, R>
             .map(|(name, move_msg)| (name.clone(), move_msg.direction));
         self.game.as_mut().unwrap().advance_turn(moves.collect());
 
-        let ref new_turn = self.game.as_ref().unwrap().state.turn;
+        let ref new_turn = self.game.as_ref().unwrap().turn_state;
         println!("Advanced turn to {:?}", new_turn.clone());
 
         let die_future = self.players.take().unwrap().die(&new_turn.casualties);
@@ -154,7 +154,7 @@ impl<S, T, R> Future for GameFuture<S, T, R>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static,
           R: Rng
 {
-    type Item = (Engine<R>, Clients<S, T>);
+    type Item = (Game<R>, Clients<S, T>);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

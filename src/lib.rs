@@ -17,24 +17,20 @@ extern crate futures;
 #[macro_use]
 extern crate tokio_core;
 
-pub mod grid;
 pub mod grids;
 pub mod snake;
 pub mod clients;
 pub mod net;
 pub mod protocol;
-pub mod state;
-pub mod engine;
+pub mod game;
 pub mod game_future;
 
-// pub use net::*;
-pub use grid::*;
+pub use grids::*;
 pub use snake::*;
 pub use clients::*;
 pub use net::*;
 pub use protocol::*;
-pub use state::*;
-pub use engine::*;
+pub use game::*;
 pub use game_future::*;
 
 #[cfg(test)]

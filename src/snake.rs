@@ -1,4 +1,4 @@
-use grid::*;
+use grids::*;
 use protocol::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]

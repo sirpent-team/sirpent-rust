@@ -156,7 +156,7 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
           T: Stream<Item = Msg, Error = io::Error> + Send
 {
     Box::new(future::loop_fn((), move |_| {
-            let engine = Engine::new(OsRng::new().unwrap(), grid);
+            let game = Game::new(OsRng::new().unwrap(), grid);
 
             let players_ref = players_pool.clone();
             while players_pool.lock().unwrap().len() < 2 {
@@ -167,10 +167,9 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
             let mut players_lock = players_pool.lock().unwrap();
             let players = players_lock.drain(..).collect();
 
-            Box::new(GameFuture::new(engine, players)
-                .map(move |(engine, players)| {
-                    let state = engine.state;
-                    println!("End of game! {:?}", state);
+            Box::new(GameFuture::new(game, players)
+                .map(move |(game, players)| {
+                    println!("End of game! {:?} {:?}", game.game_state, game.turn_state);
 
                     let mut players_lock = players_ref.lock().unwrap();
                     let mut players = players.into_iter().collect::<Vec<_>>();

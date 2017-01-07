@@ -8,9 +8,9 @@ use std::fmt::Debug;
 
 use futures::sync::mpsc;
 
-use grid::*;
+use grids::*;
 use snake::*;
-use state::*;
+use game::*;
 use clients::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.2";
