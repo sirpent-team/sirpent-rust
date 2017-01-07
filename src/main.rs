@@ -68,6 +68,7 @@ fn main() {
     // * After a short wait duration play a new game, as before with all pooled player clients.
     // * Continue indefinitely.
     thread::spawn(move || {
+        thread::sleep(Duration::from_secs(10));
         let mut lp = Core::new().unwrap();
         lp.run(play_games(names.clone(),
                             grid.clone(),
@@ -156,27 +157,29 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
           T: Stream<Item = Msg, Error = io::Error> + Send
 {
+    print!("play_games");
     Box::new(future::loop_fn((), move |_| {
             let engine = Engine::new(OsRng::new().unwrap(), grid);
 
             let players_ref = players_pool.clone();
             while players_pool.lock().unwrap().len() < 2 {
-                //println!("Not enough players yet.");
-                //return future::ok(future::Loop::Continue(()));
+                println!("Not enough players yet.");
+                //return Box::new(future::ok(future::Loop::Continue(())).into_future());
             }
 
             let mut players_lock = players_pool.lock().unwrap();
             let players = players_lock.drain(..).collect();
-            play_game(Rc::new(RefCell::new(engine)), timeout, players)
+
+            Box::new(GameFuture::new(engine, players)
                 .map(move |(engine, players)| {
-                    let state = engine.borrow().state.clone();
+                    let state = engine.state;
                     println!("End of game! {:?}", state);
 
                     let mut players_lock = players_ref.lock().unwrap();
                     let mut players = players.into_iter().collect::<Vec<_>>();
                     players_lock.append(&mut players);
                     future::Loop::Continue(())
-                })
+                }))
         })
         //.map(|_| ())
         .map_err(|_| ()))
@@ -224,7 +227,7 @@ fn play_game<S, T>(engine: Rc<RefCell<Engine<OsRng>>>,
                         let new_turn = engine2.borrow_mut().advance_turn(moves);
                         let casualty_names = new_turn.casualties
                             .iter()
-                            .map(|(name, &(ref cause_of_death, _))| {
+                            .map(|(name, cause_of_death)| {
                                 (name.clone(), cause_of_death.clone())
                             });
                         players.die(&casualty_names.collect())
