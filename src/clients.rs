@@ -316,10 +316,12 @@ impl<S, T> Clients<S, T>
                 // @TODO: Determine good approach to dropping clients.
                 match client_result {
                     Ok((return_, client)) => {
+                        println!("dataful_future ok {:?}", client.name.clone().unwrap());
                         returned.insert(client.name.clone().unwrap(), return_);
                         self.clients.insert(client.name.clone().unwrap(), client);
                     }
                     Err((e, client)) => {
+                        println!("dataful_future e {:?}", e);
                         self.failures.insert(client.name.clone().unwrap(), e);
                     }
                 }

@@ -178,7 +178,8 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
                     let mut players_lock = players_ref.lock().unwrap();
                     let mut players = players.into_iter().collect::<Vec<_>>();
                     players_lock.append(&mut players);
-                    future::Loop::Continue(())
+                    future::Loop::Break(())
+                    //future::Loop::Continue(())
                 }))
         })
         //.map(|_| ())
