@@ -11,6 +11,7 @@ use futures::sync::mpsc;
 use grid::*;
 use snake::*;
 use state::*;
+use clients::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.2";
 
@@ -18,8 +19,8 @@ pub static PROTOCOL_VERSION: &'static str = "0.2";
 pub enum MsgTypeName {
     #[serde(rename = "version")]
     Version,
-    #[serde(rename = "identify")]
-    Identify,
+    #[serde(rename = "register")]
+    Register,
     #[serde(rename = "welcome")]
     Welcome,
     #[serde(rename = "new_game")]
@@ -94,12 +95,13 @@ impl TypedMsg for VersionMsg {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct IdentifyMsg {
+pub struct RegisterMsg {
     pub desired_name: String,
+    pub kind: ClientKind,
 }
 
-impl TypedMsg for IdentifyMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Identify;
+impl TypedMsg for RegisterMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Register;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -315,7 +317,7 @@ mod tests {
     #[test]
     fn can_convert_typedmsgs_to_msg() {
         convert_typedmsg_to_msg(VersionMsg::new());
-        convert_typedmsg_to_msg(IdentifyMsg { desired_name: "abc".to_string() });
+        convert_typedmsg_to_msg(RegisterMsg { desired_name: "abc".to_string() });
         convert_typedmsg_to_msg(WelcomeMsg {
             name: "def".to_string(),
             grid: Grid { radius: 15 },
@@ -330,15 +332,15 @@ mod tests {
         convert_typedmsg_to_msg(WonMsg {});
         convert_typedmsg_to_msg(GameOverMsg { turn: TurnState::new() });
 
-        let identify_msg = IdentifyMsg { desired_name: "jkl".to_string() };
+        let register_msg = RegisterMsg { desired_name: "jkl".to_string() };
 
         let mut map: serde_json::value::Map<String, serde_json::Value> =
             serde_json::value::Map::new();
         map.insert("desired_name".to_string(),
                    serde_json::Value::String("jkl".to_string()));
-        let plain_msg = Msg::new(MsgTypeName::Identify, serde_json::Value::Object(map));
+        let plain_msg = Msg::new(MsgTypeName::Register, serde_json::Value::Object(map));
 
-        assert_eq!(format!("{:?}", Msg::from_typed(identify_msg)),
+        assert_eq!(format!("{:?}", Msg::from_typed(register_msg)),
                    format!("{:?}", plain_msg));
     }
 
@@ -351,19 +353,19 @@ mod tests {
             serde_json::value::Map::new();
         map.insert("desired_name".to_string(),
                    serde_json::Value::String(desired_name.clone()));
-        let identify_msg2: IdentifyMsg = Msg::new(MsgTypeName::Identify,
+        let register_msg2: RegisterMsg = Msg::new(MsgTypeName::Register,
                                                   serde_json::Value::Object(map))
             .to_typed()
             .unwrap();
 
-        assert_eq!(format!("{:?}", identify_msg2),
-                   format!("{:?}", IdentifyMsg { desired_name: desired_name.clone() }));
+        assert_eq!(format!("{:?}", register_msg2),
+                   format!("{:?}", RegisterMsg { desired_name: desired_name.clone() }));
     }
 
     // #[test]
     // fn can_convert_msgs_to_msg() {
     //     convert_msg_to_msg(VersionMsg::new());
-    //     convert_msg_to_msg(IdentifyMsg { desired_player_name: "abc".to_string() });
+    //     convert_msg_to_msg(RegisterMsg { desired_player_name: "abc".to_string() });
     //     convert_msg_to_msg(WelcomeMsg {
     //         player_name: "def".to_string(),
     //         grid: Grid { radius: 15 },

@@ -56,7 +56,7 @@ impl Codec for MsgCodec {
     }
 }
 
-fn other_labelled(desc: &str) -> io::Error {
+pub fn other_labelled(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
 }
 

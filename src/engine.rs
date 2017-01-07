@@ -84,7 +84,7 @@ impl<R: Rng> Engine<R> {
             } else {
                 let cause_of_death = CauseOfDeath::NoMoveMade("".to_string());
                 next_turn.casualties
-                    .insert(name.clone(), (cause_of_death, snake.clone()));
+                    .insert(name.clone(), cause_of_death);
             }
         }
     }
@@ -107,8 +107,7 @@ impl<R: Rng> Engine<R> {
                 if snake != coll_snake && snake.has_collided_into(coll_snake) {
                     next_turn.casualties
                         .insert(name.clone(),
-                                (CauseOfDeath::CollidedWithSnake(coll_player_name.clone()),
-                                 snake.clone()));
+                                CauseOfDeath::CollidedWithSnake(coll_player_name.clone()));
                     break;
                 }
             }
@@ -119,9 +118,8 @@ impl<R: Rng> Engine<R> {
         for (name, snake) in next_turn.snakes.iter() {
             for &segment in snake.segments.iter() {
                 if !self.state.game.grid.is_within_bounds(segment) {
-                    next_turn.casualties.insert(name.clone(),
-                                                (CauseOfDeath::CollidedWithBounds(segment),
-                                                 snake.clone()));
+                    next_turn.casualties
+                        .insert(name.clone(), CauseOfDeath::CollidedWithBounds(segment));
                 }
             }
         }

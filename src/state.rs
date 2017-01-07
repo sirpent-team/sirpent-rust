@@ -58,7 +58,7 @@ pub struct TurnState {
     pub eaten: HashMap<String, Vector>,
     pub snakes: HashMap<String, Snake>,
     pub directions: HashMap<String, Direction>,
-    pub casualties: HashMap<String, (CauseOfDeath, Snake)>,
+    pub casualties: HashMap<String, CauseOfDeath>,
 }
 
 impl TurnState {

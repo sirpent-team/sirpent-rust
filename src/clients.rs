@@ -7,6 +7,7 @@ use std::marker::Send;
 use std::collections::{HashSet, HashMap};
 use std::collections::hash_map::{Keys, Drain};
 use std::fmt::Debug;
+use serde_json;
 
 use futures::{Future, BoxFuture, Stream, Sink};
 use futures::stream::{SplitStream, SplitSink, futures_unordered};
@@ -20,6 +21,14 @@ use state::*;
 use protocol::*;
 
 pub type BoxFutureNotSend<I, E> = Box<Future<Item = I, Error = E>>;
+
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+pub enum ClientKind {
+    #[serde(rename = "player")]
+    Player,
+    #[serde(rename = "spectator")]
+    Spectator,
+}
 
 pub struct Client<S, T>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
@@ -111,7 +120,7 @@ impl<S, T> Client<S, T>
 
     /// Tell the client our protocol version and expect them to send back a name to use.
     /// A Client will be included with the ProtocolError unless sending the VersionMsg failed.
-    pub fn handshake(self) -> BoxFuture<(IdentifyMsg, Self), (ProtocolError, Self)> {
+    pub fn handshake(self) -> BoxFuture<(RegisterMsg, Self), (ProtocolError, Self)> {
         self.send(VersionMsg::new())
             .and_then(|client| client.receive())
             .boxed()

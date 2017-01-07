@@ -23,7 +23,7 @@ use std::thread;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use futures::{future, Future, Stream, Sink};
+use futures::{future, Future, Stream, Sink, IntoFuture, BoxFuture};
 use futures::stream::{SplitStream, SplitSink};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Remote};
@@ -99,8 +99,16 @@ fn server(listener: TcpListener,
             let players_ref = players.clone();
 
             // Find a unique name for the Client and then send WelcomeMsg.
-            let client_future = client_future.and_then(move |(identify_msg, client)| {
-                let name = find_unique_name(&mut names_ref, identify_msg.desired_name);
+            let client_future = client_future.and_then(move |(register_msg, client)| {
+                if register_msg.kind != ClientKind::Player {
+                    return future::err((ProtocolError::from(other_labelled("Spectators are \
+                                                                            not yet supported.")),
+                                        client))
+                        .into_future()
+                        .boxed();
+                }
+
+                let name = find_unique_name(&mut names_ref, register_msg.desired_name);
                 client.welcome(name, grid, timeout)
             });
             // Queue the Client as a new player.
@@ -214,7 +222,6 @@ fn play_game<S, T>(engine: Rc<RefCell<Engine<OsRng>>>,
                             .collect();
                         // Transition to the next turn and tell the players whom died.
                         let new_turn = engine2.borrow_mut().advance_turn(moves);
-                        println!("{:?}", new_turn.clone());
                         let casualty_names = new_turn.casualties
                             .iter()
                             .map(|(name, &(ref cause_of_death, _))| {
@@ -227,6 +234,7 @@ fn play_game<S, T>(engine: Rc<RefCell<Engine<OsRng>>>,
                         // error I was having but is nasty.
                         // Decide whether game is complete or further turns will be made.
                         if engine3.borrow().concluded() {
+                            println!("{:?}", engine1.borrow().state.turn.clone());
                             future::Loop::Break(players)
                         } else {
                             future::Loop::Continue(players)

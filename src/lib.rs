@@ -25,6 +25,7 @@ pub mod net;
 pub mod protocol;
 pub mod state;
 pub mod engine;
+pub mod game_future;
 
 // pub use net::*;
 pub use grid::*;
@@ -34,6 +35,7 @@ pub use net::*;
 pub use protocol::*;
 pub use state::*;
 pub use engine::*;
+pub use game_future::*;
 
 #[cfg(test)]
 mod tests {
