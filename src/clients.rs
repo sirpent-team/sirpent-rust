@@ -7,7 +7,6 @@ use std::marker::Send;
 use std::collections::{HashSet, HashMap};
 use std::collections::hash_map::{Keys, Drain};
 use std::fmt::Debug;
-use serde_json;
 
 use futures::{Future, BoxFuture, Stream, Sink};
 use futures::stream::{SplitStream, SplitSink, futures_unordered};
@@ -316,12 +315,10 @@ impl<S, T> Clients<S, T>
                 // @TODO: Determine good approach to dropping clients.
                 match client_result {
                     Ok((return_, client)) => {
-                        println!("dataful_future ok {:?}", client.name.clone().unwrap());
                         returned.insert(client.name.clone().unwrap(), return_);
                         self.clients.insert(client.name.clone().unwrap(), client);
                     }
                     Err((e, client)) => {
-                        println!("dataful_future e {:?}", e);
                         self.failures.insert(client.name.clone().unwrap(), e);
                     }
                 }
