@@ -193,6 +193,8 @@ pub enum ProtocolError {
     WrongCommand,
     InvalidStateTransition { from_state: String, event: String },
     Internal,
+    Timeout,
+    StreamFinishedUnexpectedly,
 }
 
 impl Error for ProtocolError {
@@ -221,6 +223,8 @@ impl Error for ProtocolError {
             ProtocolError::WrongCommand => "Wrong command was read.",
             ProtocolError::InvalidStateTransition { .. } => "Invalid state transition requested.",
             ProtocolError::Internal => "Unspecified internal error.",
+            ProtocolError::Timeout => "Client timed out.",
+            ProtocolError::StreamFinishedUnexpectedly => "Client connection closed unexpectedly.",
         }
     }
 
@@ -276,6 +280,10 @@ impl Display for ProtocolError {
                         event)
             }
             ProtocolError::Internal => "Unspecified internal error.".to_string(),
+            ProtocolError::Timeout => "Client timed out.".to_string(),
+            ProtocolError::StreamFinishedUnexpectedly => {
+                "Client connection closed unexpectedly.".to_string()
+            }
         };
         f.write_str(&*disp)
     }

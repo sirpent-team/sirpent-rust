@@ -24,11 +24,11 @@ enum GameFutureStage<S, T>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static
 {
     StartOfGame,
-    ReadyForTurn(BoxFutureNotSend<Clients<S, T>, ()>),
-    StartTurn(BoxFutureNotSend<Clients<S, T>, ()>),
-    AskMoves(BoxFutureNotSend<(HashMap<String, MoveMsg>, Clients<S, T>), ()>),
+    ReadyForTurn(BoxedFuture<Clients<S, T>, ()>),
+    StartTurn(BoxedFuture<Clients<S, T>, ()>),
+    AskMoves(BoxedFuture<(HashMap<String, MoveMsg>, Clients<S, T>), ()>),
     AdvanceTurn(HashMap<String, MoveMsg>),
-    NotifyDead(BoxFutureNotSend<Clients<S, T>, ()>),
+    NotifyDead(BoxedFuture<Clients<S, T>, ()>),
     LoopDecision,
     Concluded,
 }
@@ -70,7 +70,7 @@ impl<S, T, R> GameFuture<S, T, R>
     }
 
     fn poll_ready_for_turn(&mut self,
-                           mut future: BoxFutureNotSend<Clients<S, T>, ()>)
+                           mut future: BoxedFuture<Clients<S, T>, ()>)
                            -> GameFuturePollReturn<S, T> {
         self.players = match future.poll() {
             Ok(Async::Ready(players)) => Some(players),
@@ -86,7 +86,7 @@ impl<S, T, R> GameFuture<S, T, R>
     }
 
     fn poll_start_turn(&mut self,
-                       mut future: BoxFutureNotSend<Clients<S, T>, ()>)
+                       mut future: BoxedFuture<Clients<S, T>, ()>)
                        -> GameFuturePollReturn<S, T> {
         self.players = match future.poll() {
             Ok(Async::Ready(players)) => Some(players),
@@ -101,7 +101,7 @@ impl<S, T, R> GameFuture<S, T, R>
     }
 
     fn poll_ask_moves(&mut self,
-                      mut future: BoxFutureNotSend<(HashMap<String, MoveMsg>, Clients<S, T>), ()>)
+                      mut future: BoxedFuture<(HashMap<String, MoveMsg>, Clients<S, T>), ()>)
                       -> GameFuturePollReturn<S, T> {
         let (move_msgs, players) = match future.poll() {
             Ok(Async::Ready((move_msgs, players))) => (move_msgs, players),
@@ -128,7 +128,7 @@ impl<S, T, R> GameFuture<S, T, R>
     }
 
     fn poll_notify_dead(&mut self,
-                        mut future: BoxFutureNotSend<Clients<S, T>, ()>)
+                        mut future: BoxedFuture<Clients<S, T>, ()>)
                         -> GameFuturePollReturn<S, T> {
         self.players = match future.poll() {
             Ok(Async::Ready(players)) => Some(players),
@@ -143,7 +143,7 @@ impl<S, T, R> GameFuture<S, T, R>
             return (GameFutureStage::Concluded, Continue);
         } else {
             // Returns players despite no future being run. Believed negligible-cost.
-            let players_done = Box::new(future::ok(self.players.take().unwrap()));
+            let players_done = box future::ok(self.players.take().unwrap());
             return (GameFutureStage::ReadyForTurn(players_done), Continue);
         }
     }

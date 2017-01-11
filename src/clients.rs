@@ -3,23 +3,24 @@ use std::vec;
 use std::iter::FromIterator;
 use std::net::SocketAddr;
 use std::time::Duration;
-use std::marker::Send;
 use std::collections::{HashSet, HashMap};
 use std::collections::hash_map::{Keys, Drain};
 use std::fmt::Debug;
 
-use futures::{Future, BoxFuture, Stream, Sink};
+use futures::{Future, Stream, Sink};
 use futures::stream::{SplitStream, SplitSink, futures_unordered};
 use tokio_core::net::TcpStream;
 use tokio_core::io::Io;
+use tokio_timer::Timer;
 
 use net::*;
 use grids::*;
 use snake::*;
 use game::*;
 use protocol::*;
+use timeout::*;
 
-pub type BoxFutureNotSend<I, E> = Box<Future<Item = I, Error = E>>;
+pub type BoxedFuture<I, E> = Box<Future<Item = I, Error = E>>;
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum ClientKind {
@@ -30,39 +31,47 @@ pub enum ClientKind {
 }
 
 pub struct Client<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static
 {
     pub name: Option<String>,
     pub addr: Option<SocketAddr>,
     msg_tx: Option<S>,
     msg_rx: Option<T>,
+    timer: Timer,
+    timeout: Option<Duration>,
 }
 
 impl Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>> {
     pub fn from_incoming(stream: TcpStream,
-                         addr: SocketAddr)
+                         addr: SocketAddr,
+                         timer: Timer,
+                         timeout: Option<Duration>)
                          -> Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>> {
         let msg_transport = stream.framed(MsgCodec);
         let (msg_tx, msg_rx) = msg_transport.split();
-        Client::new(None, Some(addr), msg_tx, msg_rx)
+        Client::new(None, Some(addr), msg_tx, msg_rx, timer, timeout)
     }
 }
 
 impl<S, T> Client<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static
 {
     pub fn new(name: Option<String>,
                addr: Option<SocketAddr>,
                msg_tx: S,
-               msg_rx: T)
+               msg_rx: T,
+               timer: Timer,
+               timeout: Option<Duration>)
                -> Client<S, T> {
         Client {
             name: name,
             addr: addr,
             msg_tx: Some(msg_tx),
             msg_rx: Some(msg_rx),
+            timer: timer,
+            timeout: timeout,
         }
     }
 
@@ -76,91 +85,100 @@ impl<S, T> Client<S, T>
         return self;
     }
 
-    fn send<M: TypedMsg>(mut self, typed_msg: M) -> BoxFuture<Self, (ProtocolError, Self)>
+    fn send<M: TypedMsg>(mut self, typed_msg: M) -> BoxedFuture<Self, (ProtocolError, Self)>
         where M: 'static
     {
         let msg = Msg::from_typed(typed_msg);
-        self.msg_tx
+        let send_future = self.msg_tx
             .take()
             .unwrap()
-            .send(msg)
-            .then(|result| {
-                match result {
-                    Ok(msg_tx) => Ok(self.with_new_msg_tx(msg_tx)),
-                    Err(e) => Err((ProtocolError::from(e), self)),
-                }
-            })
-            .boxed()
+            .send(msg);
+
+        box send_future.then(|result| {
+            match result {
+                Ok(msg_tx) => Ok(self.with_new_msg_tx(msg_tx)),
+                Err(e) => Err((ProtocolError::from(e), self)),
+            }
+        })
     }
 
-    fn receive<M: TypedMsg>(mut self) -> BoxFuture<(M, Self), (ProtocolError, Self)>
+    fn receive<M: TypedMsg>(mut self) -> BoxedFuture<(M, Self), (ProtocolError, Self)>
         where M: 'static
     {
-        self.msg_rx
-            .take()
-            .unwrap()
-            .into_future()
-            .map_err(|(e, msg_rx)| (ProtocolError::from(e), msg_rx))
-            .and_then(|(maybe_msg, msg_rx)| {
-                let msg = maybe_msg.ok_or(ProtocolError::NoMsgReceived);
-                match msg.and_then(|msg| Msg::try_into_typed(msg)) {
+        // @TODO: Implement custom Timeout future that can allow preserving the msg_rx field we
+        // discard in map_err. We have to dispose of it because tokio_timer::Timeout requires
+        // the error type to be From<>.
+        // let receive_future = box self.msg_rx
+        // .take()
+        // .unwrap()
+        // .into_future()
+        // .map_err(|(e, _)| ProtocolError::from(e));
+
+        let receive_future = box RxWithTimeout::new(self.msg_rx.take().unwrap(),
+                                                    self.timer.clone(),
+                                                    self.timeout);
+
+        box receive_future.and_then(|(msg, msg_rx)| {
+                match Msg::try_into_typed(msg) {
                     Ok(typed_msg) => Ok((typed_msg, msg_rx)),
-                    Err(e) => Err((e, msg_rx)),
+                    Err(e) => Err((e, Some(msg_rx))),
                 }
             })
             .then(|result| {
                 match result {
                     Ok((typed_msg, msg_rx)) => Ok((typed_msg, self.with_new_msg_rx(msg_rx))),
-                    Err((e, msg_rx)) => Err((e, self.with_new_msg_rx(msg_rx))),
+                    Err((e, msg_rx)) => {
+                        match msg_rx {
+                            Some(msg_rx) => Err((e, self.with_new_msg_rx(msg_rx))),
+                            None => Err((e, self)),
+                        }
+                    }
                 }
             })
-            .boxed()
     }
 
     /// Tell the client our protocol version and expect them to send back a name to use.
     /// A Client will be included with the ProtocolError unless sending the VersionMsg failed.
-    pub fn handshake(self) -> BoxFuture<(RegisterMsg, Self), (ProtocolError, Self)> {
-        self.send(VersionMsg::new())
+    pub fn handshake(self) -> BoxedFuture<(RegisterMsg, Self), (ProtocolError, Self)> {
+        box self.send(VersionMsg::new())
             .and_then(|client| client.receive())
-            .boxed()
     }
 
     pub fn welcome(mut self,
                    name: String,
                    grid: Grid,
                    timeout: Option<Duration>)
-                   -> BoxFuture<Self, (ProtocolError, Self)> {
+                   -> BoxedFuture<Self, (ProtocolError, Self)> {
         self.name = Some(name.clone());
-        self.send(WelcomeMsg {
-                name: name,
-                grid: grid,
-                timeout: timeout,
-            })
-            .boxed()
+        box self.send(WelcomeMsg {
+            name: name,
+            grid: grid,
+            timeout: timeout,
+        })
     }
 
-    pub fn new_game(self, game: GameState) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(NewGameMsg { game: game }).boxed()
+    pub fn new_game(self, game: GameState) -> BoxedFuture<Self, (ProtocolError, Self)> {
+        box self.send(NewGameMsg { game: game })
     }
 
-    pub fn new_turn(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(TurnMsg { turn: turn }).boxed()
+    pub fn new_turn(self, turn: TurnState) -> BoxedFuture<Self, (ProtocolError, Self)> {
+        box self.send(TurnMsg { turn: turn })
     }
 
-    pub fn ask_move(self) -> BoxFuture<(MoveMsg, Self), (ProtocolError, Self)> {
-        self.receive().boxed()
+    pub fn ask_move(self) -> BoxedFuture<(MoveMsg, Self), (ProtocolError, Self)> {
+        box self.receive()
     }
 
-    pub fn die(self, cause_of_death: CauseOfDeath) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(DiedMsg { cause_of_death: cause_of_death }).boxed()
+    pub fn die(self, cause_of_death: CauseOfDeath) -> BoxedFuture<Self, (ProtocolError, Self)> {
+        box self.send(DiedMsg { cause_of_death: cause_of_death })
     }
 
-    pub fn win(self) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(WonMsg {}).boxed()
+    pub fn win(self) -> BoxedFuture<Self, (ProtocolError, Self)> {
+        box self.send(WonMsg {})
     }
 
-    pub fn end_game(self, turn: TurnState) -> BoxFuture<Self, (ProtocolError, Self)> {
-        self.send(GameOverMsg { turn: turn }).boxed()
+    pub fn end_game(self, turn: TurnState) -> BoxedFuture<Self, (ProtocolError, Self)> {
+        box self.send(GameOverMsg { turn: turn })
     }
 }
 
@@ -175,16 +193,16 @@ impl<S, T> Client<S, T>
 //   * `apply_addressed(addr: Option<SocketAddr>)`: Execute a function on a particular client?
 
 pub struct Clients<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static
 {
     clients: HashMap<String, Client<S, T>>,
     failures: HashMap<String, ProtocolError>,
 }
 
 impl<S, T> Clients<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static
 {
     /// Typically one creates Clients from an iterator rather than with new.
     pub fn new(clients: HashMap<String, Client<S, T>>,
@@ -204,24 +222,24 @@ impl<S, T> Clients<S, T>
         self.failures.drain()
     }
 
-    pub fn new_game(mut self, game: GameState) -> BoxFutureNotSend<Self, ()> {
+    pub fn new_game(mut self, game: GameState) -> BoxedFuture<Self, ()> {
         let futures = self.all_to_futures(|_, client| client.new_game(game.clone()));
         self.dataless_future(futures)
     }
 
-    pub fn new_turn(mut self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
+    pub fn new_turn(mut self, turn: TurnState) -> BoxedFuture<Self, ()> {
         let futures = self.all_to_futures(|_, client| client.new_turn(turn.clone()));
         self.dataless_future(futures)
     }
 
     pub fn ask_moves(mut self,
                      movers: &HashSet<String>)
-                     -> BoxFutureNotSend<(HashMap<String, MoveMsg>, Self), ()> {
+                     -> BoxedFuture<(HashMap<String, MoveMsg>, Self), ()> {
         let futures = self.named_to_futures(movers, |_, client| client.ask_move());
         self.dataful_future(futures)
     }
 
-    pub fn die(mut self, casualties: &HashMap<String, CauseOfDeath>) -> BoxFutureNotSend<Self, ()> {
+    pub fn die(mut self, casualties: &HashMap<String, CauseOfDeath>) -> BoxedFuture<Self, ()> {
         let mut futures = Vec::new();
         for (name, cause_of_death) in casualties {
             match self.clients.remove(name) {
@@ -234,18 +252,18 @@ impl<S, T> Clients<S, T>
         self.dataless_future(futures)
     }
 
-    pub fn win(mut self, winners: &HashSet<String>) -> BoxFutureNotSend<Self, ()> {
+    pub fn win(mut self, winners: &HashSet<String>) -> BoxedFuture<Self, ()> {
         let futures = self.named_to_futures(winners, |_, client| client.win());
         self.dataless_future(futures)
     }
 
-    pub fn end_game(mut self, turn: TurnState) -> BoxFutureNotSend<Self, ()> {
+    pub fn end_game(mut self, turn: TurnState) -> BoxedFuture<Self, ()> {
         let futures = self.all_to_futures(|_, client| client.end_game(turn.clone()));
         self.dataless_future(futures)
     }
 
-    fn all_to_futures<F, A, B>(&mut self, client_to_future_fn: F) -> Vec<BoxFuture<A, B>>
-        where F: Fn(String, Client<S, T>) -> BoxFuture<A, B>
+    fn all_to_futures<F, A, B>(&mut self, client_to_future_fn: F) -> Vec<BoxedFuture<A, B>>
+        where F: Fn(String, Client<S, T>) -> BoxedFuture<A, B>
     {
         self.clients.drain().map(|(name, client)| client_to_future_fn(name, client)).collect()
     }
@@ -253,8 +271,8 @@ impl<S, T> Clients<S, T>
     fn named_to_futures<F, A, B>(&mut self,
                                  names: &HashSet<String>,
                                  client_to_future_fn: F)
-                                 -> Vec<BoxFuture<A, B>>
-        where F: Fn(String, Client<S, T>) -> BoxFuture<A, B>
+                                 -> Vec<BoxedFuture<A, B>>
+        where F: Fn(String, Client<S, T>) -> BoxedFuture<A, B>
     {
         let mut futures = Vec::new();
         for name in names {
@@ -270,8 +288,8 @@ impl<S, T> Clients<S, T>
 
     // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
     fn dataless_future(mut self,
-                       futures: Vec<BoxFuture<Client<S, T>, (ProtocolError, Client<S, T>)>>)
-                       -> BoxFutureNotSend<Self, ()> {
+                       futures: Vec<BoxedFuture<Client<S, T>, (ProtocolError, Client<S, T>)>>)
+                       -> BoxedFuture<Self, ()> {
         // Run futures concurrently.
         // Collect Result<Client, (ProtocolError, Client)> iterator.
         let joined_future = futures_unordered(futures).collect_results();
@@ -293,14 +311,14 @@ impl<S, T> Clients<S, T>
             // Return the updated Clients.
             Self::new(self.clients, self.failures)
         });
-        return Box::new(reconstruct_future);
+        return box reconstruct_future;
     }
 
     // @TODO: Had a surprising Send requirement when trying to make futures IntoIterator.
     fn dataful_future<R>(mut self,
-                         futures: Vec<BoxFuture<(R, Client<S, T>),
-                                                (ProtocolError, Client<S, T>)>>)
-                         -> BoxFutureNotSend<(HashMap<String, R>, Self), ()>
+                         futures: Vec<BoxedFuture<(R, Client<S, T>),
+                                                  (ProtocolError, Client<S, T>)>>)
+                         -> BoxedFuture<(HashMap<String, R>, Self), ()>
         where R: Clone + Debug + 'static
     {
         // Run futures concurrently.
@@ -326,13 +344,13 @@ impl<S, T> Clients<S, T>
             // Return the received messages and updated Clients.
             (returned, Self::new(self.clients, self.failures))
         });
-        return Box::new(reconstruct_future);
+        return box reconstruct_future;
     }
 }
 
 impl<S, T> FromIterator<Client<S, T>> for Clients<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static
 {
     fn from_iter<I: IntoIterator<Item = Client<S, T>>>(iter: I) -> Self {
         Clients {
@@ -345,8 +363,8 @@ impl<S, T> FromIterator<Client<S, T>> for Clients<S, T>
 }
 
 impl<S, T> IntoIterator for Clients<S, T>
-    where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+    where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static
 {
     type Item = Client<S, T>;
     type IntoIter = vec::IntoIter<Client<S, T>>;
@@ -372,8 +390,8 @@ impl<S, T> IntoIterator for Clients<S, T>
 // @TODO: Have the option of preserving failures on Iterators. Use Iterator<Item=Result<...>>.
 //
 // impl<S, T> Default for Clients<S, T>
-// where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-// T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+// where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+// T: Stream<Item = Msg, Error = io::Error> + 'static
 // {
 // fn default() -> Clients<S, T> {
 // Clients::new(HashMap::new(), HashMap::new())
@@ -381,8 +399,8 @@ impl<S, T> IntoIterator for Clients<S, T>
 // }
 //
 // impl<S, T> Extend<Client<S, T>> for Clients<S, T>
-// where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send + 'static,
-// T: Stream<Item = Msg, Error = io::Error> + Send + 'static
+// where S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+// T: Stream<Item = Msg, Error = io::Error> + 'static
 // {
 // fn extend<I: IntoIterator<Item = Client<S, T>>>(&mut self, iter: I) {
 // for client in iter {

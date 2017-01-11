@@ -3,6 +3,7 @@ use protocol::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct Snake {
+    // Could utilise BTreeSet (ordered set) instead of Vec. Cheaply optimise collision detecting?
     pub segments: Vec<Vector>,
     #[serde(skip_serializing, skip_deserializing)]
     previous_tail: Option<Vector>,
