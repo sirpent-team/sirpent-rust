@@ -1,4 +1,4 @@
-#![feature(proc_macro, associated_consts, box_syntax)]
+#![feature(associated_consts, box_syntax)]
 
 // UUID is used to give unique identifiers to each game.
 extern crate uuid;
@@ -25,7 +25,6 @@ pub mod net;
 pub mod protocol;
 pub mod game;
 pub mod game_future;
-pub mod timeout;
 
 pub use grids::*;
 pub use snake::*;

@@ -4,6 +4,7 @@ use std::collections::{HashSet, HashMap};
 
 use grids::*;
 use snake::*;
+use protocol::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
@@ -91,7 +92,7 @@ impl<R: Rng> Game<R> {
         }
     }
 
-    pub fn advance_turn(&mut self, moves: HashMap<String, Direction>) -> TurnState {
+    pub fn advance_turn(&mut self, moves: HashMap<String, ProtocolResult<Direction>>) -> TurnState {
         let mut next_turn: TurnState = self.turn_state.clone();
 
         // N.B. does not free memory.
@@ -123,7 +124,9 @@ impl<R: Rng> Game<R> {
         return next_turn;
     }
 
-    fn snake_movement(&mut self, next_turn: &mut TurnState, moves: HashMap<String, Direction>) {
+    fn snake_movement(&mut self,
+                      next_turn: &mut TurnState,
+                      mut moves: HashMap<String, ProtocolResult<Direction>>) {
         // Apply movement and remove snakes that did not move.
         // Snake plans are Result<Direction, MoveError>. MoveError = String.
         // So we can specify an underlying error rather than just omitting any move.
@@ -131,15 +134,19 @@ impl<R: Rng> Game<R> {
         // While intricate this very neatly leads to CauseOfDeath.
 
         for (name, snake) in next_turn.snakes.iter_mut() {
-            // Move if a direction provided else kill the snake.
-            if moves.contains_key(name) {
-                let move_ = moves[name];
-                snake.step_in_direction(move_);
-                next_turn.directions.insert(name.clone(), move_);
-            } else {
-                let cause_of_death = CauseOfDeath::NoMoveMade("".to_string());
-                next_turn.casualties
-                    .insert(name.clone(), cause_of_death);
+            match moves.remove(name) {
+                Some(Ok(direction)) => {
+                    snake.step_in_direction(direction);
+                    next_turn.directions.insert(name.clone(), direction);
+                }
+                Some(Err(e)) => {
+                    let cause_of_death = CauseOfDeath::from(e);
+                    next_turn.casualties.insert(name.clone(), cause_of_death);
+                }
+                None => {
+                    let cause_of_death = CauseOfDeath::NoMoveMade("".to_string());
+                    next_turn.casualties.insert(name.clone(), cause_of_death);
+                }
             }
         }
     }

@@ -18,7 +18,6 @@ use grids::*;
 use snake::*;
 use game::*;
 use protocol::*;
-use timeout::*;
 
 pub type BoxedFuture<I, E> = Box<Future<Item = I, Error = E>>;
 
@@ -105,36 +104,25 @@ impl<S, T> Client<S, T>
     fn receive<M: TypedMsg>(mut self) -> BoxedFuture<(M, Self), (ProtocolError, Self)>
         where M: 'static
     {
-        // @TODO: Implement custom Timeout future that can allow preserving the msg_rx field we
-        // discard in map_err. We have to dispose of it because tokio_timer::Timeout requires
-        // the error type to be From<>.
-        // let receive_future = box self.msg_rx
-        // .take()
-        // .unwrap()
-        // .into_future()
-        // .map_err(|(e, _)| ProtocolError::from(e));
+        let receive_future: BoxedFuture<_, _> = match self.timeout {
+            Some(timeout) => box self.timer.anticipate(self.msg_rx.take().unwrap(), timeout),
+            None => box self.msg_rx.take().unwrap().into_future().map_err(|(e, _)| e),
+        };
 
-        let receive_future = box RxWithTimeout::new(self.msg_rx.take().unwrap(),
-                                                    self.timer.clone(),
-                                                    self.timeout);
-
-        box receive_future.and_then(|(msg, msg_rx)| {
-                match Msg::try_into_typed(msg) {
-                    Ok(typed_msg) => Ok((typed_msg, msg_rx)),
-                    Err(e) => Err((e, Some(msg_rx))),
-                }
-            })
-            .then(|result| {
-                match result {
-                    Ok((typed_msg, msg_rx)) => Ok((typed_msg, self.with_new_msg_rx(msg_rx))),
-                    Err((e, msg_rx)) => {
-                        match msg_rx {
-                            Some(msg_rx) => Err((e, self.with_new_msg_rx(msg_rx))),
-                            None => Err((e, self)),
-                        }
+        box receive_future.then(|result| {
+            match result {
+                Ok((msg, msg_rx)) => {
+                    self = self.with_new_msg_rx(msg_rx);
+                    let msg = msg.ok_or(ProtocolError::NoMsgReceived)
+                        .and_then(Msg::try_into_typed);
+                    match msg {
+                        Ok(typed_msg) => Ok((typed_msg, self)),
+                        Err(e) => Err((ProtocolError::from(e), self)),
                     }
                 }
-            })
+                Err(e) => Err((ProtocolError::from(e), self)),
+            }
+        })
     }
 
     /// Tell the client our protocol version and expect them to send back a name to use.
@@ -234,7 +222,7 @@ impl<S, T> Clients<S, T>
 
     pub fn ask_moves(mut self,
                      movers: &HashSet<String>)
-                     -> BoxedFuture<(HashMap<String, MoveMsg>, Self), ()> {
+                     -> BoxedFuture<(HashMap<String, ProtocolResult<MoveMsg>>, Self), ()> {
         let futures = self.named_to_futures(movers, |_, client| client.ask_move());
         self.dataful_future(futures)
     }
@@ -318,7 +306,7 @@ impl<S, T> Clients<S, T>
     fn dataful_future<R>(mut self,
                          futures: Vec<BoxedFuture<(R, Client<S, T>),
                                                   (ProtocolError, Client<S, T>)>>)
-                         -> BoxedFuture<(HashMap<String, R>, Self), ()>
+                         -> BoxedFuture<(HashMap<String, ProtocolResult<R>>, Self), ()>
         where R: Clone + Debug + 'static
     {
         // Run futures concurrently.
@@ -333,11 +321,12 @@ impl<S, T> Clients<S, T>
                 // @TODO: Determine good approach to dropping clients.
                 match client_result {
                     Ok((return_, client)) => {
-                        returned.insert(client.name.clone().unwrap(), return_);
+                        returned.insert(client.name.clone().unwrap(), Ok(return_));
                         self.clients.insert(client.name.clone().unwrap(), client);
                     }
                     Err((e, client)) => {
-                        self.failures.insert(client.name.clone().unwrap(), e);
+                        returned.insert(client.name.clone().unwrap(), Err(e));
+                        // self.failures.insert(client.name.clone().unwrap(), e.clone());
                     }
                 }
             }

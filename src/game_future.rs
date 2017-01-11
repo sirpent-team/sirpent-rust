@@ -26,8 +26,8 @@ enum GameFutureStage<S, T>
     StartOfGame,
     ReadyForTurn(BoxedFuture<Clients<S, T>, ()>),
     StartTurn(BoxedFuture<Clients<S, T>, ()>),
-    AskMoves(BoxedFuture<(HashMap<String, MoveMsg>, Clients<S, T>), ()>),
-    AdvanceTurn(HashMap<String, MoveMsg>),
+    AskMoves(BoxedFuture<(HashMap<String, ProtocolResult<MoveMsg>>, Clients<S, T>), ()>),
+    AdvanceTurn(HashMap<String, ProtocolResult<MoveMsg>>),
     NotifyDead(BoxedFuture<Clients<S, T>, ()>),
     LoopDecision,
     Concluded,
@@ -101,7 +101,9 @@ impl<S, T, R> GameFuture<S, T, R>
     }
 
     fn poll_ask_moves(&mut self,
-                      mut future: BoxedFuture<(HashMap<String, MoveMsg>, Clients<S, T>), ()>)
+                      mut future: BoxedFuture<(HashMap<String, ProtocolResult<MoveMsg>>,
+                                               Clients<S, T>),
+                                              ()>)
                       -> GameFuturePollReturn<S, T> {
         let (move_msgs, players) = match future.poll() {
             Ok(Async::Ready((move_msgs, players))) => (move_msgs, players),
@@ -113,11 +115,13 @@ impl<S, T, R> GameFuture<S, T, R>
     }
 
     fn poll_advance_turn(&mut self,
-                         move_msgs: HashMap<String, MoveMsg>)
+                         move_msgs: HashMap<String, ProtocolResult<MoveMsg>>)
                          -> GameFuturePollReturn<S, T> {
         // @TODO: Have advance_turn take MoveMsgs.
         let moves = move_msgs.into_iter()
-            .map(|(name, move_msg)| (name.clone(), move_msg.direction));
+            .map(|(name, move_msg)| {
+                (name.clone(), move_msg.and_then(|move_msg| Ok(move_msg.direction)))
+            });
         self.game.as_mut().unwrap().advance_turn(moves.collect());
 
         let ref new_turn = self.game.as_ref().unwrap().turn_state;
