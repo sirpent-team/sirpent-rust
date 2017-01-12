@@ -100,17 +100,20 @@ fn server(listener: TcpListener,
             let players_ref = players.clone();
 
             // Find a unique name for the Client and then send WelcomeMsg.
-            let client_future = client_future.and_then(move |(register_msg, client)| {
-                // if register_msg.kind != ClientKind::Player {
-                // return box future::err((ProtocolError::from(other_labelled("Spectators \
-                // are not yet \
-                // supported.")),
-                // client));
-                // }
-
-                let name = find_unique_name(&mut names_ref, register_msg.desired_name);
-                client.welcome(name, grid, timeout)
-            });
+            let client_future =
+                client_future.and_then(move |(register_msg, client)| -> BoxedFuture<_, _> {
+                    match register_msg.kind {
+                        ClientKind::Spectator => {
+                            let e = ProtocolError::from(other_labelled("Spectators are not yet \
+                                                                        supported."));
+                            box future::err((e, client))
+                        }
+                        ClientKind::Player => {
+                            let name = find_unique_name(&mut names_ref, register_msg.desired_name);
+                            client.welcome(name, grid, timeout)
+                        }
+                    }
+                });
             // Queue the Client as a new player.
             let client_future = client_future.map(move |client| {
                 players_ref.lock().unwrap().push(client);
