@@ -331,7 +331,10 @@ mod tests {
     #[test]
     fn can_convert_typedmsgs_to_msg() {
         convert_typedmsg_to_msg(VersionMsg::new());
-        convert_typedmsg_to_msg(RegisterMsg { desired_name: "abc".to_string() });
+        convert_typedmsg_to_msg(RegisterMsg {
+            desired_name: "abc".to_string(),
+            kind: ClientKind::Player,
+        });
         convert_typedmsg_to_msg(WelcomeMsg {
             name: "def".to_string(),
             grid: Grid { radius: 15 },
@@ -346,12 +349,17 @@ mod tests {
         convert_typedmsg_to_msg(WonMsg {});
         convert_typedmsg_to_msg(GameOverMsg { turn: TurnState::new() });
 
-        let register_msg = RegisterMsg { desired_name: "jkl".to_string() };
+        let register_msg = RegisterMsg {
+            desired_name: "jkl".to_string(),
+            kind: ClientKind::Player,
+        };
 
         let mut map: serde_json::value::Map<String, serde_json::Value> =
             serde_json::value::Map::new();
         map.insert("desired_name".to_string(),
                    serde_json::Value::String("jkl".to_string()));
+        map.insert("kind".to_string(),
+                   serde_json::Value::String("player".to_string()));
         let plain_msg = Msg::new(MsgTypeName::Register, serde_json::Value::Object(map));
 
         assert_eq!(format!("{:?}", Msg::from_typed(register_msg)),
@@ -367,13 +375,19 @@ mod tests {
             serde_json::value::Map::new();
         map.insert("desired_name".to_string(),
                    serde_json::Value::String(desired_name.clone()));
+        map.insert("kind".to_string(),
+                   serde_json::Value::String("spectator".to_string()));
         let register_msg2: RegisterMsg = Msg::new(MsgTypeName::Register,
                                                   serde_json::Value::Object(map))
             .try_into_typed()
             .unwrap();
 
         assert_eq!(format!("{:?}", register_msg2),
-                   format!("{:?}", RegisterMsg { desired_name: desired_name.clone() }));
+                   format!("{:?}",
+                           RegisterMsg {
+                               desired_name: desired_name.clone(),
+                               kind: ClientKind::Spectator,
+                           }));
     }
 
     // #[test]

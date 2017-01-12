@@ -123,10 +123,21 @@ impl GridTrait for HexagonGrid {
 
     fn random_cell<R: Rng>(&self, rng: &mut R) -> HexagonVector {
         let isize_radius = self.radius as isize;
-        HexagonVector {
-            x: rng.gen_range(-isize_radius, isize_radius + 1),
-            y: rng.gen_range(-isize_radius, isize_radius + 1),
+
+        let mut x;
+        let mut y;
+        let mut z;
+        // @TODO: Determine a nicer, unbiased way to select these parameters.
+        loop {
+            x = rng.gen_range(-isize_radius, isize_radius + 1);
+            y = rng.gen_range(-isize_radius, isize_radius + 1);
+            z = x + y;
+            if (-isize_radius <= z) && (z < isize_radius + 1) {
+                break;
+            }
         }
+
+        HexagonVector { x: x, y: y }
     }
 }
 
@@ -135,6 +146,7 @@ mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
     pub use grids::traits::*;
+    use rand::OsRng;
 
     impl Arbitrary for HexagonVector {
         fn arbitrary<G: Gen>(g: &mut G) -> HexagonVector {
@@ -147,6 +159,16 @@ mod tests {
         fn arbitrary<G: Gen>(g: &mut G) -> HexagonDirection {
             let i: usize = g.gen_range(0, 6);
             HexagonDirection::variants()[i].clone()
+        }
+    }
+
+    impl Arbitrary for HexagonGrid {
+        fn arbitrary<G: Gen>(g: &mut G) -> HexagonGrid {
+            let mut radius = Arbitrary::arbitrary(g);
+            if radius == 0 {
+                radius = 1;
+            }
+            return HexagonGrid { radius: radius };
         }
     }
 
@@ -185,5 +207,21 @@ mod tests {
     #[test]
     fn neighbour_adjacency() {
         quickcheck(neighbour_adjacency_prop as fn(HexagonVector, HexagonDirection) -> bool);
+    }
+
+    fn random_cells_within_bounds_prop(g: HexagonGrid) -> bool {
+        let mut osrng = OsRng::new().unwrap();
+        for _ in 0..1000 {
+            let random_cell = g.random_cell(&mut osrng);
+            if !g.is_within_bounds(random_cell) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    #[test]
+    fn random_cells_within_bounds() {
+        quickcheck(random_cells_within_bounds_prop as fn(HexagonGrid) -> bool);
     }
 }

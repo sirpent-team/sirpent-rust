@@ -136,6 +136,7 @@ mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
     pub use grids::traits::*;
+    use rand::OsRng;
 
     impl Arbitrary for TriangleVector {
         fn arbitrary<G: Gen>(g: &mut G) -> TriangleVector {
@@ -148,6 +149,13 @@ mod tests {
         fn arbitrary<G: Gen>(g: &mut G) -> TriangleDirection {
             let i: usize = g.gen_range(0, 3);
             TriangleDirection::variants()[i].clone()
+        }
+    }
+
+    impl Arbitrary for TriangleGrid {
+        fn arbitrary<G: Gen>(g: &mut G) -> TriangleGrid {
+            let radius = Arbitrary::arbitrary(g);
+            return TriangleGrid { radius: radius };
         }
     }
 
@@ -186,5 +194,21 @@ mod tests {
     #[test]
     fn neighbour_adjacency() {
         quickcheck(neighbour_adjacency_prop as fn(TriangleVector, TriangleDirection) -> bool);
+    }
+
+    fn random_cells_within_bounds_prop(g: TriangleGrid) -> bool {
+        let mut osrng = OsRng::new().unwrap();
+        for _ in 0..1000 {
+            let random_cell = g.random_cell(&mut osrng);
+            if !g.is_within_bounds(random_cell) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    #[test]
+    fn random_cells_within_bounds() {
+        quickcheck(random_cells_within_bounds_prop as fn(TriangleGrid) -> bool);
     }
 }

@@ -75,13 +75,13 @@ impl VectorTrait for SquareVector {
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub struct SquareGrid {
-    pub width: isize,
-    pub height: isize,
+    pub width: usize,
+    pub height: usize,
 }
 
 impl SquareGrid {
     #[allow(dead_code)]
-    pub fn new(width: isize, height: isize) -> SquareGrid {
+    pub fn new(width: usize, height: usize) -> SquareGrid {
         SquareGrid {
             width: width,
             height: height,
@@ -93,11 +93,11 @@ impl GridTrait for SquareGrid {
     type Vector = SquareVector;
 
     fn dimensions(&self) -> Vec<isize> {
-        vec![self.width, self.height]
+        vec![self.width as isize, self.height as isize]
     }
 
     fn is_within_bounds(&self, v: SquareVector) -> bool {
-        v.x >= 0 && v.x < self.width && v.y >= 0 && v.y < self.height
+        v.x >= 0 && v.x < (self.width as isize) && v.y >= 0 && v.y < (self.height as isize)
     }
 
     fn cells(&self) -> Vec<SquareVector> {
@@ -108,8 +108,8 @@ impl GridTrait for SquareGrid {
         let isize_width = self.width as isize;
         let isize_height = self.height as isize;
         SquareVector {
-            x: rng.gen_range(-isize_width, isize_width + 1),
-            y: rng.gen_range(-isize_height, isize_height + 1),
+            x: rng.gen_range(0, isize_width),
+            y: rng.gen_range(0, isize_height),
         }
     }
 }
@@ -119,6 +119,7 @@ mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
     pub use grids::traits::*;
+    use rand::OsRng;
 
     impl Arbitrary for SquareVector {
         fn arbitrary<G: Gen>(g: &mut G) -> SquareVector {
@@ -131,6 +132,22 @@ mod tests {
         fn arbitrary<G: Gen>(g: &mut G) -> SquareDirection {
             let i: usize = g.gen_range(0, 4);
             SquareDirection::variants()[i].clone()
+        }
+    }
+
+    impl Arbitrary for SquareGrid {
+        fn arbitrary<G: Gen>(g: &mut G) -> SquareGrid {
+            let (mut width, mut height) = Arbitrary::arbitrary(g);
+            if width == 0 {
+                width = 1;
+            }
+            if height == 0 {
+                height = 1;
+            }
+            return SquareGrid {
+                width: width,
+                height: height,
+            };
         }
     }
 
@@ -168,5 +185,21 @@ mod tests {
     #[test]
     fn neighbour_adjacency() {
         quickcheck(neighbour_adjacency_prop as fn(SquareVector, SquareDirection) -> bool);
+    }
+
+    fn random_cells_within_bounds_prop(g: SquareGrid) -> bool {
+        let mut osrng = OsRng::new().unwrap();
+        for _ in 0..1000 {
+            let random_cell = g.random_cell(&mut osrng);
+            if !g.is_within_bounds(random_cell) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    #[test]
+    fn random_cells_within_bounds() {
+        quickcheck(random_cells_within_bounds_prop as fn(SquareGrid) -> bool);
     }
 }
