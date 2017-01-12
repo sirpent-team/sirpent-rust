@@ -43,8 +43,10 @@ fn main() {
     // read/write into, and the bound TCP listener itself.
     let mut lp = Core::new().unwrap();
     let handle = lp.handle();
-    let listener = TcpListener::bind(&addr, &handle).unwrap();
 
+    let timer = Timer::default();
+
+    let listener = TcpListener::bind(&addr, &handle).unwrap();
     println!("Listening on {}", addr);
 
     let grid = Grid::new(25);
@@ -59,6 +61,7 @@ fn main() {
                         handle.clone(),
                         names.clone(),
                         grid.clone(),
+                        timer.clone(),
                         timeout,
                         players.clone()));
 
@@ -70,7 +73,7 @@ fn main() {
     thread::spawn(move || {
         // thread::sleep(Duration::from_secs(10));
         let mut lp = Core::new().unwrap();
-        lp.run(play_games(names.clone(), grid.clone(), players.clone()))
+        lp.run(play_games(names.clone(), grid.clone(), players.clone(), timer.clone()))
             .unwrap();
     });
 
@@ -84,10 +87,10 @@ fn server(listener: TcpListener,
           handle: Handle,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
+          timer: Timer,
           timeout: Option<Duration>,
           players: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>>)
           -> impl Future<Item = (), Error = ()> {
-    let timer = Timer::default();
     let clients = listener.incoming()
         .map_err(|e| ProtocolError::from(e))
         .map(move |(socket, addr)| {
@@ -153,24 +156,27 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 
 fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
                     grid: Grid,
-                    players_pool: Arc<Mutex<Vec<Client<S, T>>>>)
+                    players_pool: Arc<Mutex<Vec<Client<S, T>>>>,
+                    timer: Timer)
                     -> BoxedFuture<(), ()>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
           T: Stream<Item = Msg, Error = io::Error> + Send
 {
-    Box::new(future::loop_fn((), move |_| {
+    box future::loop_fn((), move |_| -> BoxedFuture<_, _> {
             let game = Game::new(OsRng::new().unwrap(), grid);
 
             let players_ref = players_pool.clone();
             while players_pool.lock().unwrap().len() < 2 {
-                println!("Not enough players yet.");
-                //return Box::new(future::ok(future::Loop::Continue(())));
+                println!("Not enough players yet. Waiting 10 seconds.");
+                return box timer.sleep(Duration::from_secs(10))
+                    .map(|_| future::Loop::Continue(()))
+                    .map_err(|_| ());
             }
 
             let mut players_lock = players_pool.lock().unwrap();
             let players = players_lock.drain(..).collect();
 
-            Box::new(GameFuture::new(game, players)
+            box GameFuture::new(game, players)
                 .map(move |(game, players)| {
                     println!("End of game! {:?} {:?}", game.game_state, game.turn_state);
 
@@ -178,8 +184,8 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
                     let mut players = players.into_iter().collect::<Vec<_>>();
                     players_lock.append(&mut players);
                     future::Loop::Continue(())
-                }))
+                })
         })
         //.map(|_| ())
-        .map_err(|_| ()))
+        .map_err(|_| ())
 }
