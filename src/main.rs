@@ -55,6 +55,8 @@ fn main() {
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let players: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>> =
         Arc::new(Mutex::new(vec![]));
+    let spectators: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>> =
+        Arc::new(Mutex::new(vec![]));
 
     // Run TCP server to welcome clients and register them as players.
     handle.spawn(server(listener,
@@ -63,7 +65,8 @@ fn main() {
                         grid.clone(),
                         timer.clone(),
                         timeout,
-                        players.clone()));
+                        players.clone(),
+                        spectators.clone()));
 
     // @TODO: Game requirements:
     // * Take existing player clients and play a game of sirpent with them until completion.
@@ -73,7 +76,11 @@ fn main() {
     thread::spawn(move || {
         // thread::sleep(Duration::from_secs(10));
         let mut lp = Core::new().unwrap();
-        lp.run(play_games(names.clone(), grid.clone(), players.clone(), timer.clone()))
+        lp.run(play_games(names.clone(),
+                            grid.clone(),
+                            players.clone(),
+                            spectators.clone(),
+                            timer.clone()))
             .unwrap();
     });
 
@@ -89,7 +96,8 @@ fn server(listener: TcpListener,
           grid: Grid,
           timer: Timer,
           timeout: Option<Duration>,
-          players: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>>)
+          players: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>>,
+          spectators: Arc<Mutex<Vec<Client<SplitSink<MsgTransport>, SplitStream<MsgTransport>>>>>)
           -> impl Future<Item = (), Error = ()> {
     let clients = listener.incoming()
         .map_err(|e| ProtocolError::from(e))
@@ -101,25 +109,25 @@ fn server(listener: TcpListener,
             // @TODO: If and when I build a client object, keep addr handy in it.
             let mut names_ref = names.clone();
             let players_ref = players.clone();
+            let spectators_ref = spectators.clone();
 
             // Find a unique name for the Client and then send WelcomeMsg.
             let client_future =
                 client_future.and_then(move |(register_msg, client)| -> BoxedFuture<_, _> {
-                    match register_msg.kind {
-                        ClientKind::Spectator => {
-                            let e = ProtocolError::from(other_labelled("Spectators are not yet \
-                                                                        supported."));
-                            box future::err((e, client))
-                        }
-                        ClientKind::Player => {
-                            let name = find_unique_name(&mut names_ref, register_msg.desired_name);
-                            client.welcome(name, grid, timeout)
-                        }
-                    }
+                    let name = find_unique_name(&mut names_ref, register_msg.desired_name.clone());
+                    box client.welcome(name, grid, timeout)
+                        .map(move |client| (client, register_msg.kind))
                 });
-            // Queue the Client as a new player.
-            let client_future = client_future.map(move |client| {
-                players_ref.lock().unwrap().push(client);
+            // Queue the Client as a new player or spectator.
+            let client_future = client_future.map(move |(client, client_kind)| {
+                match client_kind {
+                    ClientKind::Spectator => {
+                        spectators_ref.lock().unwrap().push(client);
+                    }
+                    ClientKind::Player => {
+                        players_ref.lock().unwrap().push(client);
+                    }
+                }
                 ()
             });
 
@@ -157,6 +165,7 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
                     grid: Grid,
                     players_pool: Arc<Mutex<Vec<Client<S, T>>>>,
+                    spectators_pool: Arc<Mutex<Vec<Client<S, T>>>>,
                     timer: Timer)
                     -> BoxedFuture<(), ()>
     where S: Sink<SinkItem = Msg, SinkError = io::Error> + Send,
@@ -166,6 +175,8 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
             let game = Game::new(OsRng::new().unwrap(), grid);
 
             let players_ref = players_pool.clone();
+            let spectators_ref = spectators_pool.clone();
+
             while players_pool.lock().unwrap().len() < 2 {
                 println!("Not enough players yet. Waiting 10 seconds.");
                 return box timer.sleep(Duration::from_secs(10))
@@ -176,13 +187,21 @@ fn play_games<S, T>(names: Arc<Mutex<HashSet<String>>>,
             let mut players_lock = players_pool.lock().unwrap();
             let players = players_lock.drain(..).collect();
 
-            box GameFuture::new(game, players)
-                .map(move |(game, players)| {
+            let mut spectators_lock = spectators_pool.lock().unwrap();
+            let spectators = spectators_lock.drain(..).collect();
+
+            box GameFuture::new(game, players, spectators)
+                .map(move |(game, players, spectators)| {
                     println!("End of game! {:?} {:?}", game.game_state, game.turn_state);
 
                     let mut players_lock = players_ref.lock().unwrap();
                     let mut players = players.into_iter().collect::<Vec<_>>();
                     players_lock.append(&mut players);
+
+                    let mut spectators_lock = spectators_ref.lock().unwrap();
+                    let mut spectators = spectators.into_iter().collect::<Vec<_>>();
+                    spectators_lock.append(&mut spectators);
+
                     future::Loop::Continue(())
                 })
         })

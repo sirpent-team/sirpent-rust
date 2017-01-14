@@ -16,6 +16,7 @@ pub struct GameFuture<S, T, R>
 {
     game: Option<Game<R>>,
     players: Option<Clients<S, T>>,
+    spectators: Option<Clients<S, T>>,
     current_stage: Option<GameFutureStage<S, T>>,
 }
 
@@ -24,8 +25,8 @@ enum GameFutureStage<S, T>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static
 {
     StartOfGame,
-    ReadyForTurn(BoxedFuture<Clients<S, T>, ()>),
-    StartTurn(BoxedFuture<Clients<S, T>, ()>),
+    ReadyForTurn(BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>),
+    StartTurn(BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>),
     AskMoves(BoxedFuture<(HashMap<String, ProtocolResult<MoveMsg>>, Clients<S, T>), ()>),
     AdvanceTurn(HashMap<String, ProtocolResult<MoveMsg>>),
     NotifyDead(BoxedFuture<Clients<S, T>, ()>),
@@ -48,7 +49,7 @@ impl<S, T, R> GameFuture<S, T, R>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static,
           R: Rng
 {
-    pub fn new(mut game: Game<R>, players: Clients<S, T>) -> Self {
+    pub fn new(mut game: Game<R>, players: Clients<S, T>, spectators: Clients<S, T>) -> Self {
         for name in players.names() {
             game.add_player(name.clone());
         }
@@ -56,6 +57,7 @@ impl<S, T, R> GameFuture<S, T, R>
         GameFuture {
             game: Some(game),
             players: Some(players),
+            spectators: Some(spectators),
             current_stage: Some(StartOfGame),
         }
     }
@@ -65,33 +67,46 @@ impl<S, T, R> GameFuture<S, T, R>
         let new_game_future = self.players
             .take()
             .unwrap()
-            .new_game(game);
+            .new_game(game.clone());
+        let spectators = self.spectators.take().unwrap();
+        let new_game_future = box new_game_future.and_then(move |players| {
+            spectators.new_game(game).map(|spectators| (players, spectators))
+        });
         return (ReadyForTurn(new_game_future), Continue);
     }
 
     fn poll_ready_for_turn(&mut self,
-                           mut future: BoxedFuture<Clients<S, T>, ()>)
+                           mut future: BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>)
                            -> GameFuturePollReturn<S, T> {
-        self.players = match future.poll() {
-            Ok(Async::Ready(players)) => Some(players),
+        let (players, spectators) = match future.poll() {
+            Ok(Async::Ready(p)) => p,
             _ => return (GameFutureStage::ReadyForTurn(future), Suspend),
         };
+        self.players = Some(players);
+        self.spectators = Some(spectators);
 
         let turn = self.game.as_ref().unwrap().turn_state.clone();
         let new_turn_future = self.players
             .take()
             .unwrap()
-            .new_turn(turn);
+            .new_turn(turn.clone());
+        let spectators = self.spectators.take().unwrap();
+        let new_turn_future =
+            box new_turn_future.and_then(|players| {
+                spectators.new_turn(turn).map(|spectators| (players, spectators))
+            });
         return (StartTurn(new_turn_future), Continue);
     }
 
     fn poll_start_turn(&mut self,
-                       mut future: BoxedFuture<Clients<S, T>, ()>)
+                       mut future: BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>)
                        -> GameFuturePollReturn<S, T> {
-        self.players = match future.poll() {
-            Ok(Async::Ready(players)) => Some(players),
+        let (players, spectators) = match future.poll() {
+            Ok(Async::Ready(p)) => p,
             _ => return (GameFutureStage::StartTurn(future), Suspend),
         };
+        self.players = Some(players);
+        self.spectators = Some(spectators);
 
         // @TODO: Have ask_moves take keys() directly.
         let living_player_names =
@@ -147,7 +162,9 @@ impl<S, T, R> GameFuture<S, T, R>
             return (GameFutureStage::Concluded, Continue);
         } else {
             // Returns players despite no future being run. Believed negligible-cost.
-            let players_done = box future::ok(self.players.take().unwrap());
+            let players = self.players.take().unwrap();
+            let spectators = self.spectators.take().unwrap();
+            let players_done = box future::ok((players, spectators));
             return (GameFutureStage::ReadyForTurn(players_done), Continue);
         }
     }
@@ -158,7 +175,7 @@ impl<S, T, R> Future for GameFuture<S, T, R>
           T: Stream<Item = Msg, Error = io::Error> + Send + 'static,
           R: Rng
 {
-    type Item = (Game<R>, Clients<S, T>);
+    type Item = (Game<R>, Clients<S, T>, Clients<S, T>);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -174,8 +191,11 @@ impl<S, T, R> Future for GameFuture<S, T, R>
                 GameFutureStage::NotifyDead(future) => self.poll_notify_dead(future),
                 GameFutureStage::LoopDecision => self.poll_loop_decision(),
                 GameFutureStage::Concluded => {
-                    let return_pair = (self.game.take().unwrap(), self.players.take().unwrap());
-                    return Ok(Async::Ready(return_pair));
+                    let game = self.game.take().unwrap();
+                    let players = self.players.take().unwrap();
+                    let spectators = self.spectators.take().unwrap();
+                    let return_triple = (game, players, spectators);
+                    return Ok(Async::Ready(return_triple));
                 }
             };
             self.current_stage = Some(new_stage);

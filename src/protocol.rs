@@ -23,6 +23,8 @@ pub enum MsgTypeName {
     Register,
     #[serde(rename = "welcome")]
     Welcome,
+    #[serde(rename = "close")]
+    Close,
     #[serde(rename = "new_game")]
     NewGame,
     #[serde(rename = "turn")]
@@ -120,6 +122,15 @@ pub struct WelcomeMsg {
 
 impl TypedMsg for WelcomeMsg {
     const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Welcome;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CloseMsg {
+    pub reason: String,
+}
+
+impl TypedMsg for CloseMsg {
+    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Close;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

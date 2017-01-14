@@ -168,6 +168,16 @@ impl<S, T> Client<S, T>
     pub fn end_game(self, turn: TurnState) -> BoxedFuture<Self, (ProtocolError, Self)> {
         box self.send(GameOverMsg { turn: turn })
     }
+
+    pub fn close(self, cause: String) -> BoxedFuture<Self, (ProtocolError, Self)> {
+        box self.send(CloseMsg { reason: cause })
+            .map(|mut client| {
+                // Destroy both halves of the connection to close it.
+                client.msg_rx = None;
+                client.msg_tx = None;
+                client
+            })
+    }
 }
 
 // Clients
@@ -200,6 +210,12 @@ impl<S, T> Clients<S, T>
             clients: clients,
             failures: failures,
         }
+    }
+
+    pub fn add_client(&mut self, client: Client<S, T>) {
+        // @TODO: Convert to returning ProtocolResult<()>;
+        assert!(client.name.is_some());
+        self.clients.insert(client.name.clone().unwrap(), client);
     }
 
     pub fn names(&self) -> Keys<String, Client<S, T>> {
