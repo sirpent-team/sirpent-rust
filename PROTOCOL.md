@@ -1,10 +1,4 @@
-TODOS
-=====
-
-* Lay out possible errors (on advisory basis) and possible causes of death.
-* Specify resolution to "In that case those players despite dying also win."
-
-Sirpent Protocol v0.3-incomplete
+Sirpent Protocol v0.3-draft
 ================================
 By David Morris and [Michael Mokrysz](https://github.com/46bit).
 
@@ -13,10 +7,6 @@ General Considerations
 
 All communication takes the form of messages between client and
 server, as plain text over a TCP socket.
-
-In this specification, lines starting with `>` are used to indicate
-messages from client to server; lines with no prefix indicate
-responses.
 
 Each message is a JSON object, sent on exactly one line of text as delimited by
 `\n`. Newlines embedded in the JSON are are not permitted. Carriage returns
@@ -112,13 +102,39 @@ Subsequent extensions may introduce additional kinds of dynamic state.
 Gameplay
 --------
 
-?? Food ??
+This specification intentionally does proscribe exact gameplay rules. These
+should be open to active development and agreed out-of-bound when setting up a
+sirpent server.
 
-?? Growth ??
+### Food
 
-?? Fun ??
+The server manages placing food. At any given time there should be at least 1
+item of food on the grid. Food items may be removed or moved at any change of
+turn.
 
-?? Profit ??
+### Growth
+
+Each item of food a snake eats grows it by one segment. Moving onto a cell
+containing food immediately grows your snake by 1. In effect the body of the
+snake will not move that turn but it will gain a new head segment where the food
+was.
+
+### Death
+
+There are several possible reasons for snakes to die:
+
+* `collision`: Death by collision with other snake(s). This happens when the
+  head cell of a snake is anywhere in the body of another snake.
+* `out_of_bounds`: Death by moving beyond the bounds of the grid.
+* `no_move_made`: Death by not submitting a move. This could be because of a
+  timeout, an error, or sending an invalid move.
+
+These are referred to as `cause_of_death`.
+
+### Scoring
+
+There are many possible scoring systems. These may be handled by Spectators
+acting as scoreboards, rather than the sirpent server itself.
 
 Session structure
 -----------------
@@ -222,9 +238,9 @@ collided with each other, with the edge of the grid, or have errored in some
 fashion (e.g., no move received inside the timeout).
 
 Before the next `turn` message each newly dead player will receive a `died`
-message giving their cause of death:
+message giving their cause of death. For example:
 
-    Server: {"msg": "died", "data": {"cause_of_death": …, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
+    Server: {"msg": "died", "data": {"cause_of_death": "out_of_bounds", "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
 
 The receipt of a `died` message should not result in a terminated TCP socket and
 should not stop information on the ongoing game. Dead players should be provided
@@ -238,18 +254,15 @@ between games sufficient to allow reconnections to happen.
 #### Notifications of victory and the game ending
 
 The server chooses victory criteria. Generally this is when only one player is
-left standing or when all players die. The latter case could happen when N
-remaining snakes die in the same turn. In that case those players (despite
-dying) also win.
-
-Winning players will be sent a `won` message:
-
-    Server: {"msg": "won", "data": {"game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
+left standing or when all players have died. The latter case happens when all
+`n>1` remaining snakes die in the same turn and in this situation they must not
+be sent `died` messages.
 
 All participating clients, both players and spectators, will then receive a
-`game_over` message. This also contains the final state.
+`game_over` message. This must have a list of winning player names in
+`data.winners`. This also contains the final state.
 
-    Server: {"msg": "game_over", "data": {"winners": ["46bit", "Taneb"], "turn": {"casualties": {"Taneb": …}, "eaten": {}, "food": [{"x": -24, "y": 3}], "snakes": {"46bit": {"segments": [{"x": -6, "y": -17}]}, "46bit_": {"segments": [{"x": 11,"y": -1}]}}, "turn_number": 100}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
+    Server: {"msg": "game_over", "data": {"winners": ["46bit", "Taneb"], "turn": {"casualties": {"Taneb": "out_of_bounds"}, "eaten": {}, "food": [{"x": -24, "y": 3}], "snakes": {"46bit": {"segments": [{"x": -6, "y": -17}]}, "46bit_": {"segments": [{"x": 11,"y": -1}]}}, "turn_number": 100}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
 
 ### Spectating
 
@@ -267,10 +280,10 @@ handshake.
     […]
     Server: {"msg": "game_over", "data": {"winners": ["46bit", "Taneb"], "turn": {"casualties": {"Taneb": …}, "eaten": {}, "food": [{"x": -24, "y": 3}], "snakes": {"46bit": {"segments": [{"x": -6, "y": -17}]}, "46bit_": {"segments": [{"x": 11,"y": -1}]}}, "turn_number": 100}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
 
-Died and won messages must not be relayed to spectators. Spectators should infer
-deaths from the `data.turn.casualties` field on each `turn` or `game_over`
-message. Similarly winners should be inferred from the `data.winners` field on
-each `game_over` message.
+Died messages must not be relayed to spectators. Spectators should infer deaths
+from the `data.turn.casualties` field on each `turn` or `game_over` message.
+Similarly winners should be inferred from the `data.winners` field on each
+`game_over` message.
 
 Servers may play multiple games simultaneously. Spectators may be sent multiple
 games at once. In this case the `data.game_id` field can be used to determine
@@ -280,29 +293,31 @@ Errors
 ------
 
 If a client sends an incorrect move (i.e., to a cell non-adjacent to
-the head, or overlapping the tail), the server responds with
+the head, or overlapping the tail), the server should respond with
 `move_error`:
 
-    > {{"msg": "move", "data": {"direction": "atotallyinvaliddirection"}}
-    {"resp": "move_error", "data": {"error_msg": "Invalid move"}}
+    Client: {"msg": "move", "data": {"direction": "atotallyinvaliddirection"}
+    Server: {"msg": "move_error", "data": {"error_msg": "Invalid move"}}
 
 If a client sends a message which is invalid in the current session
-state (e.g., sending a move after a game has finished) the server
-responds with `state_error`:
+state (e.g., sending a move after a game has finished) the server should
+respond with `state_error`:
 
-    > {"msg": "move", "data": {"next": "0,0"}}
-    {"resp": "state_error", "data": {"error_msg": "Game over"}}
+    Client: {"msg": "move", "data": {"next": "0,0"}}
+    Server: {"msg": "state_error", "data": {"error_msg": "Game over"}}
 
-If there is any other kind of error, the server responds with a
+If there is any other kind of error, the server should respond with a
 generic `error`:
 
-    > {"msg": "flibbertigibbet"}
-    {"resp": "error", "data": {"error_msg": "wat"}}
+    Client: {"msg": "flibbertigibbet"}
+    Server: {"msg": "error", "data": {"error_msg": "wat"}}
 
 For all errors the `data` key of the response is optional and clients must not
 depend on it. The server may include additional helpful information in `data`,
 if it is feeling magnanimous.
 
+The server may close the TCP socket after an error. In the event of a
+`move_error` (e.g., timeout) the server should keep the TCP socket open.
 
 Timeouts
 --------
@@ -333,38 +348,39 @@ A player session can be in one of the following states (valid messages
 listed):
 
 - `PRE_VERSION`
-  + `version`
+  + `version` -> `PRE_REGISTER`
 - `PRE_REGISTER`
-  + `register`
+  + `register` -> `PRE_WELCOME`
 - `PRE_WELCOME`
-  + `welcome`
+  + `welcome` -> `PRE_READY`
 - `PRE_READY`
-  + `describe_grid`
-  + `ready`
+  + `describe_grid` -> `PRE_READY`
+  + `ready` -> `READY_WAIT`
 - `READY_WAIT`
-  + `game_start`
+  + `game_start` -> `GAME_PLAYING`
 - `GAME_PLAYING`
-  + `turn`
+  + `died` -> `GAME_WATCHING`
+  + `turn` -> `TURN_MOVING`
+  + `game_over` -> `READY_WAIT`
+- `GAME_WATCHING`
+  + `turn` -> `GAME_WATCHING`
+  + `game_over` -> `READY_WAIT`
 - `TURN_MOVING`
-  + `move`
-- `TURN_DONE`
-  + `died`
-  + `won`
-  + `game_over`
+  + `move` -> `GAME_PLAYING`
 
 A spectator session can be in one of the following states (valid messages listed):
 
 - `PRE_VERSION`
-  + `version`
+  + `version` -> `PRE_REGISTER`
 - `PRE_REGISTER`
-  + `register`
+  + `register` -> `PRE_WELCOME`
 - `PRE_WELCOME`
-  + `welcome`
+  + `welcome` -> `PRE_READY`
 - `PRE_READY`
-  + `describe_grid`
-  + `ready`
+  + `describe_grid` -> `PRE_READY`
+  + `ready` -> `READY_WAIT`
 - `READY_WAIT`
-  + `game_start`
-- `GAME_PLAYING`
-  + `turn`
-  + `game_over`
+  + `game_start` -> `GAME_WATCHING`
+- `GAME_WATCHING`
+  + `turn` -> `GAME_WATCHING`
+  + `game_over` -> `READY_WAIT`
