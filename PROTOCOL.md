@@ -1,4 +1,4 @@
-Sirpent Protocol v0.3-draft
+Sirpent Protocol v0.3-draft2
 ================================
 By David Morris and [Michael Mokrysz](https://github.com/46bit).
 
@@ -52,8 +52,9 @@ Clients are be told the current grid type during the initial handshake:
 
     Server: {"msg": "welcome", "data": {…, "grid": {"kind": "hexagon", "data": {radius": 15}}}}
 
-If clients wish to be sent a graph representation they must ask now. It will be
-sent as an adjacency relation.
+If clients wish to be sent a graph representation they must ask now. Servers can
+send the Grid as an adjacency relation. If servers do not support this mode they
+must close the socket instead.
 
     Client: {"msg": "describe_grid"}
     Server: {"msg": "grid_graph", "data": {"edges": [[{"x": 0, "y": 0}, {"x": 0, "y": 1}], [{"x": 0, "y": 1}, {"x": 1, "y": 1}], [{"x": 1, "y": 1},{"x": 1, "y": 0}], [{"x": 1, "y": 0}, {"x": 0, "y": 0}], [{"x": 0, "y": 1}, {"x": 0, "y": 0}], [{"x": 1, "y": 1}, {"x": 0, "y": 1}], [{"x": 1, "y": 0},"1,1"], [{"x": 0, "y": 0},{"x": 1, "y": 0}]]]]}}
