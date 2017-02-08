@@ -24,6 +24,3 @@ serde_derive = "0.8"
 
 [dev-dependencies]
 quickcheck = "0.2.*"
-
-[replace]
-"futures:0.1.8" = { git = "https://github.com/sirpent-team/futures-rs", branch = "sirpent" }

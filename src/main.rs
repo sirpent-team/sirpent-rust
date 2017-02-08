@@ -1,11 +1,8 @@
 #![feature(conservative_impl_trait, box_syntax)]
 
-#[macro_use]
 extern crate log;
 extern crate env_logger;
-#[macro_use]
 extern crate futures;
-#[macro_use]
 extern crate tokio_core;
 extern crate sirpent;
 extern crate serde_json;
@@ -141,11 +138,10 @@ fn server(listener: TcpListener,
             Ok(())
         })
         .then(|_| Ok(()));
-
-    return box server;
+    box server
 }
 
-/// Find an unused name based upon the desired_name.
+/// Find an unused name based upon the `desired_name`.
 fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: String) -> String {
     let mut name = desired_name;
     loop {

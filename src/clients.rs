@@ -18,6 +18,7 @@ use grids::*;
 use snake::*;
 use game::*;
 use protocol::*;
+use collect_results::*;
 
 pub type BoxedFuture<I, E> = Box<Future<Item = I, Error = E>>;
 
@@ -296,7 +297,7 @@ impl<S, T> Clients<S, T>
                        -> BoxedFuture<Self, ()> {
         // Run futures concurrently.
         // Collect Result<Client, (ProtocolError, Client)> iterator.
-        let joined_future = futures_unordered(futures).collect_results();
+        let joined_future = collect_results(futures_unordered(futures));
         // Process each future's returned Result<Client, (ProtocolError, Client)>.
         let reconstruct_future = joined_future.map(move |client_results| {
             for client_result in client_results {
@@ -327,7 +328,7 @@ impl<S, T> Clients<S, T>
     {
         // Run futures concurrently.
         // Collect Result<(M, Client), (ProtocolError, Client)> iterator.
-        let joined_future = futures_unordered(futures).collect_results();
+        let joined_future = collect_results(futures_unordered(futures));
         // Process each future's returned Result<(M, Client), (ProtocolError, Client)>.
         let reconstruct_future = joined_future.map(move |client_results| {
             let mut returned = HashMap::new();

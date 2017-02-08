@@ -25,6 +25,7 @@ pub mod net;
 pub mod protocol;
 pub mod game;
 pub mod game_future;
+pub mod collect_results;
 
 pub use grids::*;
 pub use snake::*;

@@ -62,7 +62,7 @@ impl<S, T, R> GameFuture<S, T, R>
         }
     }
 
-    fn poll_start_of_game(&mut self) -> GameFuturePollReturn<S, T> {
+    fn start_of_game(&mut self) -> GameFuturePollReturn<S, T> {
         let game = self.game.as_ref().unwrap().game_state.clone();
         let new_game_future = self.players
             .take()
@@ -75,9 +75,9 @@ impl<S, T, R> GameFuture<S, T, R>
         return (ReadyForTurn(new_game_future), Continue);
     }
 
-    fn poll_ready_for_turn(&mut self,
-                           mut future: BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>)
-                           -> GameFuturePollReturn<S, T> {
+    fn ready_for_turn(&mut self,
+                      mut future: BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>)
+                      -> GameFuturePollReturn<S, T> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(p)) => p,
             _ => return (GameFutureStage::ReadyForTurn(future), Suspend),
@@ -98,9 +98,9 @@ impl<S, T, R> GameFuture<S, T, R>
         return (StartTurn(new_turn_future), Continue);
     }
 
-    fn poll_start_turn(&mut self,
-                       mut future: BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>)
-                       -> GameFuturePollReturn<S, T> {
+    fn start_turn(&mut self,
+                  mut future: BoxedFuture<(Clients<S, T>, Clients<S, T>), ()>)
+                  -> GameFuturePollReturn<S, T> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(p)) => p,
             _ => return (GameFutureStage::StartTurn(future), Suspend),
@@ -115,11 +115,11 @@ impl<S, T, R> GameFuture<S, T, R>
         return (GameFutureStage::AskMoves(ask_moves_future), Continue);
     }
 
-    fn poll_ask_moves(&mut self,
-                      mut future: BoxedFuture<(HashMap<String, ProtocolResult<MoveMsg>>,
-                                               Clients<S, T>),
-                                              ()>)
-                      -> GameFuturePollReturn<S, T> {
+    fn ask_moves(&mut self,
+                 mut future: BoxedFuture<(HashMap<String, ProtocolResult<MoveMsg>>,
+                                          Clients<S, T>),
+                                         ()>)
+                 -> GameFuturePollReturn<S, T> {
         let (move_msgs, players) = match future.poll() {
             Ok(Async::Ready((move_msgs, players))) => (move_msgs, players),
             _ => return (GameFutureStage::AskMoves(future), Suspend),
@@ -129,9 +129,9 @@ impl<S, T, R> GameFuture<S, T, R>
         return (GameFutureStage::AdvanceTurn(move_msgs), Continue);
     }
 
-    fn poll_advance_turn(&mut self,
-                         move_msgs: HashMap<String, ProtocolResult<MoveMsg>>)
-                         -> GameFuturePollReturn<S, T> {
+    fn advance_turn(&mut self,
+                    move_msgs: HashMap<String, ProtocolResult<MoveMsg>>)
+                    -> GameFuturePollReturn<S, T> {
         // @TODO: Have advance_turn take MoveMsgs.
         let moves = move_msgs.into_iter()
             .map(|(name, move_msg)| {
@@ -146,9 +146,9 @@ impl<S, T, R> GameFuture<S, T, R>
         return (GameFutureStage::NotifyDead(die_future), Continue);
     }
 
-    fn poll_notify_dead(&mut self,
-                        mut future: BoxedFuture<Clients<S, T>, ()>)
-                        -> GameFuturePollReturn<S, T> {
+    fn notify_dead(&mut self,
+                   mut future: BoxedFuture<Clients<S, T>, ()>)
+                   -> GameFuturePollReturn<S, T> {
         self.players = match future.poll() {
             Ok(Async::Ready(players)) => Some(players),
             _ => return (GameFutureStage::NotifyDead(future), Suspend),
@@ -157,7 +157,7 @@ impl<S, T, R> GameFuture<S, T, R>
         return (GameFutureStage::LoopDecision, Continue);
     }
 
-    fn poll_loop_decision(&mut self) -> GameFuturePollReturn<S, T> {
+    fn loop_decision(&mut self) -> GameFuturePollReturn<S, T> {
         if self.game.as_ref().unwrap().concluded() {
             return (GameFutureStage::Concluded, Continue);
         } else {
@@ -183,13 +183,13 @@ impl<S, T, R> Future for GameFuture<S, T, R>
             assert!(self.current_stage.is_some());
 
             let (new_stage, stage_control) = match self.current_stage.take().unwrap() {
-                GameFutureStage::StartOfGame => self.poll_start_of_game(),
-                GameFutureStage::ReadyForTurn(future) => self.poll_ready_for_turn(future),
-                GameFutureStage::StartTurn(future) => self.poll_start_turn(future),
-                GameFutureStage::AskMoves(future) => self.poll_ask_moves(future),
-                GameFutureStage::AdvanceTurn(move_msgs) => self.poll_advance_turn(move_msgs),
-                GameFutureStage::NotifyDead(future) => self.poll_notify_dead(future),
-                GameFutureStage::LoopDecision => self.poll_loop_decision(),
+                GameFutureStage::StartOfGame => self.start_of_game(),
+                GameFutureStage::ReadyForTurn(future) => self.ready_for_turn(future),
+                GameFutureStage::StartTurn(future) => self.start_turn(future),
+                GameFutureStage::AskMoves(future) => self.ask_moves(future),
+                GameFutureStage::AdvanceTurn(move_msgs) => self.advance_turn(move_msgs),
+                GameFutureStage::NotifyDead(future) => self.notify_dead(future),
+                GameFutureStage::LoopDecision => self.loop_decision(),
                 GameFutureStage::Concluded => {
                     let game = self.game.take().unwrap();
                     let players = self.players.take().unwrap();
