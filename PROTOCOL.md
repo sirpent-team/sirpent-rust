@@ -76,7 +76,7 @@ Static state is essentially the shape of the board (i.e., the graph). It is
 guaranteed not to change during a TCP socket; no guarantees are made between
 sockets.
 
-    {"game": {"grid": {"radius": 25}, "players": ["46bit", "46bit_"], "uuid": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}
+    {"game": {"grid": {"kind": "hexagon", "data": {radius": 25}}, "players": ["46bit", "46bit_"], "uuid": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}
 
 Dynamic state consists of the positions of the snakes and any food on the board:
 
@@ -162,7 +162,7 @@ Names cannot contain a literal `\n` but may be arbitrary valid unicode.
 
 The server replies with a welcome message.
 
-    Server: {"msg": "welcome", "data": {"grid": {"radius": 25}, "name": "46bit", "timeout": {"nanos": 0,"secs": 5}}}
+    Server: {"msg": "welcome", "data": {"grid": {"kind": "hexagon", "data": {radius": 25}}, "name": "46bit", "timeout": {"nanos": 0,"secs": 5}}}
 
 It may offer a different name to that offered by the client; the client must
 then use this name (for example, the server might add a suffix to distinguish
@@ -201,7 +201,7 @@ Once a new game is started, the server will send a `game_start` message
 describing the static state of the game. This will be sent to all participating
 clients, both players and spectators:
 
-    Server: {"msg": "game_start", "data": {"game": {"grid": {"radius": 25}, "players": ["46bit", "46bit_"], "id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
+    Server: {"msg": "game_start", "data": {"game": {"grid": {"kind": "hexagon", "data": {radius": 25}}, "players": ["46bit", "46bit_"], "id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
 
 Each game has a UUID. In `game_start` this is awkwardly included twice to be
 consistent with where other within-game messages expect it in `data.game_id`.
@@ -273,10 +273,10 @@ handshake.
 
     Server: {"msg": "version", "data": {"protocol": "0.3", "sirpent": "0.2.0"}}
     Client: {"msg": "register", "data": {"desired_name": "visualiser", "kind": "spectator"}}
-    Server: {"msg": "welcome", "data": {"grid": {"radius": 25}, "name": "spectator", "timeout": {"nanos": 0,"secs": 5}}}
+    Server: {"msg": "welcome", "data": {"grid": {"kind": "hexagon", "data": {radius": 15}}, "name": "spectator", "timeout": {"nanos": 0,"secs": 5}}}
     Client: {"msg": "ready"}
 
-    Server: {"msg": "game_start", "data": {"game": {"grid": {"radius": 25}, "players": ["46bit", "46bit_"], "uuid": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
+    Server: {"msg": "game_start", "data": {"game": {"grid": {"kind": "hexagon", "data": {radius": 25}}, "players": ["46bit", "46bit_"], "uuid": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
     Server: {"msg": "turn", "data": {"turn": {"casualties": {}, "eaten":{}, "food": [{"x": -24, "y": 3}], "snakes": {"46bit": {"segments": [{"x": -6, "y": -17}]}, "46bit_": {"segments": [{"x": 11,"y": -1}]}}, "turn_number": 0}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
     […]
     Server: {"msg": "game_over", "data": {"winners": ["46bit", "Taneb"], "turn": {"casualties": {"Taneb": …}, "eaten": {}, "food": [{"x": -24, "y": 3}], "snakes": {"46bit": {"segments": [{"x": -6, "y": -17}]}, "46bit_": {"segments": [{"x": 11,"y": -1}]}}, "turn_number": 100}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
