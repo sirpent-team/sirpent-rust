@@ -162,7 +162,7 @@ Names cannot contain a literal `\n` but may be arbitrary valid unicode.
 
 The server replies with a welcome message.
 
-    Server: {"msg": "welcome", "data": {"grid": {"kind": "hexagon", "data": {radius": 25}}, "name": "46bit", "timeout": {"nanos": 0,"secs": 5}}}
+    Server: {"msg": "welcome", "data": {"grid": {"kind": "hexagon", "data": {radius": 25}}, "name": "46bit", "timeout_ms": 5000}}
 
 It may offer a different name to that offered by the client; the client must
 then use this name (for example, the server might add a suffix to distinguish
@@ -273,7 +273,7 @@ handshake.
 
     Server: {"msg": "version", "data": {"protocol": "0.3", "sirpent": "0.2.0"}}
     Client: {"msg": "register", "data": {"desired_name": "visualiser", "kind": "spectator"}}
-    Server: {"msg": "welcome", "data": {"grid": {"kind": "hexagon", "data": {radius": 15}}, "name": "spectator", "timeout": {"nanos": 0,"secs": 5}}}
+    Server: {"msg": "welcome", "data": {"grid": {"kind": "hexagon", "data": {radius": 15}}, "name": "spectator", "timeout_ms": 5000}}
     Client: {"msg": "ready"}
 
     Server: {"msg": "game_start", "data": {"game": {"grid": {"kind": "hexagon", "data": {radius": 25}}, "players": ["46bit", "46bit_"], "uuid": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}, "game_id": "bb117ad4-d26b-49ac-8cd1-2d30572e6f41"}}
@@ -318,14 +318,18 @@ depend on it. The server may include additional helpful information in `data`,
 if it is feeling magnanimous.
 
 The server may close the TCP socket after an error. In the event of a
-`move_error` (e.g., timeout) the server should keep the TCP socket open.
+`move_error` the server should keep the TCP socket open, as these errors
+tend to be recoverable to some extent as the player snake is dead.
 
 Timeouts
 --------
 
-Servers may give clients a fixed time to send messages. If a client fails to
-respond quick enough the connection may be closed. If closing the connection for
-this an error message indicating such should be sent.
+The `welcome` message specifies a `timeout_ms` value. This is how many milliseconds
+a server will wait for messages from each client. This can be set to `-1` to disable
+timeouts, but given the unreliable nature of networks this is unwise.
+
+If a client fails to respond quick enough the connection may be closed. If closing
+the connection for this an error message indicating such should be sent.
 
 In the case of player moves timing out the server should handle this without
 terminating the client, killing them for the missing move but retaining their
