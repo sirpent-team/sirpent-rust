@@ -9,7 +9,6 @@ extern crate serde_json;
 extern crate rand;
 extern crate tokio_timer;
 
-use std::io;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -20,8 +19,7 @@ use std::time::Duration;
 use std::thread;
 
 use futures::{future, Future, Stream, Sink};
-use futures::stream::{SplitStream, SplitSink};
-use futures::sync::{mpsc, oneshot};
+use futures::sync::mpsc;
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
 use tokio_core::io::Io;
@@ -31,6 +29,13 @@ use sirpent::*;
 
 fn main() {
     drop(env_logger::init());
+
+    let msg = Msg::Register { desired_name: "46bit".to_string(), kind: ClientKind::Player };
+    println!("{:?}", msg);
+    let json = serde_json::to_string(&msg).unwrap();
+    println!("{}", json);
+    let msg_new: Msg = serde_json::from_str(json.as_str()).unwrap();
+    println!("{:?}", msg_new);
 
     // Take the first command line argument as an address to listen on, or fall
     // back to just some localhost default.
@@ -104,43 +109,58 @@ fn server(listener: TcpListener,
         .map(move |(socket, addr)| {
             let msg_transport = socket.framed(MsgCodec);
             let (tx, rx) = msg_transport.split();
-            (ClientFuture::unbounded(addr, tx, rx), addr)
+            (tx, rx, addr)
         });
 
-    let server = clients.for_each(move |((client_future, command_tx), addr)| {
-            handle.clone().spawn(client_future.map_err(|_| ()));
-
+    let server = clients.for_each(move |(msg_tx, msg_rx, addr)| {
             // @TODO: If and when I build a client object, keep addr handy in it.
             let mut names_ref = names.clone();
             let players_ref = players_pool.clone();
             let spectators_ref = spectators_pool.clone();
 
-            let fut = ClientsTimedReceive::single(addr, command_tx, timeout.unwrap(), &timer)
-                .map_err(|_| ())
-                .and_then(|(msgs, command_txs)| {
-                    if msgs.is_empty() {
-                        future::err(()).boxed()
-                    } else {
-                        let (_, msg) = msgs.into_iter().next().unwrap();
-                        let (_, command_tx) = command_txs.into_iter().next().unwrap();
-                        if let Msg::Register { desired_name, kind } = msg {
-                            let name = find_unique_name(&mut names_ref, desired_name);
-                            let welcome_msg = Msg::Welcome {
-                                name: name,
-                                grid: grid,
-                                timeout: timeout,
-                            };
-                            command_tx.send(ClientFutureCommand::Transmit(welcome_msg))
-                                .map(|command_tx| (name, kind, command_tx))
-                                .map_err(|_| ())
-                                .boxed()
-                        } else {
-                            future::err(()).boxed()
-                        }
-                    }
+            let fut = msg_tx.send(Msg::version())
+                .map_err(|e| {
+                    println!("{:?}", e);
+                    ()
+                })
+                .and_then(move |msg_tx| {
+                    msg_rx.into_future()
+                        .map_err(|(e, _)| {
+                            println!("{:?}", e);
+                            ()
+                        })
+                        .and_then(move |(msg, msg_rx)| {
+                            if let Some(Msg::Register { desired_name, kind }) = msg {
+                                let name = find_unique_name(&mut names_ref, desired_name);
+                                let welcome_msg = Msg::Welcome {
+                                    name: name.clone(),
+                                    grid: grid.clone(),
+                                    timeout: timeout,
+                                };
+                                msg_tx.send(welcome_msg)
+                                    .map(move |msg_tx| (msg_tx, msg_rx, addr, name, kind))
+                                    .map_err(|e| {
+                                        println!("{:?}", e);
+                                        ()
+                                    })
+                                    .boxed()
+                            } else {
+                                println!("{:?}", msg);
+                                future::err(()).boxed()
+                            }
+                        })
                 });
-            let fut = fut.map(move |(name, client_kind, command_tx)| {
-                match client_kind {
+
+            let handle2 = handle.clone();
+            let fut = fut.map(move |(msg_tx, msg_rx, _, name, kind)| {
+                let (client_future, command_tx) =
+                    ClientFuture::unbounded(name.clone(), msg_tx, msg_rx);
+                handle2.spawn(client_future.map_err(|e| {
+                    println!("{:?}", e);
+                    ()
+                }));
+
+                match kind {
                     ClientKind::Spectator => {
                         spectators_ref.lock().unwrap().insert(name, command_tx);
                     }
@@ -152,8 +172,8 @@ fn server(listener: TcpListener,
             });
 
             // Close clients with unsuccessful handshakes.
-            let fut = fut.map_err(|(e, _)| {
-                println!("Error welcoming client: {:?}", e);
+            let fut = fut.map_err(|_| {
+                println!("Error welcoming client: {:?}", "@TODO Expose This.");
                 ()
             });
 

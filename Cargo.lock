@@ -226,7 +226,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "serde"
 version = "0.9.7"
+
+[[package]]
+name = "serde"
+version = "0.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+replace = "serde 0.9.7"
 
 [[package]]
 name = "serde_codegen_internals"

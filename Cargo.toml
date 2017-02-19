@@ -24,3 +24,6 @@ serde_derive = "0.9"
 
 [dev-dependencies]
 quickcheck = "0.2.*"
+
+[replace]
+"serde:0.9.7" = { path = "../serde/serde" }
