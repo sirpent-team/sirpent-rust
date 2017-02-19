@@ -7,8 +7,8 @@ use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::{mpsc, oneshot};
 use tokio_timer::{Timer, Sleep};
 
-use protocol::Msg;
-use net::{other, other_labelled};
+use net::*;
+use clients::*;
 
 /// Determines which message should each client send.
 pub enum CommandMode<Id, CmdSink> {
@@ -21,10 +21,13 @@ pub enum CommandMode<Id, CmdSink> {
 /// Sends `Cmd` down a group of `Sink`s. Intended for sending an arbitrary command
 /// to a group of clients. Can send the same message to every client or a different
 /// message for each client - see `CommandMode`.
-pub fn group_command
+pub fn group_command<Id, CmdSink>
     (clients: HashMap<Id, CmdSink>,
      cmds: CommandMode<Id, CmdSink>)
-     -> BoxFuture<Item = HashMap<Id, Result<CmdSink, CmdSink::Error>>, Error = io::Error> {
+     -> BoxFuture<Item = HashMap<Id, Result<CmdSink, CmdSink::Error>>, Error = io::Error>
+    where Id: Eq + Hash + Clone + Send,
+          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+{
     // @TODO: Try to squash the `Vec<Vec<_>>` somehow.
     GroupCommand::new(clients, cmds)
         .collect()
@@ -50,7 +53,8 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
 {
     pub fn new(mut clients: HashMap<Id, CmdSink>, mut cmds: CommandMode<Id, CmdSink>) -> Self {
         // Drain clients into a queue for each to be sent `cmd`.
-        let send_queue = clients.drain().map(|client| self.pair_client_with_cmd(client, &mut cmds));
+        let send_queue = clients.drain()
+            .map(|client| Self::pair_client_with_cmd(client, &mut cmds));
 
         GroupCommand {
             send_queue: send_queue.collect(),
@@ -92,7 +96,7 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
                 Ok(AsyncSink::NotReady(client_cmd)) => reenqueue.push_back((client, cmd)),
                 // If sending the command errored, we can assume the Sink is forever unable to accept
                 // further items. We let the Sink drop and record this failure.
-                Err(e) => complete_client(client_id, Err(e)),
+                Err(e) => self.complete_client(client_id, Err(e)),
             };
         }
 
@@ -112,12 +116,12 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
 
             match cmd_tx.poll_complete(cmd) {
                 // If the command was flushed successfully, record the success and the Sink.
-                Ok(AsyncSink::Ready) => complete_client(client_id, Ok(cmd_tx)),
+                Ok(AsyncSink::Ready) => self.complete_client(client_id, Ok(cmd_tx)),
                 // If the command could not be sent, requeue it for trying later.
                 Ok(AsyncSink::NotReady(client_cmd)) => reenqueue.push_back((client, cmd)),
                 // If polling the Sink errored, we can assume the Sink is forever unable to make progress.
                 // We let the Sink drop and record this failure.
-                Err(e) => complete_client(client_id, Err(e)),
+                Err(e) => self.complete_client(client_id, Err(e)),
             };
         }
 
@@ -126,7 +130,7 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
     }
 
     /// Mark a client as complete. Nicer way to wrap taking out of Option.
-    fn complete_client(client_id: Id, result: Result<CmdSink, CmdSink::Error>) {
+    fn complete_client(&mut self, client_id: Id, result: Result<CmdSink, CmdSink::Error>) {
         self.completed.push((client_id, result))
     }
 }

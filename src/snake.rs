@@ -1,5 +1,5 @@
 use grids::*;
-use protocol::*;
+use net::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct Snake {

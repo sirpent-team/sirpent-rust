@@ -4,7 +4,7 @@ use std::collections::{HashSet, HashMap};
 
 use grids::*;
 use snake::*;
-use protocol::*;
+use net::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {

@@ -8,7 +8,7 @@ use futures::sync::mpsc;
 
 use grids::*;
 use game::*;
-use client_future::ClientKind;
+use clients::ClientKind;
 
 pub static PROTOCOL_VERSION: &'static str = "0.3";
 

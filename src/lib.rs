@@ -19,18 +19,17 @@ extern crate tokio_timer;
 pub mod grids;
 pub mod snake;
 pub mod net;
-pub mod protocol;
 pub mod game;
-pub mod client_future;
-pub mod game_future;
+// pub mod client_future;
+// pub mod game_future;
+pub mod clients;
 
 pub use grids::*;
 pub use snake::*;
 pub use net::*;
-pub use protocol::*;
 pub use game::*;
-pub use client_future::*;
-pub use game_future::*;
+// pub use client_future::*;
+// pub use game_future::*;
 
 #[cfg(test)]
 mod tests {

@@ -7,7 +7,7 @@ use tokio_core::net::TcpStream;
 use tokio_core::io::{EasyBuf, Framed};
 use serde_json;
 
-use protocol::*;
+use net::msg::*;
 
 pub type MsgTransport = Framed<TcpStream, MsgCodec>;
 
