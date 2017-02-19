@@ -1,13 +1,10 @@
 use std::io;
-use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
-use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
-use futures::sync::{mpsc, oneshot};
-use tokio_timer::{Timer, Sleep};
+use futures::{BoxFuture, Future, Stream, Sink, Poll, Async};
+use futures::sync::oneshot;
 
-use net::*;
 use clients::*;
 
 pub fn group_command<Id, CmdSink>
@@ -20,7 +17,9 @@ pub fn group_command<Id, CmdSink>
     // @TODO: Try to squash the `Vec<Vec<_>>` somehow.
     GroupReceive::new(clients)
         .collect()
-        .and_then(|nested_vec_results| nested_vec_results.flat_map().collect())
+        .map(|nested_vec_results| {
+            nested_vec_results.into_iter().flat_map(|v| v.into_iter()).collect::<HashMap<_, _>>()
+        })
         .boxed()
 }
 
@@ -72,11 +71,11 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
         // Maintain a separate list of clients to be requeued, so that the loop terminates.
         let mut reenqueue = VecDeque::new();
 
-        while let Some((client_id, cmd_tx, oneshot_rx)) = self.receive_queue.pop_front() {
+        while let Some((client_id, cmd_tx, mut oneshot_rx)) = self.receive_queue.pop_front() {
             match oneshot_rx.poll() {
                 Ok(Async::Ready(msg)) => self.complete_client(client_id, Ok((msg, cmd_tx))),
                 Ok(Async::NotReady) => reenqueue.push_back((client_id, cmd_tx, oneshot_rx)),
-                Err(e) => self.complete_client(client_id, Err(e)),
+                Err(_) => unimplemented!(), //self.complete_client(client_id, Err(e)),
             }
         }
 
@@ -127,7 +126,7 @@ impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
                 // If the CommandStream errors, the logic of what to do is unclear.
                 // At the time of writing CommandStream can't error.
                 // @TODO: Decide good rules here.
-                Err(e) => unimplemented!(),
+                Err(_) => unimplemented!(),
             }
         }
 
@@ -135,8 +134,7 @@ impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
 
         // Complete when queues are depleted.
         if !self.completed.is_empty() {
-            let completed = self.completed;
-            self.completed = Vec::new();
+            let completed = self.completed.drain(..).collect();
             Ok(Async::Ready(Some(completed)))
         } else if self.command_stream.is_none() && self.ready_queue.is_empty() &&
                   self.receive_queue.is_empty() {

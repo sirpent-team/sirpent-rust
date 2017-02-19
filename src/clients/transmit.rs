@@ -1,13 +1,9 @@
 use std::io;
-use std::time::Duration;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::hash::Hash;
 
-use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
-use futures::sync::{mpsc, oneshot};
-use tokio_timer::{Timer, Sleep};
+use futures::{BoxFuture, Future, Sink};
 
-use net::*;
 use clients::*;
 
 #[derive(Clone)]
@@ -31,12 +27,14 @@ pub fn group_transmit<Id, CmdSink>
             let cmd = CommandMode::Constant(Cmd::Transmit(msg));
             group_command(clients, cmd).boxed()
         }
-        MessageMode::Lookup(id_to_msg) => {
-            let pairs = clients.keys().cloned().map(|id| {
-                // @TODO: Instead of `panic!`ing if no message set, return an Err.
-                (id, Cmd::Transmit(id_to_msg.remove(&id).unwrap()))
-            });
-            group_command(clients, CommandMode::Lookup(pairs.collect())).boxed()
+        MessageMode::Lookup(mut id_to_msg) => {
+            let pairs = clients.keys()
+                .map(|id| {
+                    // @TODO: Instead of `panic!`ing if no message set, return an Err.
+                    (id.clone(), Cmd::Transmit(id_to_msg.remove(&id).unwrap()))
+                })
+                .collect();
+            group_command(clients, CommandMode::Lookup(pairs)).boxed()
         }
     }
 }

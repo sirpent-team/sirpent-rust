@@ -1,12 +1,10 @@
 use std::io;
-use std::time::Duration;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::hash::Hash;
-use std::sync::{Mutex, Arc};
+use std::sync::Arc;
 
-use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
+use futures::{Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::{mpsc, oneshot};
-use tokio_timer::{Timer, Sleep};
 
 use net::*;
 
@@ -40,22 +38,22 @@ pub enum Cmd {
 
 #[derive(Clone)]
 pub struct RaceableOneshotSender {
-    inner: Arc<oneshot::Sender<Msg>>,
+    inner: Option<Arc<oneshot::Sender<Msg>>>,
 }
 
 impl RaceableOneshotSender {
     pub fn new(oneshot_tx: oneshot::Sender<Msg>) -> RaceableOneshotSender {
-        RaceableOneshotSender { inner: Arc::new(oneshot_tx) }
+        RaceableOneshotSender { inner: Some(Arc::new(oneshot_tx)) }
     }
 
     pub fn complete(&mut self, msg: Msg) -> bool {
-        match Arc::try_unwrap(self.inner) {
-            Ok(sender) => {
+        if let Some(arc) = self.inner.take() {
+            if let Ok(sender) = Arc::try_unwrap(arc) {
                 sender.complete(msg);
-                true
+                return true;
             }
-            Err(_) => false,
         }
+        false
     }
 }
 
@@ -227,7 +225,7 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
         // N.B. Oneshot completes immediately with no need to keep polling.
         if !self.msg_rx_queue.is_empty() && !self.msg_relay_tx_queue.is_empty() {
             let msg_rx = self.msg_rx_queue.pop_front().unwrap();
-            let relay_tx = self.msg_relay_tx_queue.pop_front().unwrap();
+            let mut relay_tx = self.msg_relay_tx_queue.pop_front().unwrap();
             relay_tx.complete(msg_rx);
         };
 

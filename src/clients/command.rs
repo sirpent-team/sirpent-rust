@@ -1,13 +1,9 @@
 use std::io;
-use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
-use futures::sync::{mpsc, oneshot};
-use tokio_timer::{Timer, Sleep};
 
-use net::*;
 use clients::*;
 
 /// Determines which message should each client send.
@@ -34,7 +30,9 @@ pub fn group_command<Id, CmdSink>
     // @TODO: Try to squash the `Vec<Vec<_>>` somehow.
     GroupCommand::new(clients, cmds)
         .collect()
-        .and_then(|nested_vec_results| nested_vec_results.flat_map().collect())
+        .map(|nested_vec_results| {
+            nested_vec_results.into_iter().flat_map(|v| v.into_iter()).collect::<HashMap<_, _>>()
+        })
         .boxed()
 }
 
@@ -68,12 +66,12 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
     }
 
     /// Identifies which `Cmd` a client should be using and returns the `(client, Cmd)` pair.
-    fn pair_client_with_cmd(mut client: (Id, CmdSink),
+    fn pair_client_with_cmd(client: (Id, CmdSink),
                             cmds: &mut CommandMode<Id>)
                             -> ((Id, CmdSink), Cmd) {
         let cmd = match cmds {
-            &mut CommandMode::Constant(cmd) => cmd.clone(),
-            &mut CommandMode::Lookup(id_to_cmd) => {
+            &mut CommandMode::Constant(ref cmd) => cmd.clone(),
+            &mut CommandMode::Lookup(ref mut id_to_cmd) => {
                 // @TODO: Instead of `panic!`ing if no message set, return an Err.
                 // We can't silently pass them into `completed` because it will give this type
                 // nasty semantics.
@@ -90,14 +88,12 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
         // Maintain a separate list of clients to be requeued, so that the loop terminates.
         let mut reenqueue = VecDeque::new();
 
-        while let Some(((client_id, cmd_tx), cmd)) = self.send_queue.pop_front() {
+        while let Some(((client_id, mut cmd_tx), cmd)) = self.send_queue.pop_front() {
             match cmd_tx.start_send(cmd) {
                 // If the command was sent successfully, queue it for polling.
                 Ok(AsyncSink::Ready) => self.flushing_queue.push_back((client_id, cmd_tx)),
                 // If the command could not be sent, requeue it for trying later.
-                Ok(AsyncSink::NotReady(client_cmd)) => {
-                    reenqueue.push_back(((client_id, cmd_tx), cmd))
-                }
+                Ok(AsyncSink::NotReady(cmd)) => reenqueue.push_back(((client_id, cmd_tx), cmd)),
                 // If sending the command errored, we can assume the Sink is forever unable to accept
                 // further items. We let the Sink drop and record this failure.
                 Err(e) => self.complete_client(client_id, Err(e)),
@@ -115,7 +111,7 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
         // Maintain a separate list of clients to be requeued, so that the loop terminates.
         let mut reenqueue = VecDeque::new();
 
-        while let Some((client_id, cmd_tx)) = self.flushing_queue.pop_front() {
+        while let Some((client_id, mut cmd_tx)) = self.flushing_queue.pop_front() {
             match cmd_tx.poll_complete() {
                 // If the command was flushed successfully, record the success and the Sink.
                 Ok(Async::Ready(())) => self.complete_client(client_id, Ok(cmd_tx)),
@@ -150,8 +146,7 @@ impl<Id, CmdSink> Stream for GroupCommand<Id, CmdSink>
 
         // Complete when queues are depleted.
         if !self.completed.is_empty() {
-            let completed = self.completed;
-            self.completed = Vec::new();
+            let completed = self.completed.drain(..).collect();
             Ok(Async::Ready(Some(completed)))
         } else if self.send_queue.is_empty() && self.flushing_queue.is_empty() {
             Ok(Async::Ready(None))
