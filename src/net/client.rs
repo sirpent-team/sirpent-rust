@@ -18,7 +18,7 @@ pub enum ClientKind {
     Spectator,
 }
 
-pub enum ClientFutureCommand<I>
+pub enum ClientCommand<I>
     where I: Eq + Hash
 {
     Transmit(Msg),
@@ -26,11 +26,11 @@ pub enum ClientFutureCommand<I>
     GetId(oneshot::Sender<I>),
 }
 
-pub struct ClientFuture<I, S, T, C>
+pub struct Client<I, S, T, C>
     where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static,
-          C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
+          C: Stream<Item = ClientCommand<I>, Error = ()> + 'static
 {
     pub client_id: I,
     client_tx: S,
@@ -42,7 +42,7 @@ pub struct ClientFuture<I, S, T, C>
     queue_limit: Option<usize>,
 }
 
-impl<I, S, T> ClientFuture<I, S, T, mpsc::Receiver<ClientFutureCommand<I>>>
+impl<I, S, T> Client<I, S, T, mpsc::Receiver<ClientCommand<I>>>
     where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static
@@ -51,10 +51,10 @@ impl<I, S, T> ClientFuture<I, S, T, mpsc::Receiver<ClientFutureCommand<I>>>
                    client_tx: S,
                    client_rx: T,
                    queue_limit: usize)
-                   -> (ClientFuture<I, S, T, mpsc::Receiver<ClientFutureCommand<I>>>,
-                       mpsc::Sender<ClientFutureCommand<I>>) {
+                   -> (Client<I, S, T, mpsc::Receiver<ClientCommand<I>>>,
+                       mpsc::Sender<ClientCommand<I>>) {
         let (command_tx, command_rx) = mpsc::channel(queue_limit);
-        (ClientFuture {
+        (Client {
              client_id: client_id,
              client_tx: client_tx,
              client_rx: client_rx,
@@ -68,7 +68,7 @@ impl<I, S, T> ClientFuture<I, S, T, mpsc::Receiver<ClientFutureCommand<I>>>
     }
 }
 
-impl<I, S, T> ClientFuture<I, S, T, mpsc::UnboundedReceiver<ClientFutureCommand<I>>>
+impl<I, S, T> Client<I, S, T, mpsc::UnboundedReceiver<ClientCommand<I>>>
     where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static
@@ -76,10 +76,10 @@ impl<I, S, T> ClientFuture<I, S, T, mpsc::UnboundedReceiver<ClientFutureCommand<
     pub fn unbounded(client_id: I,
                      client_tx: S,
                      client_rx: T)
-                     -> (ClientFuture<I, S, T, mpsc::UnboundedReceiver<ClientFutureCommand<I>>>,
-                         mpsc::UnboundedSender<ClientFutureCommand<I>>) {
+                     -> (Client<I, S, T, mpsc::UnboundedReceiver<ClientCommand<I>>>,
+                         mpsc::UnboundedSender<ClientCommand<I>>) {
         let (command_tx, command_rx) = mpsc::unbounded();
-        (ClientFuture {
+        (Client {
              client_id: client_id,
              client_tx: client_tx,
              client_rx: client_rx,
@@ -97,11 +97,11 @@ impl<I, S, T> ClientFuture<I, S, T, mpsc::UnboundedReceiver<ClientFutureCommand<
     }
 }
 
-impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
+impl<I, S, T, C> Future for Client<I, S, T, C>
     where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static,
-          C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
+          C: Stream<Item = ClientCommand<I>, Error = ()> + 'static
 {
     type Item = ();
     type Error = io::Error;
@@ -114,7 +114,7 @@ impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
             Ok(Async::Ready(Some(command))) => {
                 match command {
                     // Queue a message for transmission.
-                    ClientFutureCommand::Transmit(msg_tx) => {
+                    ClientCommand::Transmit(msg_tx) => {
                         if let Some(queue_limit) = self.queue_limit {
                             if self.msg_tx_queue.len() >= queue_limit {
                                 return Err(other_labelled("Tried to exceed msg tx queue \
@@ -124,7 +124,7 @@ impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
                         self.msg_tx_queue.push_back(msg_tx)
                     }
                     // Queue a oneshot to relay a message received from the client.
-                    ClientFutureCommand::Receive(msg_relay_tx) => {
+                    ClientCommand::Receive(msg_relay_tx) => {
                         if let Some(queue_limit) = self.queue_limit {
                             if self.msg_relay_tx_queue.len() >= queue_limit {
                                 return Err(other_labelled("Tried to exceed msg relay tx queue \
@@ -134,7 +134,7 @@ impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
                         self.msg_relay_tx_queue.push_back(msg_relay_tx)
                     }
                     // Send the client id to the oneshot.
-                    ClientFutureCommand::GetId(id_relay_tx) => {
+                    ClientCommand::GetId(id_relay_tx) => {
                         id_relay_tx.complete(self.client_id.clone());
                     }
                 }
@@ -195,11 +195,11 @@ impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
     }
 }
 
-impl<I, S, T, C> Drop for ClientFuture<I, S, T, C>
+impl<I, S, T, C> Drop for Client<I, S, T, C>
     where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static,
-          C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
+          C: Stream<Item = ClientCommand<I>, Error = ()> + 'static
 {
     fn drop(&mut self) {
         // Generally `Drop` will only occur when the non-client channels are dropped, so
@@ -231,201 +231,4 @@ impl<I, S, T, C> Drop for ClientFuture<I, S, T, C>
 
 fn broken_pipe() -> io::Error {
     io::Error::new(io::ErrorKind::BrokenPipe, "Broken channel.")
-}
-
-pub struct ClientsReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
-{
-    reads: HashMap<I, D>,
-    entries_msgs: Option<HashMap<I, Msg>>,
-    entries_txs: Option<HashMap<I, C>>,
-}
-
-impl<I, C, D> ClientsReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
-{
-    pub fn new(mut clients: HashMap<I, C>) -> ClientsReceive<I, C, BoxFuture<(Msg, C), ()>> {
-        ClientsReceive {
-            reads: clients.drain()
-                .map(|(id, command_tx)| {
-                    let (msg_relay_tx, msg_relay_rx) = oneshot::channel();
-                    let msg_relay_cmd = ClientFutureCommand::Receive(msg_relay_tx);
-                    (id,
-                     command_tx.send(msg_relay_cmd)
-                         .map_err(|_| ())
-                         .and_then(|command_tx| {
-                             msg_relay_rx.map(|msg| (msg, command_tx)).map_err(|_| ())
-                         })
-                         .boxed())
-                })
-                .collect(),
-            entries_msgs: Some(HashMap::new()),
-            entries_txs: Some(HashMap::new()),
-        }
-    }
-
-    pub fn entries(&mut self) -> (HashMap<I, Msg>, HashMap<I, C>) {
-        (self.entries_msgs.take().unwrap(), self.entries_txs.take().unwrap())
-    }
-}
-
-impl<I, C, D> Future for ClientsReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
-{
-    type Item = (HashMap<I, Msg>, HashMap<I, C>);
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let mut remove = vec![];
-        for (i, mut read) in self.reads.iter_mut() {
-            match read.poll() {
-                Ok(Async::Ready((msg, command_tx))) => {
-                    self.entries_msgs.as_mut().unwrap().insert(i.clone(), msg);
-                    self.entries_txs.as_mut().unwrap().insert(i.clone(), command_tx);
-                    remove.push(i.clone());
-                }
-                Ok(Async::NotReady) => {}
-                Err(_) => remove.push(i.clone()),
-            };
-        }
-        for i in remove {
-            self.reads.remove(&i);
-        }
-
-        if self.reads.is_empty() {
-            Ok(Async::Ready(self.entries()))
-        } else {
-            Ok(Async::NotReady)
-        }
-    }
-}
-
-pub struct ClientsTimedReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
-{
-    receive: Option<ClientsReceive<I, C, D>>,
-    sleep: Sleep,
-}
-
-impl<I, C, D> ClientsTimedReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
-{
-    pub fn new(clients: HashMap<I, C>,
-               timeout: Duration,
-               timer: &Timer)
-               -> ClientsTimedReceive<I, C, BoxFuture<(Msg, C), ()>> {
-        ClientsTimedReceive {
-            receive: Some(ClientsReceive::<I, C, D>::new(clients)),
-            sleep: timer.sleep(timeout),
-        }
-    }
-
-    pub fn single(id: I,
-                  client: C,
-                  timeout: Duration,
-                  timer: &Timer)
-                  -> ClientsTimedReceive<I, C, BoxFuture<(Msg, C), ()>> {
-        let mut clients = HashMap::new();
-        clients.insert(id, client);
-        ClientsTimedReceive {
-            receive: Some(ClientsReceive::<I, C, D>::new(clients)),
-            sleep: timer.sleep(timeout),
-        }
-    }
-}
-
-impl<I, C, D> Future for ClientsTimedReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
-{
-    type Item = (HashMap<I, Msg>, HashMap<I, C>);
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.sleep.poll() {
-            // If the timeout has yet to be reached then poll receive.
-            Ok(Async::NotReady) => self.receive.as_mut().unwrap().poll(),
-            // If the timeout has been reached then return what entries we have.
-            Ok(Async::Ready(_)) => Ok(Async::Ready(self.receive.take().unwrap().entries())),
-            // If the timeout errored then return it as an `io::Error`.
-            // @TODO: Also return what entries we have?
-            Err(e) => Err(other(e)),
-        }
-    }
-}
-
-pub struct ClientsSend<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = C, Error = ()> + 'static
-{
-    sends: HashMap<I, D>,
-    entries_txs: Option<HashMap<I, C>>,
-}
-
-impl<I, C, D> ClientsSend<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = C, Error = ()> + 'static
-{
-    pub fn new(mut clients: HashMap<I, C>, msg: Msg) -> ClientsSend<I, C, BoxFuture<C, ()>> {
-        let sends = clients.drain()
-            .map(|(id, command_tx)| {
-                let msg_relay_cmd = ClientFutureCommand::Transmit(msg.clone());
-                (id, command_tx.send(msg_relay_cmd).map_err(|_| ()).boxed())
-            })
-            .collect();
-
-        ClientsSend {
-            sends: sends,
-            entries_txs: Some(HashMap::new()),
-        }
-    }
-
-    pub fn entries(&mut self) -> HashMap<I, C> {
-        self.entries_txs.take().unwrap()
-    }
-}
-
-impl<I, C, D> Future for ClientsSend<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
-          D: Future<Item = C, Error = ()> + 'static
-{
-    type Item = HashMap<I, C>;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let mut remove = vec![];
-        for (i, mut send) in self.sends.iter_mut() {
-            match send.poll() {
-                Ok(Async::Ready(command_tx)) => {
-                    self.entries_txs.as_mut().unwrap().insert(i.clone(), command_tx);
-                    remove.push(i.clone());
-                }
-                Ok(Async::NotReady) => {}
-                Err(_) => remove.push(i.clone()),
-            };
-        }
-        for i in remove {
-            self.sends.remove(&i);
-        }
-
-        if self.sends.is_empty() {
-            Ok(Async::Ready(self.entries()))
-        } else {
-            Ok(Async::NotReady)
-        }
-    }
 }
