@@ -2,6 +2,7 @@ use std::io;
 use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
+use std::sync::{Mutex, Arc};
 
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::{mpsc, oneshot};
@@ -30,10 +31,32 @@ pub enum ClientKind {
 // Notably included:
 // - Close could be safely performed by dropping the `CmdSink` but this problematically
 //   relies on access to all the producers.
+#[derive(Clone)]
 pub enum Cmd {
     Transmit(Msg),
-    ReceiveInto(oneshot::Sender<Msg>),
+    ReceiveInto(RaceableOneshotSender),
     Close,
+}
+
+#[derive(Clone)]
+pub struct RaceableOneshotSender {
+    inner: Arc<oneshot::Sender<Msg>>,
+}
+
+impl RaceableOneshotSender {
+    pub fn new(oneshot_tx: oneshot::Sender<Msg>) -> RaceableOneshotSender {
+        RaceableOneshotSender { inner: Arc::new(oneshot_tx) }
+    }
+
+    pub fn complete(&mut self, msg: Msg) -> bool {
+        match Arc::try_unwrap(self.inner) {
+            Ok(sender) => {
+                sender.complete(msg);
+                true
+            }
+            Err(_) => false,
+        }
+    }
 }
 
 pub struct Client<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream>
@@ -48,7 +71,7 @@ pub struct Client<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream>
     msg_tx_queue: VecDeque<Msg>,
     msg_rx_queue: VecDeque<Msg>,
     command_rx: ServerCmdStream,
-    msg_relay_tx_queue: VecDeque<oneshot::Sender<Msg>>,
+    msg_relay_tx_queue: VecDeque<RaceableOneshotSender>,
     queue_limit: Option<usize>,
 }
 

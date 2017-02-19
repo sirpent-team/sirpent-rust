@@ -60,7 +60,7 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
         let (oneshot_tx, oneshot_rx) = oneshot::channel();
         // We transmit this oneshot's tx along the channel to `Client` and then wait for
         // a reply from the oneshot's rx. This (perhaps surprisingly) delivers nicer code.
-        let cmd = Cmd::ReceiveInto(oneshot_tx);
+        let cmd = Cmd::ReceiveInto(RaceableOneshotSender::new(oneshot_tx));
 
         (cmd, oneshot_rx)
     }
