@@ -60,6 +60,6 @@ pub fn other_labelled(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
 }
 
-fn other<E: Error>(e: E) -> io::Error {
+pub fn other<E: Error>(e: E) -> io::Error {
     other_labelled(&*format!("{:?}", e))
 }

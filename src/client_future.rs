@@ -1,16 +1,15 @@
 use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
-use std::collections::{HashSet, HashMap, VecDeque};
-use std::fmt::Debug;
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
-use futures::{Future, Stream, Sink, Poll, Async};
+use futures::{BoxFuture, Future, Stream, Sink, Poll, Async};
 use futures::sync::{mpsc, oneshot};
 use tokio_timer::{Timer, Sleep};
 
 use protocol::Msg;
-use net::other_labelled;
+use net::{other_labelled, other};
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum ClientKind {
@@ -41,7 +40,7 @@ pub enum ClientKind {
 // }
 
 pub enum ClientFutureCommand<I>
-    where I: PartialEq + Hash
+    where I: Eq + Hash
 {
     Transmit(Msg),
     Receive(oneshot::Sender<Msg>),
@@ -49,7 +48,7 @@ pub enum ClientFutureCommand<I>
 }
 
 pub struct ClientFuture<I, S, T, C>
-    where I: PartialEq + Hash + Clone,
+    where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static,
           C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
@@ -65,7 +64,7 @@ pub struct ClientFuture<I, S, T, C>
 }
 
 impl<I, S, T, C> ClientFuture<I, S, T, C>
-    where I: PartialEq + Hash + Clone,
+    where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static,
           C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
@@ -115,7 +114,7 @@ impl<I, S, T, C> ClientFuture<I, S, T, C>
 }
 
 impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
-    where I: PartialEq + Hash + Clone,
+    where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
           T: Stream<Item = Msg, Error = io::Error> + 'static,
           C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
@@ -209,80 +208,122 @@ fn broken_pipe() -> io::Error {
     io::Error::new(io::ErrorKind::BrokenPipe, "Broken channel.")
 }
 
-// pub struct Receive {
-// reads: HashMap<ClientID, InFlight<Future<Item = Msg, Error = io::Error>>>,
-// waiting: HashSet<ClientID>,
-// clients: Rc<RefCell<Clients>>,
-// entries: HashMap<ClientID, Option<Msg>>
-// }
-//
-// impl Receive {
-// pub fn new(ids: HashSet<ClientID>, clients: Rc<RefCell<Clients>>) {
-// Receive {
-// waiting: ids,
-// clients: clients,
-// entries: HashMap::new(),
-// sleep: timer.sleep(timeout)
-// }
-// }
-//
-// fn entries(self) -> HashMap<ClientID, Option<Msg>> {
-// self.entries
-// }
-// }
-//
-// impl Future for Receive {
-// type Item = Msg;
-// type Error = io::Error;
-//
-// fn poll(&mut self) -> Poll<Msg, io::Error> {
-// let clients = self.clients.write().unlock();
-// for waiting_id in self.waiting_ids {
-// if let Ok(Async::Ready(msg)) = clients.get_mut(waiting_id).poll() {
-// self.entries.insert(waiting_id, msg);
-// self.waiting_ids.remove(waiting_id);
-// }
-// }
-//
-// if self.waiting.empty() {
-// Ok(Async::Ready(self.entries))
-// } else {
-// Ok(Async::NotReady)
-// }
-// }
-// }
-//
-// pub struct TimedReceive {
-// receive: Receive,
-// sleep: Sleep
-// }
-//
-// impl TimedReceive {
-// pub fn new(ids: HashSet<ClientID>, clients: Rc<RefCell<Clients>>, timeout: Duration, timer: &Timer) {
-// TimedReceive {
-// receive: Receive::new(ids, clients),
-// sleep: timer.sleep(timeout)
-// }
-// }
-// }
-//
-// impl Future for TimedReceive {
-// type Item = HashMap<ClientID, Option<Msg>>;
-// type Error = io::Error;
-//
-// fn poll() -> Poll<Msg, io::Error> {
-// match self.sleep.poll() {
-// If the timeout has yet to be reached then poll receive.
-// Ok(Async::NotReady) => self.receive.poll(),
-// If the timeout has been reached then return what entries we have.
-// Ok(Async::Ready(_)) => Ok(Async::Ready(self.receive.entries())),
-// If the timeout errored then return it as an `io::Error`.
-// @TODO: Also return what entries we have?
-// Err(e) => Err(other(e))
-// }
-// }
-// }
-//
+pub struct Receive<I, C, D>
+    where I: Eq + Hash + Clone + Send,
+          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          D: Future<Item = (Msg, C), Error = ()> + 'static
+{
+    reads: HashMap<I, D>,
+    entries: Option<HashMap<I, (Msg, C)>>,
+}
+
+impl<I, C, D> Receive<I, C, D>
+    where I: Eq + Hash + Clone + Send,
+          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          D: Future<Item = (Msg, C), Error = ()> + 'static
+{
+    pub fn new(mut clients: HashMap<I, C>) -> Receive<I, C, BoxFuture<(Msg, C), ()>> {
+        Receive {
+            reads: clients.drain()
+                .map(|(id, command_tx)| {
+                    let (msg_relay_tx, msg_relay_rx) = oneshot::channel();
+                    let msg_relay_cmd = ClientFutureCommand::Receive(msg_relay_tx);
+                    (id,
+                     command_tx.send(msg_relay_cmd)
+                         .map_err(|_| ())
+                         .and_then(|command_tx| {
+                             msg_relay_rx.map(|msg| (msg, command_tx)).map_err(|_| ())
+                         })
+                         .boxed())
+                })
+                .collect(),
+            entries: Some(HashMap::new()),
+        }
+    }
+
+    pub fn entries(mut self) -> HashMap<I, (Msg, C)> {
+        self.entries.take().unwrap()
+    }
+}
+
+impl<I, C, D> Future for Receive<I, C, D>
+    where I: Eq + Hash + Clone + Send,
+          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          D: Future<Item = (Msg, C), Error = ()> + 'static
+{
+    type Item = HashMap<I, (Msg, C)>;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let mut remove = vec![];
+        for (i, mut read) in self.reads.iter_mut() {
+            match read.poll() {
+                Ok(Async::Ready((msg, command_tx))) => {
+                    self.entries.as_mut().unwrap().insert(i.clone(), (msg, command_tx));
+                    remove.push(i.clone());
+                }
+                Ok(Async::NotReady) => {}
+                Err(_) => return Err(other_labelled("Unspecified error.")),
+            }
+        }
+        for i in remove {
+            self.reads.remove(&i);
+        }
+
+        if self.reads.is_empty() {
+            Ok(Async::Ready(self.entries.take().unwrap()))
+        } else {
+            Ok(Async::NotReady)
+        }
+    }
+}
+
+pub struct TimedReceive<I, C, D>
+    where I: Eq + Hash + Clone + Send,
+          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          D: Future<Item = (Msg, C), Error = ()> + 'static
+{
+    receive: Option<Receive<I, C, D>>,
+    sleep: Sleep,
+}
+
+impl<I, C, D> TimedReceive<I, C, D>
+    where I: Eq + Hash + Clone + Send,
+          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          D: Future<Item = (Msg, C), Error = ()> + 'static
+{
+    pub fn new(clients: HashMap<I, C>,
+               timeout: Duration,
+               timer: &Timer)
+               -> TimedReceive<I, C, BoxFuture<(Msg, C), ()>> {
+        TimedReceive {
+            receive: Some(Receive::<I, C, D>::new(clients)),
+            sleep: timer.sleep(timeout),
+        }
+    }
+}
+
+impl<I, C, D> Future for TimedReceive<I, C, D>
+    where I: Eq + Hash + Clone + Send,
+          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          D: Future<Item = (Msg, C), Error = ()> + 'static
+{
+    type Item = HashMap<I, (Msg, C)>;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match self.sleep.poll() {
+            // If the timeout has yet to be reached then poll receive.
+            Ok(Async::NotReady) => self.receive.as_mut().unwrap().poll(),
+            // If the timeout has been reached then return what entries we have.
+            Ok(Async::Ready(_)) => Ok(Async::Ready(self.receive.take().unwrap().entries())),
+            // If the timeout errored then return it as an `io::Error`.
+            // @TODO: Also return what entries we have?
+            Err(e) => Err(other(e)),
+        }
+    }
+}
+
 // Clients
 // * Acting on multiple clients:
 //   * `apply`: Execute a function on all contained clients at the same time, collecting the results.
