@@ -7,7 +7,6 @@ use std::error::Error;
 use futures::sync::mpsc;
 
 use grids::*;
-use snake::*;
 use game::*;
 use client_future::ClientKind;
 
@@ -38,7 +37,7 @@ pub enum Msg {
     #[serde(rename = "move")]
     Move { direction: Direction },
     #[serde(rename = "died")]
-    Died { cause_of_death: CauseOfDeath },
+    Died,
     #[serde(rename = "won")]
     Won,
     #[serde(rename = "game_over")]

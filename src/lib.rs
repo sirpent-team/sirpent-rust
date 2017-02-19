@@ -22,6 +22,7 @@ pub mod net;
 pub mod protocol;
 pub mod game;
 pub mod client_future;
+pub mod game_future;
 
 pub use grids::*;
 pub use snake::*;
@@ -29,6 +30,7 @@ pub use net::*;
 pub use protocol::*;
 pub use game::*;
 pub use client_future::*;
+pub use game_future::*;
 
 #[cfg(test)]
 mod tests {
