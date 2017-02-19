@@ -2,187 +2,56 @@ use std::time::Duration;
 use std::fmt::{self, Display, Formatter};
 use std::io;
 use serde_json;
-use serde::{Serialize, Deserialize};
 use std::error::Error;
-use std::fmt::Debug;
 
 use futures::sync::mpsc;
 
 use grids::*;
 use snake::*;
 use game::*;
-use clients::*;
+use client_future::ClientKind;
 
-pub static PROTOCOL_VERSION: &'static str = "0.2";
+pub static PROTOCOL_VERSION: &'static str = "0.3";
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub enum MsgTypeName {
+#[serde(tag = "msg")]
+pub enum Msg {
     #[serde(rename = "version")]
-    Version,
+    Version { sirpent: String, protocol: String },
     #[serde(rename = "register")]
-    Register,
+    Register {
+        desired_name: String,
+        kind: ClientKind,
+    },
     #[serde(rename = "welcome")]
-    Welcome,
+    Welcome {
+        name: String,
+        grid: Grid,
+        timeout: Option<Duration>,
+    },
     #[serde(rename = "close")]
-    Close,
+    Close { reason: String },
     #[serde(rename = "new_game")]
-    NewGame,
+    NewGame { game: GameState },
     #[serde(rename = "turn")]
-    Turn,
+    Turn { turn: TurnState },
     #[serde(rename = "move")]
-    Move,
+    Move { direction: Direction },
     #[serde(rename = "died")]
-    Died,
+    Died { cause_of_death: CauseOfDeath },
     #[serde(rename = "won")]
     Won,
     #[serde(rename = "game_over")]
-    GameOver,
-}
-
-pub trait TypedMsg: Debug + Clone + Sized + Serialize + Deserialize + Send {
-    const MSG_TYPE_NAME: MsgTypeName;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Msg {
-    #[serde(rename = "msg")]
-    pub msg_type_name: MsgTypeName,
-    pub data: serde_json::Value,
+    GameOver { turn: TurnState },
 }
 
 impl Msg {
-    pub fn new(msg_type_name: MsgTypeName, data: serde_json::Value) -> Msg {
-        Msg {
-            msg_type_name: msg_type_name,
-            data: data,
-        }
-    }
-
-    /// As try_into_typed cannot be implemented using TryInto I've chosen to keep this as a
-    /// method rather than a From.
-    pub fn from_typed<T: TypedMsg>(msg_typed: T) -> Msg {
-        Msg {
-            msg_type_name: T::MSG_TYPE_NAME,
-            data: serde_json::to_value(msg_typed),
-        }
-    }
-
-    /// Ideally this would be implemented using a blanket TryInto. Sadly this is not possible.
-    /// https://users.rust-lang.org/t/conflicting-implementations-of-trait-std-convert-into--/8661/3
-    ///
-    /// @TODO: But... I could use a macro to quietly generated each TypedMsg implementation.
-    /// Custom Derive (RFC #1681) would work beautifully. Of course I still would prefer not
-    /// having to go via Msg at all - but the relaxed requirements of Msg are very useful.
-    pub fn try_into_typed<T: TypedMsg>(self) -> ProtocolResult<T> {
-        if self.msg_type_name != T::MSG_TYPE_NAME {
-            return Err(ProtocolError::WrongCommand);
-        }
-        match serde_json::from_value(self.data) {
-            Ok(v) => Ok(v),
-            Err(e) => Err(From::from(e)),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct VersionMsg {
-    pub sirpent: String,
-    pub protocol: String,
-}
-
-impl VersionMsg {
-    pub fn new() -> VersionMsg {
-        VersionMsg {
+    pub fn version() -> Msg {
+        Msg::Version {
             sirpent: env!("CARGO_PKG_VERSION").to_string(),
             protocol: PROTOCOL_VERSION.to_string(),
         }
     }
-}
-
-impl TypedMsg for VersionMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Version;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RegisterMsg {
-    pub desired_name: String,
-    pub kind: ClientKind,
-}
-
-impl TypedMsg for RegisterMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Register;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WelcomeMsg {
-    pub name: String,
-    pub grid: Grid,
-    pub timeout: Option<Duration>,
-}
-
-impl TypedMsg for WelcomeMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Welcome;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CloseMsg {
-    pub reason: String,
-}
-
-impl TypedMsg for CloseMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Close;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NewGameMsg {
-    pub game: GameState,
-}
-
-impl TypedMsg for NewGameMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::NewGame;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TurnMsg {
-    pub turn: TurnState,
-}
-
-impl TypedMsg for TurnMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Turn;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MoveMsg {
-    pub direction: Direction,
-}
-
-impl TypedMsg for MoveMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Move;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DiedMsg {
-    pub cause_of_death: CauseOfDeath,
-}
-
-impl TypedMsg for DiedMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Died;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WonMsg {}
-
-impl TypedMsg for WonMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::Won;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GameOverMsg {
-    pub turn: TurnState,
-}
-
-impl TypedMsg for GameOverMsg {
-    const MSG_TYPE_NAME: MsgTypeName = MsgTypeName::GameOver;
 }
 
 #[derive(Debug)]

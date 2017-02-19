@@ -10,17 +10,17 @@ hexagon = []
 triangle = []
 
 [dependencies]
-futures = "0.1.8"
-tokio-core = "0.1"
-tokio-timer = { git = "https://github.com/sirpent-team/tokio-timer", branch = "sirpent" }
-log = "0.3.6"
-env_logger = "0.3.5"
-ansi_term = "0.9"
-uuid = { version = "0.3", features = ["v4", "serde"] }
-rand = "0.3"
-serde = "0.8"
-serde_json = "0.8"
-serde_derive = "0.8"
+futures = "*"
+tokio-core = "*"
+tokio-timer = "*"
+log = "*"
+env_logger = "*"
+ansi_term = "*"
+uuid = { version = "0.4", features = ["v4", "serde"] }
+rand = "*"
+serde = "*"
+serde_json = "*"
+serde_derive = "*"
 
 [dev-dependencies]
 quickcheck = "0.2.*"

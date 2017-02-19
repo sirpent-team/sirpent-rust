@@ -12,28 +12,23 @@ extern crate serde_json;
 // Quickcheck is used for property-based testing.
 #[cfg(test)]
 extern crate quickcheck;
-#[macro_use]
 extern crate futures;
-#[macro_use]
 extern crate tokio_core;
 extern crate tokio_timer;
 
 pub mod grids;
 pub mod snake;
-pub mod clients;
 pub mod net;
 pub mod protocol;
 pub mod game;
-pub mod game_future;
-pub mod collect_results;
+pub mod client_future;
 
 pub use grids::*;
 pub use snake::*;
-pub use clients::*;
 pub use net::*;
 pub use protocol::*;
 pub use game::*;
-pub use game_future::*;
+pub use client_future::*;
 
 #[cfg(test)]
 mod tests {
