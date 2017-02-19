@@ -42,26 +42,30 @@ pub struct Client<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream>
           ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static,
           ServerCmdStream: Stream<Item = Cmd, Error = ()> + 'static
 {
-    pub client_id: I,
-    client_tx: S,
-    client_rx: T,
+    pub client_id: Id,
+    client_tx: ClientMsgSink,
+    client_rx: ClientMsgStream,
     msg_tx_queue: VecDeque<Msg>,
     msg_rx_queue: VecDeque<Msg>,
-    command_rx: C,
+    command_rx: ServerCmdStream,
     msg_relay_tx_queue: VecDeque<oneshot::Sender<Msg>>,
     queue_limit: Option<usize>,
 }
 
-impl<I, S, T> Client<I, S, T, mpsc::Receiver<Cmd>>
-    where I: Eq + Hash + Clone,
-          S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + 'static
+impl<Id, ClientMsgSink, ClientMsgStream> Client<Id,
+                                                ClientMsgSink,
+                                                ClientMsgStream,
+                                                mpsc::Receiver<Cmd>>
+    where Id: Eq + Hash + Clone,
+          ClientMsgSink: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static
 {
-    pub fn bounded(client_id: I,
-                   client_tx: S,
-                   client_rx: T,
-                   queue_limit: usize)
-                   -> (Client<I, S, T, mpsc::Receiver<Cmd>>, mpsc::Sender<Cmd>) {
+    pub fn bounded
+        (client_id: Id,
+         client_tx: ClientMsgSink,
+         client_rx: ClientMsgStream,
+         queue_limit: usize)
+         -> (Client<Id, ClientMsgSink, ClientMsgStream, mpsc::Receiver<Cmd>>, mpsc::Sender<Cmd>) {
         let (command_tx, command_rx) = mpsc::channel(queue_limit);
         (Client {
              client_id: client_id,
@@ -77,16 +81,19 @@ impl<I, S, T> Client<I, S, T, mpsc::Receiver<Cmd>>
     }
 }
 
-impl<I, S, T> Client<I, S, T, mpsc::UnboundedReceiver<Cmd>>
-    where I: Eq + Hash + Clone,
-          S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + 'static
+impl<Id, ClientMsgSink, ClientMsgStream> Client<Id,
+                                                ClientMsgSink,
+                                                ClientMsgStream,
+                                                mpsc::UnboundedReceiver<Cmd>>
+    where Id: Eq + Hash + Clone,
+          ClientMsgSink: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static
 {
-    pub fn unbounded
-        (client_id: I,
-         client_tx: S,
-         client_rx: T)
-         -> (Client<I, S, T, mpsc::UnboundedReceiver<Cmd>>, mpsc::UnboundedSender<Cmd>) {
+    pub fn unbounded(client_id: Id,
+                     client_tx: ClientMsgSink,
+                     client_rx: ClientMsgStream)
+                     -> (Client<Id, ClientMsgSink, ClientMsgStream, mpsc::UnboundedReceiver<Cmd>>,
+                         mpsc::UnboundedSender<Cmd>) {
         let (command_tx, command_rx) = mpsc::unbounded();
         (Client {
              client_id: client_id,
@@ -101,16 +108,17 @@ impl<I, S, T> Client<I, S, T, mpsc::UnboundedReceiver<Cmd>>
          command_tx)
     }
 
-    pub fn client_id(&self) -> I {
+    pub fn client_id(&self) -> Id {
         self.client_id.clone()
     }
 }
 
-impl<I, S, T, C> Future for Client<I, S, T, C>
-    where I: Eq + Hash + Clone,
-          S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + 'static,
-          C: Stream<Item = Cmd, Error = ()> + 'static
+impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
+    for Client<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream>
+    where Id: Eq + Hash + Clone,
+          ClientMsgSink: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static,
+          ServerCmdStream: Stream<Item = Cmd, Error = ()> + 'static
 {
     type Item = ();
     type Error = io::Error;
@@ -123,7 +131,7 @@ impl<I, S, T, C> Future for Client<I, S, T, C>
             Ok(Async::Ready(Some(command))) => {
                 match command {
                     // Queue a message for transmission.
-                    ClientCommand::Transmit(msg_tx) => {
+                    Cmd::Transmit(msg_tx) => {
                         if let Some(queue_limit) = self.queue_limit {
                             if self.msg_tx_queue.len() >= queue_limit {
                                 return Err(other_labelled("Tried to exceed msg tx queue \
@@ -133,7 +141,7 @@ impl<I, S, T, C> Future for Client<I, S, T, C>
                         self.msg_tx_queue.push_back(msg_tx)
                     }
                     // Queue a oneshot to relay a message received from the client.
-                    ClientCommand::Receive(msg_relay_tx) => {
+                    Cmd::ReceiveInto(msg_relay_tx) => {
                         if let Some(queue_limit) = self.queue_limit {
                             if self.msg_relay_tx_queue.len() >= queue_limit {
                                 return Err(other_labelled("Tried to exceed msg relay tx queue \
@@ -142,9 +150,9 @@ impl<I, S, T, C> Future for Client<I, S, T, C>
                         }
                         self.msg_relay_tx_queue.push_back(msg_relay_tx)
                     }
-                    // Send the client id to the oneshot.
-                    ClientCommand::GetId(id_relay_tx) => {
-                        id_relay_tx.complete(self.client_id.clone());
+                    Cmd::Close => {
+                        // @TODO: Implement.
+                        unimplemented!();
                     }
                 }
             }

@@ -12,14 +12,16 @@ use clients::*;
 
 pub fn group_command<Id, CmdSink>
     (clients: HashMap<Id, CmdSink>)
-     -> BoxFuture<Item = HashMap<Id, Result<(Msg, CmdSink), CmdSink::Error>>, Error = io::Error>
-    where Id: Eq + Hash + Clone + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+     -> BoxFuture<HashMap<Id, Result<(Msg, CmdSink), CmdSink::SinkError>>, io::Error>
+    where Id: Eq + Hash + Clone + Send + 'static,
+          CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
+          CmdSink::SinkError: Send + 'static
 {
     // @TODO: Try to squash the `Vec<Vec<_>>` somehow.
     GroupReceive::new(clients)
         .collect()
         .and_then(|nested_vec_results| nested_vec_results.flat_map().collect())
+        .boxed()
 }
 
 pub struct GroupReceive<Id, CmdSink>
@@ -29,7 +31,7 @@ pub struct GroupReceive<Id, CmdSink>
     command_stream: Option<GroupCommand<Id, CmdSink>>,
     ready_queue: HashMap<Id, oneshot::Receiver<Msg>>,
     receive_queue: VecDeque<(Id, CmdSink, oneshot::Receiver<Msg>)>,
-    completed: Vec<(Id, (Msg, CmdSink))>,
+    completed: Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>,
 }
 
 impl<Id, CmdSink> GroupReceive<Id, CmdSink>
@@ -38,7 +40,7 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
 {
     pub fn new(clients: HashMap<Id, CmdSink>) -> Self {
         let mut cmds = HashMap::new();
-        let mut ready_queue = VecDeque::new();
+        let mut ready_queue = HashMap::new();
         for client_id in clients.keys() {
             let (cmd, oneshot_rx) = Self::new_client_oneshot();
             cmds.insert(client_id.clone(), cmd);
@@ -46,7 +48,7 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
         }
 
         GroupReceive {
-            command_stream: Some(GroupCommand::new(clients, cmds)),
+            command_stream: Some(GroupCommand::new(clients, CommandMode::Lookup(cmds))),
             ready_queue: ready_queue,
             receive_queue: VecDeque::new(),
             completed: Vec::new(),
@@ -79,15 +81,16 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
         }
 
         // Reenqueue clients who weren't ready yet.
-        self.receive_queue.append(reenqueue);
+        self.receive_queue.append(&mut reenqueue);
     }
 
-    fn enqueue_for_receive(&mut self, commanded_clients: Vec<(Id, CmdSink)>) {
+    fn enqueue_for_receive(&mut self,
+                           commanded_clients: Vec<(Id, Result<CmdSink, CmdSink::SinkError>)>) {
         for (client_id, result) in commanded_clients.into_iter() {
             match result {
                 Ok(cmd_tx) => {
-                    let (_, oneshot_rx) = self.ready_queue.remove(client_id).unwrap();
-                    self.receive_queue.insert((client_id, cmd_tx, oneshot_rx));
+                    let oneshot_rx = self.ready_queue.remove(&client_id).unwrap();
+                    self.receive_queue.push_back((client_id, cmd_tx, oneshot_rx));
                 }
                 Err(e) => self.complete_client(client_id, Err(e)),
             }
@@ -95,7 +98,9 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
     }
 
     /// Mark a client as complete. Nicer way to wrap taking out of Option.
-    fn complete_client(&mut self, client_id: Id, result: Result<(Msg, CmdSink), CmdSink::Error>) {
+    fn complete_client(&mut self,
+                       client_id: Id,
+                       result: Result<(Msg, CmdSink), CmdSink::SinkError>) {
         self.completed.push((client_id, result))
     }
 }
@@ -104,18 +109,20 @@ impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
     where Id: Eq + Hash + Clone + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
-    type Item = Vec<(Id, (Msg, CmdSink))>;
+    type Item = Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if self.command_stream.is_some() {
-            match self.complete_stream.as_mut().unwrap().poll() {
+            match self.command_stream.as_mut().unwrap().poll() {
                 // When the CommandStream sends a group of results, receive-queue them.
                 Ok(Async::Ready(Some(commanded_clients))) => {
-                    self.enqueue_for_receive(commanded_clients)
+                    self.enqueue_for_receive(commanded_clients);
                 }
                 // Once the CommandStream has finished sending results, destroy it.
-                Ok(Async::Ready(None)) => self.command_stream.take().unwrap(),
+                Ok(Async::Ready(None)) => {
+                    self.command_stream.take().unwrap();
+                }
                 Ok(Async::NotReady) => {}
                 // If the CommandStream errors, the logic of what to do is unclear.
                 // At the time of writing CommandStream can't error.
@@ -131,7 +138,8 @@ impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
             let completed = self.completed;
             self.completed = Vec::new();
             Ok(Async::Ready(Some(completed)))
-        } else if self.send_queue.is_empty() && self.flushing_queue.is_empty() {
+        } else if self.command_stream.is_none() && self.ready_queue.is_empty() &&
+                  self.receive_queue.is_empty() {
             Ok(Async::Ready(None))
         } else {
             Ok(Async::NotReady)
