@@ -1,10 +1,9 @@
 use std::io;
-use std::net::SocketAddr;
 use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
-use futures::{BoxFuture, Future, Stream, Sink, Poll, Async};
+use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::{mpsc, oneshot};
 use tokio_timer::{Timer, Sleep};
 
@@ -43,11 +42,10 @@ pub struct ClientFuture<I, S, T, C>
     queue_limit: Option<usize>,
 }
 
-impl<I, S, T, C> ClientFuture<I, S, T, C>
+impl<I, S, T> ClientFuture<I, S, T, mpsc::Receiver<ClientFutureCommand<I>>>
     where I: Eq + Hash + Clone,
           S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + 'static,
-          C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
+          T: Stream<Item = Msg, Error = io::Error> + 'static
 {
     pub fn bounded(client_id: I,
                    client_tx: S,
@@ -68,7 +66,13 @@ impl<I, S, T, C> ClientFuture<I, S, T, C>
          },
          command_tx)
     }
+}
 
+impl<I, S, T> ClientFuture<I, S, T, mpsc::UnboundedReceiver<ClientFutureCommand<I>>>
+    where I: Eq + Hash + Clone,
+          S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static
+{
     pub fn unbounded(client_id: I,
                      client_tx: S,
                      client_rx: T)
@@ -131,7 +135,7 @@ impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
                     }
                     // Send the client id to the oneshot.
                     ClientFutureCommand::GetId(id_relay_tx) => {
-                        id_relay_tx.complete(self.client_id());
+                        id_relay_tx.complete(self.client_id.clone());
                     }
                 }
             }
@@ -140,21 +144,28 @@ impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
             _ => {}
         };
 
-        // Second continue sending messages to the client. If it is ready for a new message
-        // then send one.
-        match self.client_tx.poll_complete() {
-            Ok(Async::Ready(_)) => {
-                if let Some(msg_tx) = self.msg_tx_queue.pop_front() {
-                    match self.client_tx.start_send(msg_tx) {
-                        Err(e) => return Err(e.into()),
-                        // @TODO: needs Ok(Async::Ready(None)) handling?
-                        _ => {}
-                    };
-                }
+        // Second send messages to the client until the sender has to pause.
+        while !self.msg_tx_queue.is_empty() {
+            // Keep queueing items until the buffer gets full.
+            while !self.msg_tx_queue.is_empty() {
+                let msg_tx = self.msg_tx_queue[0].clone();
+                match self.client_tx.start_send(msg_tx) {
+                    // Only deque the item if it was started sending successfully.
+                    Ok(AsyncSink::Ready) => {
+                        self.msg_tx_queue.pop_front();
+                    }
+                    // Go flush the loop if the sender's internal buffer is full.
+                    Ok(AsyncSink::NotReady(_)) => break,
+                    Err(e) => return Err(e.into()),
+                };
             }
-            Err(e) => return Err(e.into()),
-            _ => {}
-        };
+            // Start flushing the sender's internal buffer.
+            match self.client_tx.poll_complete() {
+                Ok(Async::Ready(())) => {}
+                Ok(Async::NotReady) => {}
+                Err(e) => return Err(e.into()),
+            };
+        }
 
         // Third see if there's anything to read from the client.
         match self.client_rx.poll() {
@@ -181,6 +192,40 @@ impl<I, S, T, C> Future for ClientFuture<I, S, T, C>
         };
 
         Ok(Async::NotReady)
+    }
+}
+
+impl<I, S, T, C> Drop for ClientFuture<I, S, T, C>
+    where I: Eq + Hash + Clone,
+          S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
+          T: Stream<Item = Msg, Error = io::Error> + 'static,
+          C: Stream<Item = ClientFutureCommand<I>, Error = ()> + 'static
+{
+    fn drop(&mut self) {
+        // Generally `Drop` will only occur when the non-client channels are dropped, so
+        // this just ensures all messages reach the client.
+        // @TODO: There *has* to be a better way to do this! Does `Wait` work here?
+        while !self.msg_tx_queue.is_empty() {
+            // Keep queueing items until the buffer gets full.
+            while !self.msg_tx_queue.is_empty() {
+                let msg_tx = self.msg_tx_queue[0].clone();
+                match self.client_tx.start_send(msg_tx) {
+                    // Only deque the item if it was started sending successfully.
+                    Ok(AsyncSink::Ready) => {
+                        self.msg_tx_queue.pop_front();
+                    }
+                    // Go flush the loop if the sender's internal buffer is full.
+                    Ok(AsyncSink::NotReady(_)) => break,
+                    Err(_) => return,
+                };
+            }
+            // Start flushing the sender's internal buffer.
+            match self.client_tx.poll_complete() {
+                Ok(Async::Ready(())) => {}
+                Ok(Async::NotReady) => {}
+                Err(_) => return,
+            };
+        }
     }
 }
 
