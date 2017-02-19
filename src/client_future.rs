@@ -8,7 +8,7 @@ use futures::sync::{mpsc, oneshot};
 use tokio_timer::{Timer, Sleep};
 
 use protocol::Msg;
-use net::other_labelled;
+use net::{other, other_labelled};
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum ClientKind {
@@ -235,7 +235,7 @@ fn broken_pipe() -> io::Error {
 
 pub struct ClientsReceive<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = (Msg, C), Error = ()> + 'static
 {
     reads: HashMap<I, D>,
@@ -245,7 +245,7 @@ pub struct ClientsReceive<I, C, D>
 
 impl<I, C, D> ClientsReceive<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = (Msg, C), Error = ()> + 'static
 {
     pub fn new(mut clients: HashMap<I, C>) -> ClientsReceive<I, C, BoxFuture<(Msg, C), ()>> {
@@ -275,11 +275,11 @@ impl<I, C, D> ClientsReceive<I, C, D>
 
 impl<I, C, D> Future for ClientsReceive<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = (Msg, C), Error = ()> + 'static
 {
     type Item = (HashMap<I, Msg>, HashMap<I, C>);
-    type Error = ();
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let mut remove = vec![];
@@ -308,7 +308,7 @@ impl<I, C, D> Future for ClientsReceive<I, C, D>
 
 pub struct ClientsTimedReceive<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = (Msg, C), Error = ()> + 'static
 {
     receive: Option<ClientsReceive<I, C, D>>,
@@ -317,7 +317,7 @@ pub struct ClientsTimedReceive<I, C, D>
 
 impl<I, C, D> ClientsTimedReceive<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = (Msg, C), Error = ()> + 'static
 {
     pub fn new(clients: HashMap<I, C>,
@@ -329,15 +329,28 @@ impl<I, C, D> ClientsTimedReceive<I, C, D>
             sleep: timer.sleep(timeout),
         }
     }
+
+    pub fn single(id: I,
+                  client: C,
+                  timeout: Duration,
+                  timer: &Timer)
+                  -> ClientsTimedReceive<I, C, BoxFuture<(Msg, C), ()>> {
+        let mut clients = HashMap::new();
+        clients.insert(id, client);
+        ClientsTimedReceive {
+            receive: Some(ClientsReceive::<I, C, D>::new(clients)),
+            sleep: timer.sleep(timeout),
+        }
+    }
 }
 
 impl<I, C, D> Future for ClientsTimedReceive<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = (Msg, C), Error = ()> + 'static
 {
     type Item = (HashMap<I, Msg>, HashMap<I, C>);
-    type Error = ();
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         match self.sleep.poll() {
@@ -347,14 +360,14 @@ impl<I, C, D> Future for ClientsTimedReceive<I, C, D>
             Ok(Async::Ready(_)) => Ok(Async::Ready(self.receive.take().unwrap().entries())),
             // If the timeout errored then return it as an `io::Error`.
             // @TODO: Also return what entries we have?
-            Err(_) => Err(()),
+            Err(e) => Err(other(e)),
         }
     }
 }
 
 pub struct ClientsSend<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = C, Error = ()> + 'static
 {
     sends: HashMap<I, D>,
@@ -363,7 +376,7 @@ pub struct ClientsSend<I, C, D>
 
 impl<I, C, D> ClientsSend<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = C, Error = ()> + 'static
 {
     pub fn new(mut clients: HashMap<I, C>, msg: Msg) -> ClientsSend<I, C, BoxFuture<C, ()>> {
@@ -387,11 +400,11 @@ impl<I, C, D> ClientsSend<I, C, D>
 
 impl<I, C, D> Future for ClientsSend<I, C, D>
     where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientFutureCommand<I>, SinkError = ()> + Send + 'static,
+          C: Sink<SinkItem = ClientFutureCommand<I>> + Send + 'static,
           D: Future<Item = C, Error = ()> + 'static
 {
     type Item = HashMap<I, C>;
-    type Error = ();
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let mut remove = vec![];

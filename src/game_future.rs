@@ -1,3 +1,4 @@
+use std::io;
 use std::marker::Send;
 use std::collections::HashMap;
 use rand::Rng;
@@ -13,7 +14,7 @@ use client_future::*;
 pub type BoxedFuture<I, E> = Box<Future<Item = I, Error = E>>;
 
 pub struct GameFuture<C, R>
-    where C: Sink<SinkItem = ClientFutureCommand<String>, SinkError = ()> + Send + 'static,
+    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static,
           R: Rng
 {
     game: Option<Game<R>>,
@@ -25,14 +26,14 @@ pub struct GameFuture<C, R>
 }
 
 enum GameFutureStage<C>
-    where C: Sink<SinkItem = ClientFutureCommand<String>, SinkError = ()> + Send + 'static
+    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static
 {
     StartOfGame,
-    ReadyForTurn(BoxedFuture<(HashMap<String, C>, HashMap<String, C>), ()>),
-    StartTurn(BoxedFuture<(HashMap<String, C>, HashMap<String, C>), ()>),
-    AskMoves(BoxedFuture<(HashMap<String, Msg>, HashMap<String, C>), ()>),
+    ReadyForTurn(BoxedFuture<(HashMap<String, C>, HashMap<String, C>), io::Error>),
+    StartTurn(BoxedFuture<(HashMap<String, C>, HashMap<String, C>), io::Error>),
+    AskMoves(BoxedFuture<(HashMap<String, Msg>, HashMap<String, C>), io::Error>),
     AdvanceTurn(HashMap<String, Msg>),
-    NotifyDead(BoxedFuture<HashMap<String, C>, ()>),
+    NotifyDead(BoxedFuture<HashMap<String, C>, io::Error>),
     LoopDecision,
     Concluded,
 }
@@ -48,14 +49,14 @@ use self::GameFutureStageControl::*;
 type GameFuturePollReturn<C> = (GameFutureStage<C>, GameFutureStageControl);
 
 impl<C, R> GameFuture<C, R>
-    where C: Sink<SinkItem = ClientFutureCommand<String>, SinkError = ()> + Send + 'static,
+    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static,
           R: Rng
 {
     pub fn new(mut game: Game<R>,
                players: HashMap<String, C>,
                spectators: HashMap<String, C>,
-               timeout: Duration,
-               timer: Timer)
+               timer: Timer,
+               timeout: Duration)
                -> Self {
         for name in players.keys() {
             game.add_player(name.clone());
@@ -89,7 +90,8 @@ impl<C, R> GameFuture<C, R>
     }
 
     fn ready_for_turn(&mut self,
-                      mut future: BoxedFuture<(HashMap<String, C>, HashMap<String, C>), ()>)
+                      mut future: BoxedFuture<(HashMap<String, C>, HashMap<String, C>),
+                                              io::Error>)
                       -> GameFuturePollReturn<C> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
@@ -110,7 +112,7 @@ impl<C, R> GameFuture<C, R>
     }
 
     fn start_turn(&mut self,
-                  mut future: BoxedFuture<(HashMap<String, C>, HashMap<String, C>), ()>)
+                  mut future: BoxedFuture<(HashMap<String, C>, HashMap<String, C>), io::Error>)
                   -> GameFuturePollReturn<C> {
         let (mut players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
@@ -132,7 +134,7 @@ impl<C, R> GameFuture<C, R>
     }
 
     fn ask_moves(&mut self,
-                 mut future: BoxedFuture<(HashMap<String, Msg>, HashMap<String, C>), ()>)
+                 mut future: BoxedFuture<(HashMap<String, Msg>, HashMap<String, C>), io::Error>)
                  -> GameFuturePollReturn<C> {
         let (moves, living_players) = match future.poll() {
             Ok(Async::Ready((moves, players))) => (moves, players),
@@ -168,7 +170,7 @@ impl<C, R> GameFuture<C, R>
     }
 
     fn notify_dead(&mut self,
-                   mut future: BoxedFuture<HashMap<String, C>, ()>)
+                   mut future: BoxedFuture<HashMap<String, C>, io::Error>)
                    -> GameFuturePollReturn<C> {
         let casualty_players = match future.poll() {
             Ok(Async::Ready(players)) => players,
@@ -193,7 +195,7 @@ impl<C, R> GameFuture<C, R>
 }
 
 impl<C, R> Future for GameFuture<C, R>
-    where C: Sink<SinkItem = ClientFutureCommand<String>, SinkError = ()> + Send + 'static,
+    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static,
           R: Rng
 {
     type Item = (Game<R>, HashMap<String, C>, HashMap<String, C>);
