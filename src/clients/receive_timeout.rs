@@ -1,67 +1,63 @@
 use std::io;
 use std::time::Duration;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::hash::Hash;
 
-use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
-use futures::sync::{mpsc, oneshot};
+use futures::{Future, Stream, Sink, Poll, Async};
 use tokio_timer::{Timer, Sleep};
 
-use protocol::Msg;
-use net::{other, other_labelled};
+use net::*;
+use clients::*;
 
-pub struct ClientsTimedReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
+pub struct GroupReceiveTimeout<Id, CmdSink>
+    where Id: Eq + Hash + Clone + Send,
+          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
-    receive: Option<ClientsReceive<I, C, D>>,
+    group_receive: Option<GroupReceive<Id, CmdSink>>,
+    items: Option<Vec<Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>>>,
     sleep: Sleep,
 }
 
-impl<I, C, D> ClientsTimedReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
+impl<Id, CmdSink> GroupReceiveTimeout<Id, CmdSink>
+    where Id: Eq + Hash + Clone + Send,
+          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
-    pub fn new(clients: HashMap<I, C>,
-               timeout: Duration,
-               timer: &Timer)
-               -> ClientsTimedReceive<I, C, BoxFuture<(Msg, C), ()>> {
-        ClientsTimedReceive {
-            receive: Some(ClientsReceive::<I, C, D>::new(clients)),
-            sleep: timer.sleep(timeout),
-        }
-    }
-
-    pub fn single(id: I,
-                  client: C,
-                  timeout: Duration,
-                  timer: &Timer)
-                  -> ClientsTimedReceive<I, C, BoxFuture<(Msg, C), ()>> {
-        let mut clients = HashMap::new();
-        clients.insert(id, client);
-        ClientsTimedReceive {
-            receive: Some(ClientsReceive::<I, C, D>::new(clients)),
-            sleep: timer.sleep(timeout),
+    pub fn new(clients: HashMap<Id, CmdSink>, timeout: Duration) -> Self {
+        GroupReceiveTimeout {
+            group_receive: Some(GroupReceive::new(clients)),
+            items: Some(Vec::new()),
+            sleep: Timer::default().sleep(timeout),
         }
     }
 }
 
-impl<I, C, D> Future for ClientsTimedReceive<I, C, D>
-    where I: Eq + Hash + Clone + Send,
-          C: Sink<SinkItem = ClientCommand<I>> + Send + 'static,
-          D: Future<Item = (Msg, C), Error = ()> + 'static
+impl<Id, CmdSink> Future for GroupReceiveTimeout<Id, CmdSink>
+    where Id: Eq + Hash + Clone + Send,
+          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
-    type Item = (HashMap<I, Msg>, HashMap<I, C>);
+    type Item = Vec<Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>>;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if let Some(mut group_receive) = self.group_receive.take() {
+            match group_receive.poll() {
+                Ok(Async::Ready(Some(v))) => {
+                    self.items.as_mut().unwrap().push(v);
+                    self.group_receive = Some(group_receive);
+                }
+                Ok(Async::Ready(None)) => {}
+                Ok(Async::NotReady) => {
+                    self.group_receive = Some(group_receive);
+                }
+                Err(e) => return Err(other(e)),
+            }
+        }
+
         match self.sleep.poll() {
             // If the timeout has yet to be reached then poll receive.
-            Ok(Async::NotReady) => self.receive.as_mut().unwrap().poll(),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
             // If the timeout has been reached then return what entries we have.
-            Ok(Async::Ready(_)) => Ok(Async::Ready(self.receive.take().unwrap().entries())),
+            Ok(Async::Ready(_)) => Ok(Async::Ready(self.items.take().unwrap())),
             // If the timeout errored then return it as an `io::Error`.
             // @TODO: Also return what entries we have?
             Err(e) => Err(other(e)),

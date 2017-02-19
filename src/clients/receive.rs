@@ -1,4 +1,5 @@
 use std::io;
+use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
@@ -7,17 +8,20 @@ use futures::sync::oneshot;
 
 use clients::*;
 
-pub fn group_command<Id, CmdSink>
-    (clients: HashMap<Id, CmdSink>)
+pub fn group_receive<Id, CmdSink>
+    (clients: HashMap<Id, CmdSink>,
+     timeout: Option<Duration>)
      -> BoxFuture<HashMap<Id, Result<(Msg, CmdSink), CmdSink::SinkError>>, io::Error>
     where Id: Eq + Hash + Clone + Send + 'static,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
           CmdSink::SinkError: Send + 'static
 {
+    let vec_vec_results = match timeout {
+        Some(timeout) => GroupReceiveTimeout::new(clients, timeout).boxed(),
+        None => GroupReceive::new(clients).collect().boxed(),
+    };
     // @TODO: Try to squash the `Vec<Vec<_>>` somehow.
-    GroupReceive::new(clients)
-        .collect()
-        .map(|nested_vec_results| {
+    vec_vec_results.map(|nested_vec_results| {
             nested_vec_results.into_iter().flat_map(|v| v.into_iter()).collect::<HashMap<_, _>>()
         })
         .boxed()
