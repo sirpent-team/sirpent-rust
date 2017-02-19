@@ -27,5 +27,5 @@ fn main() {
     // That correct, serde_json-generated JSON errors in the decode with
     // `Syntax(Message("invalid type: string \"B1\", expected enum B"), 0, 0)`
     let a_new: A = serde_json::from_str(json.as_str()).unwrap();
-    //println!("{:?}", a_new);
+    // println!("{:?}", a_new);
 }

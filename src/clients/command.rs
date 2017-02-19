@@ -15,41 +15,54 @@ pub enum CommandMode<Id, CmdSink> {
     /// Send an identical command to all clients.
     Constant(Cmd),
     /// Send a different message to each client.
-    Lookup(HashMap<Id, CmdSink>)
+    Lookup(HashMap<Id, CmdSink>),
 }
 
 /// Sends `Cmd` down a group of `Sink`s. Intended for sending an arbitrary command
 /// to a group of clients. Can send the same message to every client or a different
 /// message for each client - see `CommandMode`.
-pub struct ClientsCommand<Id, CmdSink>
+pub fn group_command
+    (clients: HashMap<Id, CmdSink>,
+     cmds: CommandMode<Id, CmdSink>)
+     -> BoxFuture<Item = HashMap<Id, Result<CmdSink, CmdSink::Error>>, Error = io::Error> {
+    // @TODO: Try to squash the `Vec<Vec<_>>` somehow.
+    GroupCommand::new(clients, cmds)
+        .collect()
+        .and_then(|nested_vec_results| nested_vec_results.flat_map().collect())
+}
+
+/// Sends `Cmd` down a group of `Sink`s. See `command` for details.
+///
+/// This is implemented as a `Stream` so completed clients can be used before the entire
+/// group has completed.
+pub struct GroupCommand<Id, CmdSink>
     where Id: Eq + Hash + Clone + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     send_queue: VecDeque<(Id, CmdSink)>,
     flushing_queue: VecDeque<(Id, CmdSink)>,
-    completed: Option<HashMap<Id, CmdSink>>,
+    completed: Vec<(Id, CmdSink)>,
 }
 
-impl<Id, CmdSink> ClientsCommand<Id, CmdSink>
+impl<Id, CmdSink> GroupCommand<Id, CmdSink>
     where Id: Eq + Hash + Clone + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
-    pub fn new(mut clients: HashMap<Id, CmdSink>, cmds: CommandMode<Id, CmdSink>) -> Self {
+    pub fn new(mut clients: HashMap<Id, CmdSink>, mut cmds: CommandMode<Id, CmdSink>) -> Self {
         // Drain clients into a queue for each to be sent `cmd`.
-        // N.B. Drain retains the memory allocated by `clients` but it is now empty, so
-        // we can reuse it!
-        let send_queue = clients.drain().map(Self::pair_client_with_cmd);
+        let send_queue = clients.drain().map(|client| self.pair_client_with_cmd(client, &mut cmds));
 
-        ClientsCommand {
+        GroupCommand {
             send_queue: send_queue.collect(),
             flushing_queue: VecDeque::new(),
-            // Reuse newly-emptied clients for completions, as sufficient memory already allocated.
-            completed: Some(clients)
+            completed: Vec::new(),
         }
     }
 
     /// Identifies which `Cmd` a client should be using and returns the `(client, Cmd)` pair.
-    fn pair_client_with_cmd(mut client: (Id, CmdSink), cmds: CommandMode<Id, CmdSink>) -> ((Id, CmdSink), Cmd) {
+    fn pair_client_with_cmd(mut client: (Id, CmdSink),
+                            &mut cmds: CommandMode<Id, CmdSink>)
+                            -> ((Id, CmdSink), Cmd) {
         let cmd = match cmds {
             CommandMode::Constant(cmd) => cmd.clone(),
             CommandMode::Lookup(id_to_cmd) => {
@@ -79,7 +92,7 @@ impl<Id, CmdSink> ClientsCommand<Id, CmdSink>
                 Ok(AsyncSink::NotReady(client_cmd)) => reenqueue.push_back((client, cmd)),
                 // If sending the command errored, we can assume the Sink is forever unable to accept
                 // further items. We let the Sink drop and record this failure.
-                Err(e) => complete_client(client_id, Err(e))
+                Err(e) => complete_client(client_id, Err(e)),
             };
         }
 
@@ -104,7 +117,7 @@ impl<Id, CmdSink> ClientsCommand<Id, CmdSink>
                 Ok(AsyncSink::NotReady(client_cmd)) => reenqueue.push_back((client, cmd)),
                 // If polling the Sink errored, we can assume the Sink is forever unable to make progress.
                 // We let the Sink drop and record this failure.
-                Err(e) => complete_client(client_id, Err(e))
+                Err(e) => complete_client(client_id, Err(e)),
             };
         }
 
@@ -114,27 +127,28 @@ impl<Id, CmdSink> ClientsCommand<Id, CmdSink>
 
     /// Mark a client as complete. Nicer way to wrap taking out of Option.
     fn complete_client(client_id: Id, result: Result<CmdSink, CmdSink::Error>) {
-        self.completed.as_mut().unwrap().insert(client_id, result)
+        self.completed.push((client_id, result))
     }
 }
 
-impl<Id, CmdSink> Future for ClientsCommand<Id, CmdSink>
+impl<Id, CmdSink> Stream for GroupCommand<Id, CmdSink>
     where Id: Eq + Hash + Clone + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
-    type Item = HashMap<Id, CmdSink>;
+    type Item = Vec<(Id, CmdSink)>;
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        // @TODO: Get a better sense of how Futures commonly do these guards.
-        assert!(self.completed.is_some());
-
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         self.poll_the_send_queue();
         self.poll_the_flushing_queue();
 
         // Complete when queues are depleted.
-        if self.send_queue.is_empty() && self.flushing_queue.is_empty() {
-            Ok(Async::Ready(self.completed.take().unwrap()))
+        if !self.completed.is_empty() {
+            let completed = self.completed;
+            self.completed = Vec::new();
+            Ok(Async::Ready(Some(completed)))
+        } else if self.send_queue.is_empty() && self.flushing_queue.is_empty() {
+            Ok(Async::Ready(None))
         } else {
             Ok(Async::NotReady)
         }

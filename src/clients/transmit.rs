@@ -10,13 +10,15 @@ use tokio_timer::{Timer, Sleep};
 use protocol::Msg;
 use net::{other, other_labelled};
 
-pub fn transmit(clients: HashMap<Id, CmdSink>, msgs: CommandMode<Id, Msg>) {
+pub fn group_transmit(clients: HashMap<Id, CmdSink>, msgs: CommandMode<Id, Msg>) {
     let cmds = match msg {
         CommandMode::Constant(msg) => clients.keys().cloned().map(|id| (id, msg.clone())),
-        CommandMode::Lookup(id_to_cmd) => clients.keys().cloned().map(|id| {
-            // @TODO: Instead of `panic!`ing if no message set, return an Err.
-            (id, id_to_cmd.remove(id).unwrap())
-        })
+        CommandMode::Lookup(id_to_cmd) => {
+            clients.keys().cloned().map(|id| {
+                // @TODO: Instead of `panic!`ing if no message set, return an Err.
+                (id, id_to_cmd.remove(id).unwrap())
+            })
+        }
     };
-    command(clients, cmds)
+    group_command(clients, cmds)
 }
