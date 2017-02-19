@@ -30,13 +30,6 @@ use sirpent::*;
 fn main() {
     drop(env_logger::init());
 
-    let msg = Msg::Register { desired_name: "46bit".to_string(), kind: ClientKind::Player };
-    println!("{:?}", msg);
-    let json = serde_json::to_string(&msg).unwrap();
-    println!("{}", json);
-    let msg_new: Msg = serde_json::from_str(json.as_str()).unwrap();
-    println!("{:?}", msg_new);
-
     // Take the first command line argument as an address to listen on, or fall
     // back to just some localhost default.
     let addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());

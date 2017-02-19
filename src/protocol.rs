@@ -13,7 +13,7 @@ use client_future::ClientKind;
 pub static PROTOCOL_VERSION: &'static str = "0.3";
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "msg")]
+//#[serde(tag = "msg")]
 pub enum Msg {
     #[serde(rename = "version")]
     Version { sirpent: String, protocol: String },
