@@ -187,7 +187,7 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
     }
 }
 
-fn play_games(names: Arc<Mutex<HashSet<String>>>,
+fn play_games(_: Arc<Mutex<HashSet<String>>>,
               grid: Grid,
               players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
               spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,

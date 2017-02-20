@@ -16,6 +16,7 @@ serde = "0.9"
 serde_json = "0.9"
 serde_derive = "0.9"
 clippy = {version = "0.0.114", optional = true}
+error-chain = "0.9"
 
 [dev-dependencies]
 quickcheck = "0.2"

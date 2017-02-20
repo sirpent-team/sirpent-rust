@@ -6,6 +6,9 @@
         unsafe_code,
         unused_import_braces, unused_qualifications)]
 
+// `error_chain!` can recurse deeply
+#![recursion_limit = "1024"]
+
 // UUID is used to give unique identifiers to each game.
 extern crate uuid;
 // Rand is used to generate OS-level random numbers.
@@ -21,6 +24,8 @@ extern crate quickcheck;
 extern crate futures;
 extern crate tokio_core;
 extern crate tokio_timer;
+#[macro_use]
+extern crate error_chain;
 
 pub mod grids;
 pub mod snake;
@@ -29,6 +34,7 @@ pub mod game;
 pub mod game_future;
 pub mod clients;
 pub mod utils;
+pub mod errors;
 
 pub use grids::*;
 pub use snake::*;
@@ -37,6 +43,7 @@ pub use game::*;
 pub use game_future::*;
 pub use clients::*;
 pub use utils::*;
+pub use errors::*;
 
 #[cfg(test)]
 mod tests {
