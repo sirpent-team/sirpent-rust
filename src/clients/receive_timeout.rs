@@ -1,10 +1,11 @@
 use std::hash::Hash;
 use std::fmt::Debug;
-use std::time::Duration;
+use std::convert::Into;
 use std::collections::HashMap;
 use futures::{Future, Stream, Sink, Poll, Async};
 use tokio_timer::{Timer, Sleep};
 
+use utils::*;
 use clients::*;
 
 pub struct GroupReceiveTimeout<Id, CmdSink>
@@ -20,11 +21,11 @@ impl<Id, CmdSink> GroupReceiveTimeout<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
-    pub fn new(clients: HashMap<Id, CmdSink>, timeout: Duration) -> Self {
+    pub fn new(clients: HashMap<Id, CmdSink>, timeout: Milliseconds) -> Self {
         GroupReceiveTimeout {
             group_receive: GroupReceive::new(clients),
             items: Some(Vec::new()),
-            sleep: Timer::default().sleep(timeout),
+            sleep: Timer::default().sleep(timeout.into()),
         }
     }
 }

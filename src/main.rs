@@ -11,7 +11,7 @@ use std::env;
 use std::str;
 use rand::OsRng;
 use std::thread;
-use std::time::Duration;
+use std::convert::Into;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::collections::{HashSet, HashMap};
@@ -44,7 +44,7 @@ fn main() {
     println!("Listening on {}", addr);
 
     let grid = Grid::new(25);
-    let timeout: Option<Duration> = Some(Duration::from_secs(5));
+    let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let players: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>> =
@@ -64,10 +64,10 @@ fn main() {
     // @TODO: Game requirements:
     // * Take existing player clients and play a game of sirpent with them until completion.
     // * Once game is concluded return player clients to the pool.
-    // * After a short wait duration play a new game, as before with all pooled player clients.
+    // * After a short wait Milliseconds play a new game, as before with all pooled player clients.
     // * Continue indefinitely.
     thread::spawn(move || {
-        thread::sleep(Duration::from_secs(10));
+        thread::sleep(Milliseconds::new(10000).into());
         let mut lp = Core::new().unwrap();
         lp.run(play_games(names.clone(),
                             grid.clone(),
@@ -88,7 +88,7 @@ fn server(listener: TcpListener,
           handle: Handle,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
-          timeout: Option<Duration>,
+          timeout: Option<Milliseconds>,
           players_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>,
           spectators_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>)
           -> Box<Future<Item = (), Error = ()>> {
@@ -115,7 +115,7 @@ fn server(listener: TcpListener,
                                 let welcome_msg = Msg::Welcome {
                                     name: name.clone(),
                                     grid: grid.clone(),
-                                    timeout: timeout,
+                                    timeout_millis: timeout,
                                 };
                                 msg_tx.send(welcome_msg)
                                     .map(move |msg_tx| (msg_tx, msg_rx, addr, name, kind))
@@ -182,7 +182,7 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
               spectators_pool: Arc<Mutex<HashMap<String,
                                                  MapToError<mpsc::UnboundedSender<Cmd>>>>>,
               timer: Timer,
-              timeout: Option<Duration>)
+              timeout: Option<Milliseconds>)
               -> BoxFuture<(), ()> {
     Box::new(future::loop_fn((), move |_| {
         let players_ref = players_pool.clone();
@@ -190,7 +190,7 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
 
         while players_pool.lock().unwrap().len() < 2 {
             println!("Not enough players yet. Waiting 10 seconds.");
-            return timer.sleep(Duration::from_secs(10))
+            return timer.sleep(Milliseconds::new(10000).into())
                 .map(|_| future::Loop::Continue(()))
                 .map_err(|_| ())
                 .boxed();
@@ -207,7 +207,7 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
         let game = Game::new(OsRng::new().unwrap(), grid);
         GameFuture::new(game, players, spectators, timeout)
             .map(move |(game, players, spectators)| {
-                println!("End of game! {:?} {:?}", game.game_state, game.turn_state);
+                println!("End of game! {:?} {:?}", game.game_state, game.round_state);
 
                 // Return players and spectators to the waiting pool.
                 let mut players_pool = players_ref.lock().unwrap();

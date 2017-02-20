@@ -1,8 +1,14 @@
 use std::io;
+use std::fmt;
 use std::error;
 use serde_json;
-use serde::Serialize;
+use std::result;
+use std::ops::Deref;
+use std::convert::Into;
+use std::time::Duration;
 use std::collections::HashMap;
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
+use serde::de::{self, Visitor};
 use futures::{Future, Stream, Sink, Poll, StartSend};
 
 use errors::*;
@@ -34,6 +40,75 @@ pub fn retain_oks<O>(h: HashMap<String, Result<O>>) -> HashMap<String, O> {
             }
         })
         .collect()
+}
+
+// Constants from https://github.com/rust-lang-deprecated/time/blob/master/src/duration.rs
+/// The number of nanoseconds in a millisecond.
+const NANOS_PER_MILLI: u64 = 1000_000;
+/// The number of milliseconds per second.
+const MILLIS_PER_SEC: u64 = 1000;
+
+/// Represents a duration in milliseconds.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub struct Milliseconds {
+    inner: Duration,
+}
+
+impl Milliseconds {
+    pub fn new(milliseconds: u64) -> Milliseconds {
+        Milliseconds { inner: Duration::from_millis(milliseconds) }
+    }
+
+    pub fn millis(&self) -> u64 {
+        let seconds_part_as_millis: u64 = self.inner.as_secs() * MILLIS_PER_SEC;
+        let nanos_part_as_millis: u64 = (self.inner.subsec_nanos() as u64) / NANOS_PER_MILLI;
+        seconds_part_as_millis + nanos_part_as_millis
+    }
+}
+
+impl Deref for Milliseconds {
+    type Target = Duration;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl Into<Duration> for Milliseconds {
+    fn into(self) -> Duration {
+        self.inner
+    }
+}
+
+impl Serialize for Milliseconds {
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        serializer.serialize_u64(self.millis())
+    }
+}
+
+impl Deserialize for Milliseconds {
+    fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
+        where D: Deserializer
+    {
+        struct MillisecondsVisitor;
+
+        impl Visitor for MillisecondsVisitor {
+            type Value = Milliseconds;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("struct Milliseconds as u64")
+            }
+
+            fn visit_u64<E>(self, value: u64) -> result::Result<Milliseconds, E>
+                where E: de::Error
+            {
+                Ok(Milliseconds::new(value.into()))
+            }
+        }
+
+        deserializer.deserialize_u64(MillisecondsVisitor)
+    }
 }
 
 pub fn map2error<S>(inner: S) -> MapToError<S> {

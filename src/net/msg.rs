@@ -1,7 +1,9 @@
-use std::time::Duration;
+use uuid::Uuid;
+use std::collections::HashSet;
 
 use game::*;
 use grids::*;
+use utils::*;
 use clients::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.4";
@@ -10,10 +12,7 @@ pub static PROTOCOL_VERSION: &'static str = "0.4";
 //#[serde(tag = "msg")]
 pub enum Msg {
     #[serde(rename = "version")]
-    Version {
-        sirpent: String,
-        protocol: String
-    },
+    Version { sirpent: String, protocol: String },
     #[serde(rename = "register")]
     Register {
         desired_name: String,
@@ -23,23 +22,20 @@ pub enum Msg {
     Welcome {
         name: String,
         grid: Grid,
-        timeout: Option<i64>,
+        timeout_millis: Option<Milliseconds>,
     },
     #[serde(rename = "game")]
-    Game { game: GameState }
+    Game { game: GameState },
     #[serde(rename = "round")]
-    Round {
-        round: RoundState,
-        game_uuid: Uuid
-    }
+    Round { round: RoundState, game_uuid: Uuid },
     #[serde(rename = "move")]
-    Move { direction: Direction }
+    Move { direction: Direction },
     #[serde(rename = "outcome")]
     Outcome {
         winners: HashSet<String>,
         conclusion: RoundState,
-        game_uuid: Uuid
-    }
+        game_uuid: Uuid,
+    },
 }
 
 impl Msg {
@@ -50,21 +46,11 @@ impl Msg {
         }
     }
 
-    pub fn welcome(name: String, grid: Grid, timeout: Option<Duration>) {
-        Msg::Welcome {
-            name: name,
-            grid: grid,
-            timeout: timeout.map(Duration::num_milliseconds)
-        }
-    }
-
-    pub fn outcome(game_uuid: Uuid, round: RoundState) -> Msg {
+    pub fn outcome(final_round_state: RoundState, game_uuid: Uuid) -> Msg {
         Msg::Outcome {
-            winners: round.snakes.keys().cloned().collect(),
-            conclusion: round,
+            winners: final_round_state.snakes.keys().cloned().collect(),
+            conclusion: final_round_state,
             game_uuid: game_uuid,
         }
     }
 }
-
-

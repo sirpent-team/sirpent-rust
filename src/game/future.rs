@@ -1,13 +1,11 @@
 use rand::Rng;
 use std::marker::Send;
-use std::time::Duration;
 use std::collections::HashMap;
 use futures::{future, Async, BoxFuture, Future, Sink, Poll};
 
 use net::*;
 use game::*;
 use utils::*;
-use errors::*;
 use clients::*;
 
 pub struct GameFuture<CmdSink, R>
@@ -18,17 +16,17 @@ pub struct GameFuture<CmdSink, R>
     players: Option<HashMap<String, CmdSink>>,
     spectators: Option<HashMap<String, CmdSink>>,
     current_stage: Option<GameFutureStage<CmdSink>>,
-    timeout: Option<Duration>,
+    timeout: Option<Milliseconds>,
 }
 
 enum GameFutureStage<CmdSink>
     where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     StartOfGame,
-    ReadyForTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
-    StartTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
+    ReadyForRound(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
+    StartRound(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
     AskMoves(BoxFuture<(HashMap<String, (Msg, CmdSink)>), Error>),
-    AdvanceTurn(HashMap<String, Msg>),
+    AdvanceRound(HashMap<String, Msg>),
     LoopDecision,
     Concluding(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
     EndOfGame,
@@ -42,7 +40,7 @@ enum GameFutureStageControl {
 use self::GameFutureStage::*;
 use self::GameFutureStageControl::*;
 
-type GameFuturePollReturn<CmdSink> = (GameFutureStage<CmdSink>, GameFutureStageControl);
+type GameFuturePollreturn<CmdSink> = (GameFutureStage<CmdSink>, GameFutureStageControl);
 
 impl<CmdSink, R> GameFuture<CmdSink, R>
     where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
@@ -51,7 +49,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
     pub fn new(mut game: Game<R>,
                players: HashMap<String, CmdSink>,
                spectators: HashMap<String, CmdSink>,
-               timeout: Option<Duration>)
+               timeout: Option<Milliseconds>)
                -> Self {
         for name in players.keys() {
             game.add_player(name.clone());
@@ -66,9 +64,9 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         }
     }
 
-    fn start_of_game(&mut self) -> GameFuturePollReturn<CmdSink> {
+    fn start_of_game(&mut self) -> GameFuturePollreturn<CmdSink> {
         let game = self.game.as_ref().unwrap().game_state.clone();
-        let new_game_msg = Msg::NewGame { game: game };
+        let new_game_msg = Msg::Game { game: game };
 
         let players = self.players.take().unwrap();
         let spectators = self.spectators.take().unwrap();
@@ -77,42 +75,48 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             .map(retain_oks);
         let f2 = group_transmit(spectators, MessageMode::Constant(new_game_msg)).map(retain_oks);
         let new_game_future = f1.join(f2).boxed();
-        (ReadyForTurn(new_game_future), Continue)
+        (ReadyForRound(new_game_future), Continue)
     }
 
-    fn ready_for_turn(&mut self,
-                      mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                            Error>)
-                      -> GameFuturePollReturn<CmdSink> {
+    fn ready_for_round(&mut self,
+                       mut future: BoxFuture<(HashMap<String, CmdSink>,
+                                              HashMap<String, CmdSink>),
+                                             Error>)
+                       -> GameFuturePollreturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
-            _ => return (ReadyForTurn(future), Suspend),
+            _ => return (ReadyForRound(future), Suspend),
         };
 
-        let turn = self.game.as_ref().unwrap().turn_state.clone();
-        let turn_msg = Msg::Turn { turn: turn };
+        let game = self.game.as_ref().unwrap();
+        let round = game.round_state.clone();
+        let game_uuid = game.game_state.uuid.clone();
+        let round_msg = Msg::Round {
+            round: round,
+            game_uuid: game_uuid,
+        };
 
-        let players_txing = group_transmit(players, MessageMode::Constant(turn_msg.clone()))
+        let players_txing = group_transmit(players, MessageMode::Constant(round_msg.clone()))
             .map(retain_oks);
-        let spectators_txing = group_transmit(spectators, MessageMode::Constant(turn_msg))
+        let spectators_txing = group_transmit(spectators, MessageMode::Constant(round_msg))
             .map(retain_oks);
-        let turn_future = players_txing.join(spectators_txing).boxed();
-        (StartTurn(turn_future), Continue)
+        let round_future = players_txing.join(spectators_txing).boxed();
+        (StartRound(round_future), Continue)
     }
 
-    fn start_turn(&mut self,
-                  mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                        Error>)
-                  -> GameFuturePollReturn<CmdSink> {
+    fn start_round(&mut self,
+                   mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
+                                         Error>)
+                   -> GameFuturePollreturn<CmdSink> {
         let (mut players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
-            _ => return (StartTurn(future), Suspend),
+            _ => return (StartRound(future), Suspend),
         };
         self.spectators = Some(spectators);
 
-        let turn = self.game.as_ref().unwrap().turn_state.clone();
+        let round = self.game.as_ref().unwrap().round_state.clone();
         let (living_players, dead_players) = players.drain()
-            .partition(|&(ref name, _)| turn.snakes.contains_key(name));
+            .partition(|&(ref name, _)| round.snakes.contains_key(name));
         self.players = Some(dead_players);
 
         let move_future = group_receive(living_players, self.timeout).map(retain_oks).boxed();
@@ -121,7 +125,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
     fn ask_moves(&mut self,
                  mut future: BoxFuture<(HashMap<String, (Msg, CmdSink)>), Error>)
-                 -> GameFuturePollReturn<CmdSink> {
+                 -> GameFuturePollreturn<CmdSink> {
         let mut answers = match future.poll() {
             Ok(Async::Ready(answers)) => answers,
             _ => return (AskMoves(future), Suspend),
@@ -136,10 +140,10 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
         self.players.as_mut().unwrap().extend(living_players.into_iter());
 
-        (AdvanceTurn(msgs), Continue)
+        (AdvanceRound(msgs), Continue)
     }
 
-    fn advance_turn(&mut self, mut moves: HashMap<String, Msg>) -> GameFuturePollReturn<CmdSink> {
+    fn advance_round(&mut self, mut moves: HashMap<String, Msg>) -> GameFuturePollreturn<CmdSink> {
         let directions = moves.drain().filter_map(|(name, msg)| {
             if let Msg::Move { direction } = msg {
                 Some((name.clone(), Ok(direction)))
@@ -147,18 +151,20 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
                 None
             }
         });
-        self.game.as_mut().unwrap().advance_turn(directions.collect());
+        self.game.as_mut().unwrap().advance_round(directions.collect());
 
-        let new_turn = &self.game.as_ref().unwrap().turn_state;
-        println!("Advanced turn to {:?}", new_turn.clone());
+        let new_round = &self.game.as_ref().unwrap().round_state;
+        println!("Advanced round to {:?}", new_round.clone());
 
         (LoopDecision, Continue)
     }
 
-    fn loop_decision(&mut self) -> GameFuturePollReturn<CmdSink> {
+    fn loop_decision(&mut self) -> GameFuturePollreturn<CmdSink> {
         if self.game.as_ref().unwrap().concluded() {
-            let turn = self.game.as_ref().unwrap().turn_state.clone();
-            let game_over_msg = Msg::GameOver { turn: turn };
+            let game = self.game.as_ref().unwrap();
+            let round = game.round_state.clone();
+            let game_uuid = game.game_state.uuid.clone();
+            let game_over_msg = Msg::outcome(round, game_uuid);
 
             let players = self.players.take().unwrap();
             let spectators = self.spectators.take().unwrap();
@@ -171,21 +177,21 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             let concluding_future = players_txing.join(spectators_txing).boxed();
             (Concluding(concluding_future), Continue)
         } else {
-            // Returns players despite no future being run. Believed negligible-cost.
+            // returns players despite no future being run. Believed negligible-cost.
             let players = self.players.take().unwrap();
             let spectators = self.spectators.take().unwrap();
             let players_done = future::ok((players, spectators)).boxed();
-            (ReadyForTurn(players_done), Continue)
+            (ReadyForRound(players_done), Continue)
         }
     }
 
     fn conclude(&mut self,
                 mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
                                       Error>)
-                -> GameFuturePollReturn<CmdSink> {
+                -> GameFuturePollreturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
-            _ => return (StartTurn(future), Suspend),
+            _ => return (StartRound(future), Suspend),
         };
 
         self.players = Some(players);
@@ -207,10 +213,10 @@ impl<CmdSink, R> Future for GameFuture<CmdSink, R>
 
             let (new_stage, stage_control) = match self.current_stage.take().unwrap() {
                 StartOfGame => self.start_of_game(),
-                ReadyForTurn(future) => self.ready_for_turn(future),
-                StartTurn(future) => self.start_turn(future),
+                ReadyForRound(future) => self.ready_for_round(future),
+                StartRound(future) => self.start_round(future),
                 AskMoves(future) => self.ask_moves(future),
-                AdvanceTurn(move_msgs) => self.advance_turn(move_msgs),
+                AdvanceRound(move_msgs) => self.advance_round(move_msgs),
                 LoopDecision => self.loop_decision(),
                 Concluding(future) => self.conclude(future),
                 EndOfGame => {

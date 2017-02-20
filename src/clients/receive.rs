@@ -1,14 +1,14 @@
 use std::hash::Hash;
 use std::fmt::Debug;
-use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async};
 use futures::sync::oneshot;
 
+use utils::*;
 use clients::*;
 
 pub fn group_receive<Id, CmdSink>(clients: HashMap<Id, CmdSink>,
-                                  timeout: Option<Duration>)
+                                  timeout: Option<Milliseconds>)
                                   -> BoxFuture<HashMap<Id, Result<(Msg, CmdSink)>>, Error>
     where Id: Eq + Hash + Clone + Debug + Send + 'static,
           CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static

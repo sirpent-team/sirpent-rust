@@ -1,6 +1,5 @@
 use rand::Rng;
-use uuid::Uuid;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashMap;
 
 use grids::*;
 use snake::*;

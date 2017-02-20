@@ -11,7 +11,6 @@ use std::env;
 use std::str;
 use rand::OsRng;
 use std::thread;
-use std::time::Duration;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::collections::{HashSet, HashMap};
