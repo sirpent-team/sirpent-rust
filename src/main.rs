@@ -18,7 +18,7 @@ use std::collections::{HashSet, HashMap};
 use std::time::Duration;
 use std::thread;
 
-use futures::{future, Future, Stream, Sink};
+use futures::{future, BoxFuture, Future, Stream, Sink};
 use futures::sync::mpsc;
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
@@ -26,6 +26,7 @@ use tokio_core::io::Io;
 use tokio_timer::Timer;
 
 use sirpent::*;
+use sirpent::clients::*;
 
 fn main() {
     drop(env_logger::init());
@@ -50,10 +51,9 @@ fn main() {
     let timeout: Option<Duration> = Some(Duration::from_secs(5));
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ClientFutureCommand<String>>>>> =
+    let players: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>> =
         Arc::new(Mutex::new(HashMap::new()));
-    let spectators: Arc<Mutex<HashMap<String,
-                                          mpsc::UnboundedSender<ClientFutureCommand<String>>>>> =
+    let spectators: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     // Run TCP server to welcome clients and register them as players.
@@ -95,8 +95,8 @@ fn server(listener: TcpListener,
           grid: Grid,
           timer: Timer,
           timeout: Option<Duration>,
-          players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ClientFutureCommand<String>>>>>,
-          spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ClientFutureCommand<String>>>>>)
+          players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
+          spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>)
           -> impl Future<Item = (), Error = ()> {
     let clients = listener.incoming()
         .map(move |(socket, addr)| {
@@ -146,8 +146,7 @@ fn server(listener: TcpListener,
 
             let handle2 = handle.clone();
             let fut = fut.map(move |(msg_tx, msg_rx, _, name, kind)| {
-                let (client_future, command_tx) =
-                    ClientFuture::unbounded(name.clone(), msg_tx, msg_rx);
+                let (client_future, command_tx) = Client::unbounded(name.clone(), msg_tx, msg_rx);
                 handle2.spawn(client_future.map_err(|e| {
                     println!("{:?}", e);
                     ()
@@ -195,15 +194,14 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 }
 
 fn play_games(names: Arc<Mutex<HashSet<String>>>,
-            grid: Grid,
-            players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ClientFutureCommand<String>>>>>,
-            spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ClientFutureCommand<String>>>>>,
-            timer: Timer,
-            timeout: Duration)
-            -> BoxedFuture<(), ()>
-{
+              grid: Grid,
+              players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
+              spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
+              timer: Timer,
+              timeout: Duration)
+              -> BoxFuture<(), ()> {
     box future::loop_fn((),
-                        move |_| -> BoxedFuture<future::Loop<(), ()>, future::Loop<(), ()>> {
+                        move |_| -> BoxFuture<future::Loop<(), ()>, future::Loop<(), ()>> {
         let game = Game::new(OsRng::new().unwrap(), grid);
 
         let players_ref = players_pool.clone();

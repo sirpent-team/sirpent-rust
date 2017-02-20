@@ -147,42 +147,48 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(), io::Error> {
+        println!("Client::poll");
+
         // First check for anything being instructed.
         // This is first because it provides possible messages to send and possible places
         // to send messages - both needed later.
-        match self.command_rx.poll() {
-            Ok(Async::Ready(Some(command))) => {
-                match command {
-                    // Queue a message for transmission.
-                    Cmd::Transmit(msg_tx) => {
-                        if let Some(queue_limit) = self.queue_limit {
-                            if self.msg_tx_queue.len() >= queue_limit {
-                                return Err(other_labelled("Tried to exceed msg tx queue \
-                                                           capacity."));
+        loop {
+            match self.command_rx.poll() {
+                Ok(Async::Ready(Some(command))) => {
+                    match command {
+                        // Queue a message for transmission.
+                        Cmd::Transmit(msg_tx) => {
+                            println!("msg_tx: {:?}", msg_tx);
+                            if let Some(queue_limit) = self.queue_limit {
+                                if self.msg_tx_queue.len() >= queue_limit {
+                                    return Err(other_labelled("Tried to exceed msg tx queue \
+                                                               capacity."));
+                                }
                             }
+                            self.msg_tx_queue.push_back(msg_tx)
                         }
-                        self.msg_tx_queue.push_back(msg_tx)
-                    }
-                    // Queue a oneshot to relay a message received from the client.
-                    Cmd::ReceiveInto(msg_relay_tx) => {
-                        if let Some(queue_limit) = self.queue_limit {
-                            if self.msg_relay_tx_queue.len() >= queue_limit {
-                                return Err(other_labelled("Tried to exceed msg relay tx queue \
-                                                           capacity."));
+                        // Queue a oneshot to relay a message received from the client.
+                        Cmd::ReceiveInto(msg_relay_tx) => {
+                            if let Some(queue_limit) = self.queue_limit {
+                                if self.msg_relay_tx_queue.len() >= queue_limit {
+                                    return Err(other_labelled("Tried to exceed msg relay tx \
+                                                               queue capacity."));
+                                }
                             }
+                            self.msg_relay_tx_queue.push_back(msg_relay_tx)
                         }
-                        self.msg_relay_tx_queue.push_back(msg_relay_tx)
-                    }
-                    Cmd::Close => {
-                        // @TODO: Implement.
-                        unimplemented!();
-                    }
+                        Cmd::Close => {
+                            // @TODO: Implement.
+                            unimplemented!();
+                        }
+                    };
+                    continue;
                 }
+                Ok(Async::Ready(None)) => return Err(broken_pipe()),
+                Err(()) => unreachable!(),
+                Ok(Async::NotReady) => break,
             }
-            Ok(Async::Ready(None)) => return Err(broken_pipe()),
-            Err(()) => unreachable!(),
-            _ => {}
-        };
+        }
 
         // Second send messages to the client until the sender has to pause.
         while !self.msg_tx_queue.is_empty() {
@@ -206,6 +212,11 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                 Err(e) => return Err(e.into()),
             };
         }
+        match self.client_tx.poll_complete() {
+            Ok(Async::Ready(())) => {}
+            Ok(Async::NotReady) => {}
+            Err(e) => return Err(e.into()),
+        };
 
         // Third see if there's anything to read from the client.
         match self.client_rx.poll() {

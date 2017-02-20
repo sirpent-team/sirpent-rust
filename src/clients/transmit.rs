@@ -1,6 +1,7 @@
 use std::io;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::fmt::Debug;
 
 use futures::{BoxFuture, Future, Sink};
 
@@ -8,7 +9,7 @@ use clients::*;
 
 #[derive(Clone)]
 pub enum MessageMode<Id>
-    where Id: Eq + Hash + Clone + Send
+    where Id: Eq + Hash + Clone + Debug + Send
 {
     Constant(Msg),
     Lookup(HashMap<Id, Msg>),
@@ -18,7 +19,7 @@ pub fn group_transmit<Id, CmdSink>
     (clients: HashMap<Id, CmdSink>,
      msgs: MessageMode<Id>)
      -> BoxFuture<HashMap<Id, Result<CmdSink, CmdSink::SinkError>>, io::Error>
-    where Id: Eq + Hash + Clone + Send + 'static,
+    where Id: Eq + Hash + Clone + Debug + Send + 'static,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
           CmdSink::SinkError: Send + 'static
 {

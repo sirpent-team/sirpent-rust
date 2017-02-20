@@ -1,6 +1,7 @@
 use std::io;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
+use std::fmt::Debug;
 
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
 
@@ -8,7 +9,7 @@ use clients::*;
 
 /// Determines which message should each client send.
 pub enum CommandMode<Id>
-    where Id: Eq + Hash + Clone + Send
+    where Id: Eq + Hash + Clone + Debug + Send
 {
     /// Send an identical command to all clients.
     Constant(Cmd),
@@ -23,7 +24,7 @@ pub fn group_command<Id, CmdSink>
     (clients: HashMap<Id, CmdSink>,
      cmds: CommandMode<Id>)
      -> BoxFuture<HashMap<Id, Result<CmdSink, CmdSink::SinkError>>, io::Error>
-    where Id: Eq + Hash + Clone + Send + 'static,
+    where Id: Eq + Hash + Clone + Debug + Send + 'static,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
           CmdSink::SinkError: Send + 'static
 {
@@ -41,7 +42,7 @@ pub fn group_command<Id, CmdSink>
 /// This is implemented as a `Stream` so completed clients can be used before the entire
 /// group has completed.
 pub struct GroupCommand<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     send_queue: VecDeque<((Id, CmdSink), Cmd)>,
@@ -50,7 +51,7 @@ pub struct GroupCommand<Id, CmdSink>
 }
 
 impl<Id, CmdSink> GroupCommand<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     pub fn new(mut clients: HashMap<Id, CmdSink>, mut cmds: CommandMode<Id>) -> Self {
@@ -114,7 +115,10 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
         while let Some((client_id, mut cmd_tx)) = self.flushing_queue.pop_front() {
             match cmd_tx.poll_complete() {
                 // If the command was flushed successfully, record the success and the Sink.
-                Ok(Async::Ready(())) => self.complete_client(client_id, Ok(cmd_tx)),
+                Ok(Async::Ready(())) => {
+                    println!("flushing complete for {:?}", client_id);
+                    self.complete_client(client_id, Ok(cmd_tx))
+                }
                 // If the command could not be sent, requeue it for trying later.
                 Ok(Async::NotReady) => reenqueue.push_back((client_id, cmd_tx)),
                 // If polling the Sink errored, we can assume the Sink is forever unable to make progress.
@@ -134,7 +138,7 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
 }
 
 impl<Id, CmdSink> Stream for GroupCommand<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     type Item = Vec<(Id, Result<CmdSink, CmdSink::SinkError>)>;

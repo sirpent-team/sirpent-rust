@@ -2,6 +2,7 @@ use std::io;
 use std::time::Duration;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
+use std::fmt::Debug;
 
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async};
 use futures::sync::oneshot;
@@ -12,7 +13,7 @@ pub fn group_receive<Id, CmdSink>
     (clients: HashMap<Id, CmdSink>,
      timeout: Option<Duration>)
      -> BoxFuture<HashMap<Id, Result<(Msg, CmdSink), CmdSink::SinkError>>, io::Error>
-    where Id: Eq + Hash + Clone + Send + 'static,
+    where Id: Eq + Hash + Clone + Debug + Send + 'static,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
           CmdSink::SinkError: Send + 'static
 {
@@ -28,7 +29,7 @@ pub fn group_receive<Id, CmdSink>
 }
 
 pub struct GroupReceive<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     command_stream: Option<GroupCommand<Id, CmdSink>>,
@@ -38,7 +39,7 @@ pub struct GroupReceive<Id, CmdSink>
 }
 
 impl<Id, CmdSink> GroupReceive<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     pub fn new(clients: HashMap<Id, CmdSink>) -> Self {
@@ -109,7 +110,7 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
 }
 
 impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     type Item = Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>;

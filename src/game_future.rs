@@ -4,36 +4,47 @@ use std::collections::HashMap;
 use rand::Rng;
 use std::time::Duration;
 
-use futures::{future, Async, Future, Sink, Poll};
+use futures::{future, Async, BoxFuture, Future, Sink, Poll};
 use tokio_timer::Timer;
 
 use game::*;
-use protocol::*;
-use client_future::*;
+use net::*;
+use clients::*;
 
-pub type BoxedFuture<I, E> = Box<Future<Item = I, Error = E>>;
+fn retain_oks<O, E>(h: HashMap<String, Result<O, E>>) -> HashMap<String, O> {
+    h.into_iter()
+        .filter_map(|(id, result)| {
+            match result {
+                Ok(o) => Some((id, o)),
+                Err(_) => None,
+            }
+        })
+        .collect()
+}
 
-pub struct GameFuture<C, R>
-    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static,
+pub struct GameFuture<CmdSink, R>
+    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
+          CmdSink::SinkError: Send + 'static,
           R: Rng
 {
     game: Option<Game<R>>,
-    players: Option<HashMap<String, C>>,
-    spectators: Option<HashMap<String, C>>,
-    current_stage: Option<GameFutureStage<C>>,
+    players: Option<HashMap<String, CmdSink>>,
+    spectators: Option<HashMap<String, CmdSink>>,
+    current_stage: Option<GameFutureStage<CmdSink>>,
     timeout: Duration,
     timer: Timer,
 }
 
-enum GameFutureStage<C>
-    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static
+enum GameFutureStage<CmdSink>
+    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
+          CmdSink::SinkError: Send + 'static
 {
     StartOfGame,
-    ReadyForTurn(BoxedFuture<(HashMap<String, C>, HashMap<String, C>), io::Error>),
-    StartTurn(BoxedFuture<(HashMap<String, C>, HashMap<String, C>), io::Error>),
-    AskMoves(BoxedFuture<(HashMap<String, Msg>, HashMap<String, C>), io::Error>),
+    ReadyForTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), io::Error>),
+    StartTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), io::Error>),
+    AskMoves(BoxFuture<(HashMap<String, (Msg, CmdSink)>), io::Error>),
     AdvanceTurn(HashMap<String, Msg>),
-    NotifyDead(BoxedFuture<HashMap<String, C>, io::Error>),
+    NotifyDead(BoxFuture<HashMap<String, CmdSink>, io::Error>),
     LoopDecision,
     Concluded,
 }
@@ -46,15 +57,16 @@ enum GameFutureStageControl {
 use self::GameFutureStage::*;
 use self::GameFutureStageControl::*;
 
-type GameFuturePollReturn<C> = (GameFutureStage<C>, GameFutureStageControl);
+type GameFuturePollReturn<CmdSink> = (GameFutureStage<CmdSink>, GameFutureStageControl);
 
-impl<C, R> GameFuture<C, R>
-    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static,
+impl<CmdSink, R> GameFuture<CmdSink, R>
+    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
+          CmdSink::SinkError: Send + 'static,
           R: Rng
 {
     pub fn new(mut game: Game<R>,
-               players: HashMap<String, C>,
-               spectators: HashMap<String, C>,
+               players: HashMap<String, CmdSink>,
+               spectators: HashMap<String, CmdSink>,
                timer: Timer,
                timeout: Duration)
                -> Self {
@@ -72,27 +84,24 @@ impl<C, R> GameFuture<C, R>
         }
     }
 
-    fn start_of_game(&mut self) -> GameFuturePollReturn<C> {
+    fn start_of_game(&mut self) -> GameFuturePollReturn<CmdSink> {
         let game = self.game.as_ref().unwrap().game_state.clone();
         let new_game_msg = Msg::NewGame { game: game };
 
         let players = self.players.take().unwrap();
         let spectators = self.spectators.take().unwrap();
 
-        let new_game_future =
-            ClientsSend::<String, C, BoxedFuture<C, ()>>::new(players, new_game_msg.clone())
-                .and_then(move |players| {
-                    ClientsSend::<String, C, BoxedFuture<C, ()>>::new(spectators, new_game_msg)
-                        .map(|spectators| (players, spectators))
-                })
-                .boxed();
+        let f1 = group_transmit(players, MessageMode::Constant(new_game_msg.clone()))
+            .map(retain_oks);
+        let f2 = group_transmit(spectators, MessageMode::Constant(new_game_msg)).map(retain_oks);
+        let new_game_future = f1.join(f2).boxed();
         return (ReadyForTurn(new_game_future), Continue);
     }
 
     fn ready_for_turn(&mut self,
-                      mut future: BoxedFuture<(HashMap<String, C>, HashMap<String, C>),
-                                              io::Error>)
-                      -> GameFuturePollReturn<C> {
+                      mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
+                                            io::Error>)
+                      -> GameFuturePollReturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
             _ => return (GameFutureStage::ReadyForTurn(future), Suspend),
@@ -101,19 +110,16 @@ impl<C, R> GameFuture<C, R>
         let turn = self.game.as_ref().unwrap().turn_state.clone();
         let turn_msg = Msg::Turn { turn: turn };
 
-        let turn_future = ClientsSend::<String, C, BoxedFuture<C, ()>>::new(players,
-                                                                            turn_msg.clone())
-            .and_then(move |players| {
-                ClientsSend::<String, C, BoxedFuture<C, ()>>::new(spectators, turn_msg)
-                    .map(|spectators| (players, spectators))
-            })
-            .boxed();
+        let f1 = group_transmit(players, MessageMode::Constant(turn_msg.clone())).map(retain_oks);
+        let f2 = group_transmit(spectators, MessageMode::Constant(turn_msg)).map(retain_oks);
+        let turn_future = f1.join(f2).boxed();
         return (StartTurn(turn_future), Continue);
     }
 
     fn start_turn(&mut self,
-                  mut future: BoxedFuture<(HashMap<String, C>, HashMap<String, C>), io::Error>)
-                  -> GameFuturePollReturn<C> {
+                  mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
+                                        io::Error>)
+                  -> GameFuturePollReturn<CmdSink> {
         let (mut players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
             _ => return (GameFutureStage::StartTurn(future), Suspend),
@@ -125,27 +131,31 @@ impl<C, R> GameFuture<C, R>
             .partition(|&(ref name, _)| turn.snakes.contains_key(name));
         self.players = Some(dead_players);
 
-        let move_future =
-            ClientsTimedReceive::<String, C, BoxedFuture<(Msg, C), ()>>::new(living_players,
-                                                                             self.timeout,
-                                                                             &self.timer)
-                .boxed();
+        let move_future = group_receive(living_players, Some(self.timeout)).map(retain_oks).boxed();
         return (GameFutureStage::AskMoves(move_future), Continue);
     }
 
     fn ask_moves(&mut self,
-                 mut future: BoxedFuture<(HashMap<String, Msg>, HashMap<String, C>), io::Error>)
-                 -> GameFuturePollReturn<C> {
-        let (moves, living_players) = match future.poll() {
-            Ok(Async::Ready((moves, players))) => (moves, players),
+                 mut future: BoxFuture<(HashMap<String, (Msg, CmdSink)>), io::Error>)
+                 -> GameFuturePollReturn<CmdSink> {
+        let mut answers = match future.poll() {
+            Ok(Async::Ready(answers)) => answers,
             _ => return (GameFutureStage::AskMoves(future), Suspend),
         };
+        let mut living_players = HashMap::with_capacity(answers.len());
+        let msgs = answers.drain()
+            .map(|(name, (msg, cmd_tx))| {
+                living_players.insert(name.clone(), cmd_tx);
+                (name, msg)
+            })
+            .collect();
+
         self.players.as_mut().unwrap().extend(living_players.into_iter());
 
-        return (GameFutureStage::AdvanceTurn(moves), Continue);
+        return (GameFutureStage::AdvanceTurn(msgs), Continue);
     }
 
-    fn advance_turn(&mut self, mut moves: HashMap<String, Msg>) -> GameFuturePollReturn<C> {
+    fn advance_turn(&mut self, mut moves: HashMap<String, Msg>) -> GameFuturePollReturn<CmdSink> {
         let directions = moves.drain().filter_map(|(name, msg)| {
             if let Msg::Move { direction } = msg {
                 Some((name.clone(), Ok(direction)))
@@ -164,14 +174,15 @@ impl<C, R> GameFuture<C, R>
         let (casualty_players, living_players) = players.drain()
             .partition(|&(ref name, _)| new_turn.casualties.contains_key(name));
         self.players = Some(living_players);
-        let die_future =
-            ClientsSend::<String, C, BoxedFuture<C, ()>>::new(casualty_players, Msg::Died).boxed();
+        let die_future = group_transmit(casualty_players, MessageMode::Constant(Msg::Died))
+            .map(retain_oks)
+            .boxed();
         return (GameFutureStage::NotifyDead(die_future), Continue);
     }
 
     fn notify_dead(&mut self,
-                   mut future: BoxedFuture<HashMap<String, C>, io::Error>)
-                   -> GameFuturePollReturn<C> {
+                   mut future: BoxFuture<HashMap<String, CmdSink>, io::Error>)
+                   -> GameFuturePollReturn<CmdSink> {
         let casualty_players = match future.poll() {
             Ok(Async::Ready(players)) => players,
             _ => return (GameFutureStage::NotifyDead(future), Suspend),
@@ -181,7 +192,7 @@ impl<C, R> GameFuture<C, R>
         return (GameFutureStage::LoopDecision, Continue);
     }
 
-    fn loop_decision(&mut self) -> GameFuturePollReturn<C> {
+    fn loop_decision(&mut self) -> GameFuturePollReturn<CmdSink> {
         if self.game.as_ref().unwrap().concluded() {
             return (GameFutureStage::Concluded, Continue);
         } else {
@@ -194,11 +205,12 @@ impl<C, R> GameFuture<C, R>
     }
 }
 
-impl<C, R> Future for GameFuture<C, R>
-    where C: Sink<SinkItem = ClientFutureCommand<String>> + Send + 'static,
+impl<CmdSink, R> Future for GameFuture<CmdSink, R>
+    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
+          CmdSink::SinkError: Send + 'static,
           R: Rng
 {
-    type Item = (Game<R>, HashMap<String, C>, HashMap<String, C>);
+    type Item = (Game<R>, HashMap<String, CmdSink>, HashMap<String, CmdSink>);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

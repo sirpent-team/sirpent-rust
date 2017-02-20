@@ -2,6 +2,7 @@ use std::io;
 use std::time::Duration;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::fmt::Debug;
 
 use futures::{Future, Stream, Sink, Poll, Async};
 use tokio_timer::{Timer, Sleep};
@@ -10,7 +11,7 @@ use net::*;
 use clients::*;
 
 pub struct GroupReceiveTimeout<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     group_receive: Option<GroupReceive<Id, CmdSink>>,
@@ -19,7 +20,7 @@ pub struct GroupReceiveTimeout<Id, CmdSink>
 }
 
 impl<Id, CmdSink> GroupReceiveTimeout<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     pub fn new(clients: HashMap<Id, CmdSink>, timeout: Duration) -> Self {
@@ -32,24 +33,24 @@ impl<Id, CmdSink> GroupReceiveTimeout<Id, CmdSink>
 }
 
 impl<Id, CmdSink> Future for GroupReceiveTimeout<Id, CmdSink>
-    where Id: Eq + Hash + Clone + Send,
+    where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
     type Item = Vec<Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>>;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        if let Some(mut group_receive) = self.group_receive.take() {
-            match group_receive.poll() {
-                Ok(Async::Ready(Some(v))) => {
-                    self.items.as_mut().unwrap().push(v);
-                    self.group_receive = Some(group_receive);
-                }
-                Ok(Async::Ready(None)) => {}
-                Ok(Async::NotReady) => {
-                    self.group_receive = Some(group_receive);
-                }
-                Err(e) => return Err(other(e)),
+        loop {
+            if let Some(mut group_receive) = self.group_receive.take() {
+                match group_receive.poll() {
+                    Ok(Async::Ready(Some(v))) => {
+                        self.items.as_mut().unwrap().push(v);
+                    }
+                    Ok(Async::Ready(None)) => return Ok(Async::Ready(self.items.take().unwrap())),
+                    Ok(Async::NotReady) => {}
+                    Err(e) => return Err(other(e)),
+                };
+                self.group_receive = Some(group_receive);
             }
         }
 
