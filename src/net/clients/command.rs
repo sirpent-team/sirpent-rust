@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::collections::{HashMap, VecDeque};
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
 
-use clients::*;
+use super::*;
 
 /// Determines which message should each client send.
 pub enum CommandMode<Id>

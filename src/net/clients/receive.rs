@@ -5,7 +5,7 @@ use futures::{BoxFuture, Future, Stream, Sink, Poll, Async};
 use futures::sync::oneshot;
 
 use utils::*;
-use clients::*;
+use super::*;
 
 pub fn group_receive<Id, CmdSink>(clients: HashMap<Id, CmdSink>,
                                   timeout: Option<Milliseconds>)

@@ -22,7 +22,11 @@ use tokio_core::reactor::{Core, Handle};
 use tokio_core::io::Io;
 use tokio_timer::Timer;
 
-use sirpent::*;
+use sirpent::utils::*;
+use sirpent::net::*;
+use sirpent::engine::*;
+use sirpent::state::*;
+use sirpent::net::clients::*;
 
 fn main() {
     drop(env_logger::init());
@@ -122,7 +126,9 @@ fn server(listener: TcpListener,
                                     .boxed()
                             } else {
                                 println!("{:?}", msg);
-                                future::err("message was not a Msg::Register".into()).boxed()
+                                future::err(format!("message was not a Msg::Register :: {:?}", msg)
+                                        .into())
+                                    .boxed()
                             }
                         })
                 });
@@ -147,8 +153,8 @@ fn server(listener: TcpListener,
             });
 
             // Close clients with unsuccessful handshakes.
-            let fut = fut.map_err(|_| {
-                println!("Error welcoming client: {:?}", "@TODO Expose This.");
+            let fut = fut.map_err(|e| {
+                println!("Error welcoming client: {:?}", e);
                 ()
             });
 

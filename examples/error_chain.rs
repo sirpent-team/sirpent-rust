@@ -1,25 +1,7 @@
-extern crate log;
-extern crate env_logger;
-extern crate futures;
-extern crate tokio_core;
 extern crate sirpent;
 extern crate serde_json;
 extern crate rand;
 extern crate tokio_timer;
-
-use std::env;
-use std::str;
-use rand::OsRng;
-use std::thread;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::collections::{HashSet, HashMap};
-use futures::{future, BoxFuture, Future, Stream, Sink};
-use futures::sync::mpsc;
-use tokio_core::net::TcpListener;
-use tokio_core::reactor::{Core, Handle};
-use tokio_core::io::Io;
-use tokio_timer::Timer;
 
 use sirpent::*;
 
@@ -42,7 +24,7 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let n: u64 = serde_json::from_str("abc").chain_err(|| "unable to decode nonsense as a u64")?;
+    let _: u64 = serde_json::from_str("abc").chain_err(|| "unable to decode nonsense as a u64")?;
 
     Ok(())
 }

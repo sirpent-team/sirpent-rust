@@ -3,10 +3,10 @@ use std::marker::Send;
 use std::collections::HashMap;
 use futures::{future, Async, BoxFuture, Future, Sink, Poll};
 
+use super::*;
 use net::*;
-use game::*;
+use net::clients::*;
 use utils::*;
-use clients::*;
 
 pub struct GameFuture<CmdSink, R>
     where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
@@ -90,7 +90,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
         let game = self.game.as_ref().unwrap();
         let round = game.round_state.clone();
-        let game_uuid = game.game_state.uuid.clone();
+        let game_uuid = game.game_state.uuid;
         let round_msg = Msg::Round {
             round: round,
             game_uuid: game_uuid,
@@ -163,7 +163,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         if self.game.as_ref().unwrap().concluded() {
             let game = self.game.as_ref().unwrap();
             let round = game.round_state.clone();
-            let game_uuid = game.game_state.uuid.clone();
+            let game_uuid = game.game_state.uuid;
             let game_over_msg = Msg::outcome(round, game_uuid);
 
             let players = self.players.take().unwrap();

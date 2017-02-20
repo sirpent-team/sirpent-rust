@@ -1,12 +1,11 @@
-pub mod traits;
-pub mod square;
-pub mod hexagon;
-pub mod triangle;
+mod game;
+mod snake;
+pub mod grids;
 
-pub use self::traits::*;
+pub use self::game::*;
+pub use self::snake::*;
+use self::grids::*;
 
-#[cfg(feature = "hexagon")]
-pub use self::hexagon::*;
 #[cfg(feature = "hexagon")]
 pub type Direction = HexagonDirection;
 #[cfg(feature = "hexagon")]
@@ -15,16 +14,12 @@ pub type Vector = HexagonVector;
 pub type Grid = HexagonGrid;
 
 #[cfg(feature = "square")]
-pub use self::square::*;
-#[cfg(feature = "square")]
 pub type Direction = SquareDirection;
 #[cfg(feature = "square")]
 pub type Vector = SquareVector;
 #[cfg(feature = "square")]
 pub type Grid = SquareGrid;
 
-#[cfg(feature = "triangle")]
-pub use self::triangle::*;
 #[cfg(feature = "triangle")]
 pub type Direction = TriangleDirection;
 #[cfg(feature = "triangle")]

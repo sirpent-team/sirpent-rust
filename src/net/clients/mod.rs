@@ -8,10 +8,10 @@ use futures::sync::{mpsc, oneshot};
 use net::*;
 use errors::*;
 
-pub mod command;
-pub mod receive;
-pub mod receive_timeout;
-pub mod transmit;
+mod command;
+mod receive;
+mod receive_timeout;
+mod transmit;
 
 pub use self::command::*;
 pub use self::receive::*;

@@ -1,4 +1,5 @@
-use grids::*;
+use super::*;
+use super::grids::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct Snake {

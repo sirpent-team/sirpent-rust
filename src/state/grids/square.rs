@@ -1,6 +1,6 @@
 use rand::Rng;
 
-use grids::traits::*;
+use super::traits::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub enum SquareDirection {
@@ -118,7 +118,6 @@ impl GridTrait for SquareGrid {
 mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
-    pub use grids::traits::*;
     use rand::OsRng;
 
     impl Arbitrary for SquareVector {

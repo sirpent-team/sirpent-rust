@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use futures::{BoxFuture, Future, Sink};
 
-use clients::*;
+use super::*;
 
 #[derive(Clone, Debug)]
 pub enum MessageMode<Id>

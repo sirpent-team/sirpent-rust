@@ -27,20 +27,12 @@ extern crate tokio_timer;
 #[macro_use]
 extern crate error_chain;
 
-pub mod grids;
-pub mod snake;
+pub mod state;
+pub mod engine;
 pub mod net;
-pub mod game;
-pub mod clients;
 pub mod utils;
-pub mod errors;
+mod errors;
 
-pub use grids::*;
-pub use snake::*;
-pub use net::*;
-pub use game::*;
-pub use clients::*;
-pub use utils::*;
 pub use errors::*;
 
 #[cfg(test)]

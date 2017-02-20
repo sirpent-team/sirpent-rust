@@ -6,7 +6,7 @@ use futures::{Future, Stream, Sink, Poll, Async};
 use tokio_timer::{Timer, Sleep};
 
 use utils::*;
-use clients::*;
+use super::*;
 
 pub struct GroupReceiveTimeout<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,

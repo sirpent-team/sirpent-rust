@@ -26,11 +26,11 @@ impl Graph for MyGraph {
     type N = Node;
     type E = Edge;
 
-    fn has_edge(&self, n1: &Node, n2: &Node) -> bool {
+    fn has_edge(&self, _: &Node, _: &Node) -> bool {
         true
     }
 
-    fn edges(&self, n: &Node) -> Vec<Edge> {
+    fn edges(&self, _: &Node) -> Vec<Edge> {
         Vec::new()
     }
 }

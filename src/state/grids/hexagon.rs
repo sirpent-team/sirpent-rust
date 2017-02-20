@@ -1,7 +1,7 @@
 use rand::Rng;
 use std::cmp::max;
 
-use grids::traits::*;
+use super::traits::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
 pub enum HexagonDirection {
@@ -145,7 +145,6 @@ impl GridTrait for HexagonGrid {
 mod tests {
     use quickcheck::{Gen, Arbitrary, quickcheck};
     use super::*;
-    pub use grids::traits::*;
     use rand::OsRng;
 
     impl Arbitrary for HexagonVector {

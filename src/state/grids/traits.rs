@@ -2,9 +2,9 @@ use rand::Rng;
 use std::fmt::Debug;
 use serde::{Serialize, Deserialize};
 
-use grids::hexagon::*;
-use grids::square::*;
-use grids::triangle::*;
+use super::hexagon::*;
+use super::square::*;
+use super::triangle::*;
 
 pub trait DirectionTrait
     : PartialEq + Eq + Copy + Serialize + Deserialize + Clone + Debug {

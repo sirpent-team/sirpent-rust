@@ -1,8 +1,7 @@
 use uuid::Uuid;
 use std::collections::{HashSet, HashMap};
 
-use grids::*;
-use snake::*;
+use super::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {

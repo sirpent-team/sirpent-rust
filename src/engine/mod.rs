@@ -1,15 +1,13 @@
 use rand::Rng;
 use std::collections::HashMap;
 
-use grids::*;
-use snake::*;
+use state::*;
+use state::grids::*;
 use errors::*;
 
-pub mod state;
-pub mod future;
+mod future;
 
-pub use state::*;
-pub use future::*;
+pub use self::future::*;
 
 #[derive(Debug)]
 pub struct Game<R: Rng> {
@@ -23,7 +21,7 @@ impl<R: Rng> Game<R> {
     pub fn new(rng: R, grid: Grid) -> Self {
         let mut game = Game {
             rng: Box::new(rng),
-            grid: grid.clone(),
+            grid: grid,
             game_state: GameState::new(grid),
             round_state: RoundState::default(),
         };
@@ -129,7 +127,7 @@ impl<R: Rng> Game<R> {
 
     fn snake_collisions(&mut self, next_round: &mut RoundState) {
         for (name, snake) in &next_round.snakes {
-            for (_, coll_snake) in &next_round.snakes {
+            for coll_snake in next_round.snakes.values() {
                 if snake != coll_snake && snake.has_collided_into(coll_snake) {
                     next_round.casualties
                         .insert(name.clone(), CauseOfDeath::CollidedWithSnake);
