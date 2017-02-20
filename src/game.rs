@@ -1,10 +1,10 @@
+use std::io;
 use rand::Rng;
 use uuid::Uuid;
 use std::collections::{HashSet, HashMap};
 
 use grids::*;
 use snake::*;
-use net::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
@@ -87,12 +87,12 @@ impl<R: Rng> Game<R> {
     pub fn concluded(&self) -> bool {
         let number_of_living_snakes = self.turn_state.snakes.len();
         match number_of_living_snakes {
-            0 => true,
+            0 | 1 => true,
             _ => false,
         }
     }
 
-    pub fn advance_turn(&mut self, moves: HashMap<String, ProtocolResult<Direction>>) -> TurnState {
+    pub fn advance_turn(&mut self, moves: HashMap<String, io::Result<Direction>>) -> TurnState {
         let mut next_turn: TurnState = self.turn_state.clone();
 
         // N.B. does not free memory.
@@ -126,7 +126,7 @@ impl<R: Rng> Game<R> {
 
     fn snake_movement(&mut self,
                       next_turn: &mut TurnState,
-                      mut moves: HashMap<String, ProtocolResult<Direction>>) {
+                      mut moves: HashMap<String, io::Result<Direction>>) {
         // Apply movement and remove snakes that did not move.
         // Snake plans are Result<Direction, MoveError>. MoveError = String.
         // So we can specify an underlying error rather than just omitting any move.

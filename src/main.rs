@@ -1,5 +1,3 @@
-#![feature(conservative_impl_trait, box_syntax)]
-
 extern crate log;
 extern crate env_logger;
 extern crate futures;
@@ -10,14 +8,13 @@ extern crate rand;
 extern crate tokio_timer;
 
 use std::env;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 use std::str;
 use rand::OsRng;
-use std::collections::{HashSet, HashMap};
-use std::time::Duration;
 use std::thread;
-
+use std::time::Duration;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::collections::{HashSet, HashMap};
 use futures::{future, BoxFuture, Future, Stream, Sink};
 use futures::sync::mpsc;
 use tokio_core::net::TcpListener;
@@ -61,7 +58,6 @@ fn main() {
                         handle.clone(),
                         names.clone(),
                         grid.clone(),
-                        timer.clone(),
                         timeout,
                         players.clone(),
                         spectators.clone()));
@@ -79,7 +75,7 @@ fn main() {
                             players.clone(),
                             spectators.clone(),
                             timer.clone(),
-                            timeout.expect("Must have a timeout for now.")))
+                            timeout))
             .unwrap();
     });
 
@@ -93,11 +89,10 @@ fn server(listener: TcpListener,
           handle: Handle,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
-          timer: Timer,
           timeout: Option<Duration>,
           players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
           spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>)
-          -> impl Future<Item = (), Error = ()> {
+          -> Box<Future<Item = (), Error = ()>> {
     let clients = listener.incoming()
         .map(move |(socket, addr)| {
             let msg_transport = socket.framed(MsgCodec);
@@ -173,7 +168,7 @@ fn server(listener: TcpListener,
             Ok(())
         })
         .then(|_| Ok(()));
-    box server
+    Box::new(server)
 }
 
 /// Find an unused name based upon the `desired_name`.
@@ -198,10 +193,10 @@ fn play_games(names: Arc<Mutex<HashSet<String>>>,
               players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
               spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
               timer: Timer,
-              timeout: Duration)
+              timeout: Option<Duration>)
               -> BoxFuture<(), ()> {
-    box future::loop_fn((),
-                        move |_| -> BoxFuture<future::Loop<(), ()>, future::Loop<(), ()>> {
+    Box::new(future::loop_fn((),
+                             move |_| -> BoxFuture<future::Loop<(), ()>, future::Loop<(), ()>> {
         let game = Game::new(OsRng::new().unwrap(), grid);
 
         let players_ref = players_pool.clone();
@@ -209,9 +204,10 @@ fn play_games(names: Arc<Mutex<HashSet<String>>>,
 
         while players_pool.lock().unwrap().len() < 2 {
             println!("Not enough players yet. Waiting 10 seconds.");
-            return box timer.sleep(Duration::from_secs(10))
+            return timer.sleep(Duration::from_secs(10))
                 .map(|_| future::Loop::Continue(()))
-                .map_err(|_| future::Loop::Break(()));
+                .map_err(|_| future::Loop::Break(()))
+                .boxed();
         }
 
         let mut players_lock = players_pool.lock().unwrap();
@@ -220,7 +216,7 @@ fn play_games(names: Arc<Mutex<HashSet<String>>>,
         let mut spectators_lock = spectators_pool.lock().unwrap();
         let spectators = spectators_lock.drain().collect();
 
-        box GameFuture::new(game, players, spectators, timer.clone(), timeout)
+        GameFuture::new(game, players, spectators, timeout)
             .map(move |(game, players, spectators)| {
                 println!("End of game! {:?} {:?}", game.game_state, game.turn_state);
 
@@ -235,7 +231,8 @@ fn play_games(names: Arc<Mutex<HashSet<String>>>,
                 future::Loop::Continue(())
             })
             .map_err(|_| future::Loop::Break(()))
+            .boxed()
     })
         .map(|_| ())
-        .map_err(|_| ())
+        .map_err(|_| ()))
 }

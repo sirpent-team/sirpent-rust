@@ -1,6 +1,6 @@
 [package]
 name = "sirpent"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Nathan van Doorn <nvd1234@gmail.com>", "Michael Mokrysz <hi@46b.it>"]
 
 [features]
@@ -23,4 +23,4 @@ serde_json = "0.9"
 serde_derive = "0.9"
 
 [dev-dependencies]
-quickcheck = "0.2.*"
+quickcheck = "0.2"

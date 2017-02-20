@@ -1,11 +1,9 @@
 use std::io;
-use std::marker::Send;
-use std::collections::HashMap;
 use rand::Rng;
+use std::marker::Send;
 use std::time::Duration;
-
+use std::collections::HashMap;
 use futures::{future, Async, BoxFuture, Future, Sink, Poll};
-use tokio_timer::Timer;
 
 use game::*;
 use net::*;
@@ -31,8 +29,7 @@ pub struct GameFuture<CmdSink, R>
     players: Option<HashMap<String, CmdSink>>,
     spectators: Option<HashMap<String, CmdSink>>,
     current_stage: Option<GameFutureStage<CmdSink>>,
-    timeout: Duration,
-    timer: Timer,
+    timeout: Option<Duration>,
 }
 
 enum GameFutureStage<CmdSink>
@@ -67,8 +64,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
     pub fn new(mut game: Game<R>,
                players: HashMap<String, CmdSink>,
                spectators: HashMap<String, CmdSink>,
-               timer: Timer,
-               timeout: Duration)
+               timeout: Option<Duration>)
                -> Self {
         for name in players.keys() {
             game.add_player(name.clone());
@@ -80,7 +76,6 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             spectators: Some(spectators),
             current_stage: Some(StartOfGame),
             timeout: timeout,
-            timer: timer,
         }
     }
 
@@ -131,7 +126,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             .partition(|&(ref name, _)| turn.snakes.contains_key(name));
         self.players = Some(dead_players);
 
-        let move_future = group_receive(living_players, Some(self.timeout)).map(retain_oks).boxed();
+        let move_future = group_receive(living_players, self.timeout).map(retain_oks).boxed();
         return (GameFutureStage::AskMoves(move_future), Continue);
     }
 
@@ -199,7 +194,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             // Returns players despite no future being run. Believed negligible-cost.
             let players = self.players.take().unwrap();
             let spectators = self.spectators.take().unwrap();
-            let players_done = box future::ok((players, spectators));
+            let players_done = future::ok((players, spectators)).boxed();
             return (GameFutureStage::ReadyForTurn(players_done), Continue);
         }
     }

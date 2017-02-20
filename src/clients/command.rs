@@ -1,8 +1,7 @@
 use std::io;
-use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::fmt::Debug;
-
+use std::collections::{HashMap, VecDeque};
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async, AsyncSink};
 
 use clients::*;
@@ -116,7 +115,6 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
             match cmd_tx.poll_complete() {
                 // If the command was flushed successfully, record the success and the Sink.
                 Ok(Async::Ready(())) => {
-                    println!("flushing complete for {:?}", client_id);
                     self.complete_client(client_id, Ok(cmd_tx))
                 }
                 // If the command could not be sent, requeue it for trying later.

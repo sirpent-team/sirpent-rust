@@ -1,9 +1,8 @@
 use std::io;
-use std::time::Duration;
-use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::fmt::Debug;
-
+use std::time::Duration;
+use std::collections::{HashMap, VecDeque};
 use futures::{BoxFuture, Future, Stream, Sink, Poll, Async};
 use futures::sync::oneshot;
 
@@ -32,7 +31,7 @@ pub struct GroupReceive<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
           CmdSink: Sink<SinkItem = Cmd> + Send + 'static
 {
-    command_stream: Option<GroupCommand<Id, CmdSink>>,
+    group_command: Option<GroupCommand<Id, CmdSink>>,
     ready_queue: HashMap<Id, oneshot::Receiver<Msg>>,
     receive_queue: VecDeque<(Id, CmdSink, oneshot::Receiver<Msg>)>,
     completed: Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>,
@@ -52,7 +51,7 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
         }
 
         GroupReceive {
-            command_stream: Some(GroupCommand::new(clients, CommandMode::Lookup(cmds))),
+            group_command: Some(GroupCommand::new(clients, CommandMode::Lookup(cmds))),
             ready_queue: ready_queue,
             receive_queue: VecDeque::new(),
             completed: Vec::new(),
@@ -117,22 +116,26 @@ impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if self.command_stream.is_some() {
-            match self.command_stream.as_mut().unwrap().poll() {
-                // When the CommandStream sends a group of results, receive-queue them.
+        while let Some(mut group_command_) = self.group_command.take() {
+            match group_command_.poll() {
+                // When the CommandStream sends a group of results, receive-queue them and
+                // see if there's more to come.
                 Ok(Async::Ready(Some(commanded_clients))) => {
                     self.enqueue_for_receive(commanded_clients);
                 }
                 // Once the CommandStream has finished sending results, destroy it.
-                Ok(Async::Ready(None)) => {
-                    self.command_stream.take().unwrap();
+                Ok(Async::Ready(None)) => break,
+                // If the stream isn't ready yet then save it but move on.
+                Ok(Async::NotReady) => {
+                    self.group_command = Some(group_command_);
+                    break;
                 }
-                Ok(Async::NotReady) => {}
-                // If the CommandStream errors, the logic of what to do is unclear.
-                // At the time of writing CommandStream can't error.
+                // If the GroupCommand errors, the logic of what to do is unclear.
+                // At the time of writing it can't error.
                 // @TODO: Decide good rules here.
                 Err(_) => unimplemented!(),
             }
+            self.group_command = Some(group_command_);
         }
 
         self.poll_the_receive_queue();
@@ -141,7 +144,7 @@ impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
         if !self.completed.is_empty() {
             let completed = self.completed.drain(..).collect();
             Ok(Async::Ready(Some(completed)))
-        } else if self.command_stream.is_none() && self.ready_queue.is_empty() &&
+        } else if self.group_command.is_none() && self.ready_queue.is_empty() &&
                   self.receive_queue.is_empty() {
             Ok(Async::Ready(None))
         } else {

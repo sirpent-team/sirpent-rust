@@ -1,5 +1,3 @@
-#![feature(associated_consts, box_syntax)]
-
 // UUID is used to give unique identifiers to each game.
 extern crate uuid;
 // Rand is used to generate OS-level random numbers.
@@ -22,6 +20,7 @@ pub mod net;
 pub mod game;
 pub mod game_future;
 pub mod clients;
+pub mod utils;
 
 pub use grids::*;
 pub use snake::*;

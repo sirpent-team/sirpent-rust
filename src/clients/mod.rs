@@ -1,12 +1,12 @@
 use std::io;
-use std::collections::VecDeque;
-use std::hash::Hash;
 use std::sync::Arc;
-
+use std::hash::Hash;
+use std::collections::VecDeque;
 use futures::{Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::{mpsc, oneshot};
 
 use net::*;
+use utils::*;
 
 pub mod command;
 pub mod receive;
@@ -147,8 +147,6 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(), io::Error> {
-        println!("Client::poll");
-
         // First check for anything being instructed.
         // This is first because it provides possible messages to send and possible places
         // to send messages - both needed later.
@@ -158,10 +156,9 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                     match command {
                         // Queue a message for transmission.
                         Cmd::Transmit(msg_tx) => {
-                            println!("msg_tx: {:?}", msg_tx);
                             if let Some(queue_limit) = self.queue_limit {
                                 if self.msg_tx_queue.len() >= queue_limit {
-                                    return Err(other_labelled("Tried to exceed msg tx queue \
+                                    return Err(io_error_from_str("Tried to exceed msg tx queue \
                                                                capacity."));
                                 }
                             }
@@ -171,7 +168,7 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                         Cmd::ReceiveInto(msg_relay_tx) => {
                             if let Some(queue_limit) = self.queue_limit {
                                 if self.msg_relay_tx_queue.len() >= queue_limit {
-                                    return Err(other_labelled("Tried to exceed msg relay tx \
+                                    return Err(io_error_from_str("Tried to exceed msg relay tx \
                                                                queue capacity."));
                                 }
                             }
@@ -223,7 +220,7 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
             Ok(Async::Ready(Some(msg_rx))) => {
                 if let Some(queue_limit) = self.queue_limit {
                     if self.msg_rx_queue.len() >= queue_limit {
-                        return Err(other_labelled("Tried to exceed msg rx queue capacity."));
+                        return Err(io_error_from_str("Tried to exceed msg rx queue capacity."));
                     }
                 }
                 self.msg_rx_queue.push_back(msg_rx)

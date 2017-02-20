@@ -1,7 +1,7 @@
 use std::io;
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::fmt::Debug;
+use std::collections::HashMap;
 
 use futures::{BoxFuture, Future, Sink};
 

@@ -1,5 +1,5 @@
-use std::cmp::max;
 use rand::Rng;
+use std::cmp::max;
 
 use grids::traits::*;
 
