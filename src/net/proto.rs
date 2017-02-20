@@ -11,6 +11,7 @@ use utils::*;
 pub type MsgTransport = Framed<TcpStream, MsgCodec>;
 
 // https://github.com/tokio-rs/tokio-line/blob/master/src/framed_transport.rs
+#[derive(Clone, Copy, Debug)]
 pub struct MsgCodec;
 
 impl Codec for MsgCodec {

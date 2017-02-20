@@ -80,7 +80,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             .map(retain_oks);
         let f2 = group_transmit(spectators, MessageMode::Constant(new_game_msg)).map(retain_oks);
         let new_game_future = f1.join(f2).boxed();
-        return (ReadyForTurn(new_game_future), Continue);
+        (ReadyForTurn(new_game_future), Continue)
     }
 
     fn ready_for_turn(&mut self,
@@ -89,7 +89,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
                       -> GameFuturePollReturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
-            _ => return (GameFutureStage::ReadyForTurn(future), Suspend),
+            _ => return (ReadyForTurn(future), Suspend),
         };
 
         let turn = self.game.as_ref().unwrap().turn_state.clone();
@@ -100,7 +100,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         let spectators_txing = group_transmit(spectators, MessageMode::Constant(turn_msg))
             .map(retain_oks);
         let turn_future = players_txing.join(spectators_txing).boxed();
-        return (StartTurn(turn_future), Continue);
+        (StartTurn(turn_future), Continue)
     }
 
     fn start_turn(&mut self,
@@ -109,7 +109,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
                   -> GameFuturePollReturn<CmdSink> {
         let (mut players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
-            _ => return (GameFutureStage::StartTurn(future), Suspend),
+            _ => return (StartTurn(future), Suspend),
         };
         self.spectators = Some(spectators);
 
@@ -119,7 +119,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         self.players = Some(dead_players);
 
         let move_future = group_receive(living_players, self.timeout).map(retain_oks).boxed();
-        return (GameFutureStage::AskMoves(move_future), Continue);
+        (AskMoves(move_future), Continue)
     }
 
     fn ask_moves(&mut self,
@@ -127,7 +127,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
                  -> GameFuturePollReturn<CmdSink> {
         let mut answers = match future.poll() {
             Ok(Async::Ready(answers)) => answers,
-            _ => return (GameFutureStage::AskMoves(future), Suspend),
+            _ => return (AskMoves(future), Suspend),
         };
         let mut living_players = HashMap::with_capacity(answers.len());
         let msgs = answers.drain()
@@ -139,7 +139,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
         self.players.as_mut().unwrap().extend(living_players.into_iter());
 
-        return (GameFutureStage::AdvanceTurn(msgs), Continue);
+        (AdvanceTurn(msgs), Continue)
     }
 
     fn advance_turn(&mut self, mut moves: HashMap<String, Msg>) -> GameFuturePollReturn<CmdSink> {
@@ -152,10 +152,10 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         });
         self.game.as_mut().unwrap().advance_turn(directions.collect());
 
-        let ref new_turn = self.game.as_ref().unwrap().turn_state;
+        let new_turn = &self.game.as_ref().unwrap().turn_state;
         println!("Advanced turn to {:?}", new_turn.clone());
 
-        return (GameFutureStage::LoopDecision, Continue);
+        (LoopDecision, Continue)
     }
 
     fn loop_decision(&mut self) -> GameFuturePollReturn<CmdSink> {
@@ -172,13 +172,13 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             let spectators_txing = group_transmit(spectators, MessageMode::Constant(game_over_msg))
                 .map(retain_oks);
             let concluding_future = players_txing.join(spectators_txing).boxed();
-            return (GameFutureStage::Concluding(concluding_future), Continue);
+            (Concluding(concluding_future), Continue)
         } else {
             // Returns players despite no future being run. Believed negligible-cost.
             let players = self.players.take().unwrap();
             let spectators = self.spectators.take().unwrap();
             let players_done = future::ok((players, spectators)).boxed();
-            return (GameFutureStage::ReadyForTurn(players_done), Continue);
+            (ReadyForTurn(players_done), Continue)
         }
     }
 
@@ -188,12 +188,12 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
                 -> GameFuturePollReturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
-            _ => return (GameFutureStage::StartTurn(future), Suspend),
+            _ => return (StartTurn(future), Suspend),
         };
 
         self.players = Some(players);
         self.spectators = Some(spectators);
-        return (GameFutureStage::EndOfGame, Continue);
+        (EndOfGame, Continue)
     }
 }
 
@@ -210,14 +210,14 @@ impl<CmdSink, R> Future for GameFuture<CmdSink, R>
             assert!(self.current_stage.is_some());
 
             let (new_stage, stage_control) = match self.current_stage.take().unwrap() {
-                GameFutureStage::StartOfGame => self.start_of_game(),
-                GameFutureStage::ReadyForTurn(future) => self.ready_for_turn(future),
-                GameFutureStage::StartTurn(future) => self.start_turn(future),
-                GameFutureStage::AskMoves(future) => self.ask_moves(future),
-                GameFutureStage::AdvanceTurn(move_msgs) => self.advance_turn(move_msgs),
-                GameFutureStage::LoopDecision => self.loop_decision(),
-                GameFutureStage::Concluding(future) => self.conclude(future),
-                GameFutureStage::EndOfGame => {
+                StartOfGame => self.start_of_game(),
+                ReadyForTurn(future) => self.ready_for_turn(future),
+                StartTurn(future) => self.start_turn(future),
+                AskMoves(future) => self.ask_moves(future),
+                AdvanceTurn(move_msgs) => self.advance_turn(move_msgs),
+                LoopDecision => self.loop_decision(),
+                Concluding(future) => self.conclude(future),
+                EndOfGame => {
                     let game = self.game.take().unwrap();
                     let players = self.players.take().unwrap();
                     let spectators = self.spectators.take().unwrap();

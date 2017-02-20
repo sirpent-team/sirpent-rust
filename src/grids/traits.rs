@@ -4,9 +4,7 @@ use std::fmt::Debug;
 use serde::{Serialize, Deserialize};
 
 pub trait DirectionTrait
-    : PartialEq + Eq + Copy + Serialize + Deserialize + Clone + Debug
-    where Self: marker::Sized
-{
+    : PartialEq + Eq + Copy + Serialize + Deserialize + Clone + Debug {
     fn variants() -> &'static [Self];
 }
 

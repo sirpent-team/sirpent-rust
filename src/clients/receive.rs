@@ -89,7 +89,7 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
 
     fn enqueue_for_receive(&mut self,
                            commanded_clients: Vec<(Id, Result<CmdSink, CmdSink::SinkError>)>) {
-        for (client_id, result) in commanded_clients.into_iter() {
+        for (client_id, result) in commanded_clients {
             match result {
                 Ok(cmd_tx) => {
                     let oneshot_rx = self.ready_queue.remove(&client_id).unwrap();

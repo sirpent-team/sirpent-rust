@@ -44,7 +44,7 @@ impl VectorTrait for HexagonVector {
         let xdist = (self.x - other.x).abs();
         let ydist = (self.y - other.y).abs();
         let zdist = ((self.x + self.y) - (other.x + other.y)).abs();
-        return max(max(xdist, ydist), zdist) as usize;
+        max(max(xdist, ydist), zdist) as usize
     }
 
     fn neighbour(&self, direction: &HexagonDirection) -> HexagonVector {

@@ -69,9 +69,9 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
     fn pair_client_with_cmd(client: (Id, CmdSink),
                             cmds: &mut CommandMode<Id>)
                             -> ((Id, CmdSink), Cmd) {
-        let cmd = match cmds {
-            &mut CommandMode::Constant(ref cmd) => cmd.clone(),
-            &mut CommandMode::Lookup(ref mut id_to_cmd) => {
+        let cmd = match *cmds {
+            CommandMode::Constant(ref cmd) => cmd.clone(),
+            CommandMode::Lookup(ref mut id_to_cmd) => {
                 // @TODO: Instead of `panic!`ing if no message set, return an Err.
                 // We can't silently pass them into `completed` because it will give this type
                 // nasty semantics.

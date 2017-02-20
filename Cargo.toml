@@ -3,12 +3,6 @@ name = "sirpent"
 version = "0.1.1"
 authors = ["Nathan van Doorn <nvd1234@gmail.com>", "Michael Mokrysz <hi@46b.it>"]
 
-[features]
-default = ["hexagon"]
-square = []
-hexagon = []
-triangle = []
-
 [dependencies]
 futures = "0.1"
 tokio-core = "0.1"
@@ -21,6 +15,14 @@ rand = "0.3"
 serde = "0.9"
 serde_json = "0.9"
 serde_derive = "0.9"
+clippy = {version = "0.0.114", optional = true}
 
 [dev-dependencies]
 quickcheck = "0.2"
+
+[features]
+default = ["hexagon"]
+square = []
+hexagon = []
+triangle = []
+dev = ["clippy"]

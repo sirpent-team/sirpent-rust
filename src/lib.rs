@@ -1,3 +1,11 @@
+// https://pascalhertleif.de/artikel/good-practices-for-writing-rust-libraries/
+#![cfg_attr(feature = "dev", allow(unstable_features))]
+#![cfg_attr(feature = "dev", feature(plugin))]
+#![cfg_attr(feature = "dev", plugin(clippy))]
+#![deny(trivial_numeric_casts,
+        unsafe_code,
+        unused_import_braces, unused_qualifications)]
+
 // UUID is used to give unique identifiers to each game.
 extern crate uuid;
 // Rand is used to generate OS-level random numbers.

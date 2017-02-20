@@ -18,7 +18,7 @@ pub use self::receive::*;
 pub use self::receive_timeout::*;
 pub use self::transmit::*;
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum ClientKind {
     #[serde(rename = "player")]
     Player,
@@ -208,14 +208,12 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
             }
             // Start flushing the sender's internal buffer.
             match self.client_tx.poll_complete() {
-                Ok(Async::Ready(())) => {}
-                Ok(Async::NotReady) => {}
+                Ok(Async::Ready(())) | Ok(Async::NotReady) => {}
                 Err(e) => return Err(e.into()),
             };
         }
         match self.client_tx.poll_complete() {
-            Ok(Async::Ready(())) => {}
-            Ok(Async::NotReady) => {}
+            Ok(Async::Ready(())) | Ok(Async::NotReady) => {}
             Err(e) => return Err(e.into()),
         };
 
@@ -273,8 +271,7 @@ impl<I, S, T, C> Drop for Client<I, S, T, C>
             }
             // Start flushing the sender's internal buffer.
             match self.client_tx.poll_complete() {
-                Ok(Async::Ready(())) => {}
-                Ok(Async::NotReady) => {}
+                Ok(Async::Ready(())) | Ok(Async::NotReady) => {}
                 Err(_) => return,
             };
         }

@@ -23,7 +23,7 @@ impl GameState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TurnState {
     pub turn_number: usize,
     pub food: HashSet<Vector>,
@@ -33,19 +33,7 @@ pub struct TurnState {
     pub casualties: HashMap<String, CauseOfDeath>,
 }
 
-impl TurnState {
-    pub fn new() -> TurnState {
-        TurnState {
-            turn_number: 0,
-            food: HashSet::new(),
-            eaten: HashMap::new(),
-            snakes: HashMap::new(),
-            directions: HashMap::new(),
-            casualties: HashMap::new(),
-        }
-    }
-}
-
+#[derive(Debug)]
 pub struct Game<R: Rng> {
     pub rng: Box<R>,
     pub game_state: GameState,
@@ -57,15 +45,15 @@ impl<R: Rng> Game<R> {
         let mut game = Game {
             rng: Box::new(rng),
             game_state: GameState::new(grid),
-            turn_state: TurnState::new(),
+            turn_state: TurnState::default(),
         };
 
         // @TODO: Alter API to avoid this juggling.
-        let mut turn_state = TurnState::new();
+        let mut turn_state = TurnState::default();
         game.manage_food(&mut turn_state);
         game.turn_state = turn_state;
 
-        return game;
+        game
     }
 
     pub fn add_player(&mut self, desired_name: String) -> String {
@@ -81,7 +69,7 @@ impl<R: Rng> Game<R> {
         let snake = Snake::new(vec![head]);
         self.turn_state.snakes.insert(final_name.clone(), snake);
 
-        return final_name;
+        final_name
     }
 
     pub fn concluded(&self) -> bool {
@@ -121,7 +109,7 @@ impl<R: Rng> Game<R> {
         next_turn.turn_number += 1;
 
         self.turn_state = next_turn.clone();
-        return next_turn;
+        next_turn
     }
 
     fn snake_movement(&mut self,
@@ -133,7 +121,7 @@ impl<R: Rng> Game<R> {
         // Then below if no snake plan is set, we use a default error message.
         // While intricate this very neatly leads to CauseOfDeath.
 
-        for (name, snake) in next_turn.snakes.iter_mut() {
+        for (name, snake) in &mut next_turn.snakes {
             match moves.remove(name) {
                 Some(Ok(direction)) => {
                     snake.step_in_direction(direction);
@@ -152,7 +140,7 @@ impl<R: Rng> Game<R> {
     }
 
     fn snake_eating(&mut self, next_turn: &mut TurnState) {
-        for (name, snake) in next_turn.snakes.iter_mut() {
+        for (name, snake) in &mut next_turn.snakes {
             if next_turn.food.contains(&snake.segments[0]) {
                 // Remove this food only after the full loop, such that N snakes colliding on top of a
                 // food all grow. They immediately die but this way collision with growth of both snakes
@@ -164,7 +152,7 @@ impl<R: Rng> Game<R> {
     }
 
     fn snake_collisions(&mut self, next_turn: &mut TurnState) {
-        for (name, snake) in next_turn.snakes.iter() {
+        for (name, snake) in &next_turn.snakes {
             for (coll_player_name, coll_snake) in next_turn.snakes.iter() {
                 if snake != coll_snake && snake.has_collided_into(coll_snake) {
                     next_turn.casualties
@@ -177,8 +165,8 @@ impl<R: Rng> Game<R> {
     }
 
     fn snake_grid_bounds(&mut self, next_turn: &mut TurnState) {
-        for (name, snake) in next_turn.snakes.iter() {
-            for &segment in snake.segments.iter() {
+        for (name, snake) in &next_turn.snakes {
+            for &segment in &snake.segments {
                 if !self.game_state.grid.is_within_bounds(segment) {
                     next_turn.casualties
                         .insert(name.clone(), CauseOfDeath::CollidedWithBounds(segment));
@@ -190,7 +178,7 @@ impl<R: Rng> Game<R> {
     fn remove_snakes(&mut self, next_turn: &mut TurnState) {
         // N.B. At one point we .drain()ed the dead_snakes Set. This was removed so it
         // can be used to track which players were killed.
-        for (name, _) in next_turn.casualties.iter() {
+        for (name, _) in &next_turn.casualties {
             // Kill snake if not already killed, and drop food at non-head segments within the grid.
             // @TODO: This code is much cleaner than the last draft but still lots goes on here.
             if let Some(dead_snake) = next_turn.snakes.remove(name) {
@@ -208,7 +196,7 @@ impl<R: Rng> Game<R> {
     }
 
     fn manage_food(&mut self, next_turn: &mut TurnState) {
-        for (_, food) in next_turn.eaten.iter() {
+        for (_, food) in &next_turn.eaten {
             next_turn.food.remove(&food);
         }
 

@@ -35,8 +35,7 @@ impl VectorTrait for TriangleVector {
         // distance = abs(Δu) + abs(Δv) + abs(Δ(u+v+R))
         let du = (self.u - other.u).abs();
         let dv = (self.v - other.v).abs();
-        let d3 = (((self.u + self.v + (self.r as isize))) -
-                  ((other.u + other.v + (other.r as isize))))
+        let d3 = ((self.u + self.v + (self.r as isize)) - (other.u + other.v + (other.r as isize)))
             .abs();
         (du + dv + d3) as usize
     }
@@ -126,7 +125,7 @@ impl GridTrait for TriangleGrid {
         unimplemented!();
     }
 
-    fn random_cell<R: Rng>(&self, rng: &mut R) -> TriangleVector {
+    fn random_cell<R: Rng>(&self, _: &mut R) -> TriangleVector {
         unimplemented!();
     }
 }

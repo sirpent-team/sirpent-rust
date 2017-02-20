@@ -19,7 +19,7 @@ impl Snake {
     }
 
     pub fn is_head_at(&self, v: &Vector) -> bool {
-        self.segments.len() > 0 && self.segments[0] == *v
+        !self.segments.is_empty() && self.segments[0] == *v
     }
 
     pub fn has_segment_at(&self, v: &Vector) -> bool {
@@ -35,7 +35,7 @@ impl Snake {
             }
             next_candidate += my_head.distance(&here);
         }
-        return false;
+        false
     }
 
     pub fn step_in_direction(&mut self, dir: Direction) {

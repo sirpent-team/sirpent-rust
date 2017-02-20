@@ -7,7 +7,7 @@ use futures::{BoxFuture, Future, Sink};
 
 use clients::*;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum MessageMode<Id>
     where Id: Eq + Hash + Clone + Debug + Send
 {
