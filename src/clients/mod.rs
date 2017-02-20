@@ -39,6 +39,8 @@ pub enum Cmd {
     Close,
 }
 
+/// @TODO: This isn't actually raceable. Rather it only works if there's one
+/// reference.
 #[derive(Clone)]
 pub struct RaceableOneshotSender {
     inner: Option<Arc<oneshot::Sender<Msg>>>,
@@ -57,6 +59,19 @@ impl RaceableOneshotSender {
             }
         }
         false
+    }
+
+    pub fn poll_cancel(&mut self) -> Poll<(), ()> {
+        // @TODO:
+        if let Some(arc) = self.inner.take() {
+            if let Ok(mut sender) = Arc::try_unwrap(arc) {
+                let ret = sender.poll_cancel();
+                self.inner = Some(Arc::new(sender));
+                return ret;
+            }
+        }
+        // If the oneshot has been used then act as if the Receiver was dropped.
+        Ok(Async::Ready(()))
     }
 }
 
@@ -235,11 +250,21 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
         // Fourth see if we can forward any messages. We need a queued received message
         // *and* a queued oneshot to send it to.
         // N.B. Oneshot completes immediately with no need to keep polling.
-        if !self.msg_rx_queue.is_empty() && !self.msg_relay_tx_queue.is_empty() {
-            let msg_rx = self.msg_rx_queue.pop_front().unwrap();
+        // N.B. The while loop is to ensure we can keep ahead of incoming messages.
+        while !self.msg_rx_queue.is_empty() && !self.msg_relay_tx_queue.is_empty() {
             let mut relay_tx = self.msg_relay_tx_queue.pop_front().unwrap();
-            relay_tx.complete(msg_rx);
-        };
+            // Check if the oneshot::Sender still has an associated non-dropped Receiver.
+            match relay_tx.poll_cancel() {
+                // Drop this Sender if the Receiver is dropped.
+                Ok(Async::Ready(_)) | Err(_) => continue,
+                // If there is a corresponding Receiver still, then send the received message
+                // at the head of the queue.
+                Ok(Async::NotReady) => {
+                  let msg_rx = self.msg_rx_queue.pop_front().unwrap();
+                  relay_tx.complete(msg_rx);
+                }
+            }
+        }
 
         Ok(Async::NotReady)
     }
