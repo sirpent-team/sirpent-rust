@@ -256,12 +256,13 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
             // Check if the oneshot::Sender still has an associated non-dropped Receiver.
             match relay_tx.poll_cancel() {
                 // Drop this Sender if the Receiver is dropped.
-                Ok(Async::Ready(_)) | Err(_) => continue,
+                Ok(Async::Ready(_)) |
+                Err(_) => continue,
                 // If there is a corresponding Receiver still, then send the received message
                 // at the head of the queue.
                 Ok(Async::NotReady) => {
-                  let msg_rx = self.msg_rx_queue.pop_front().unwrap();
-                  relay_tx.complete(msg_rx);
+                    let msg_rx = self.msg_rx_queue.pop_front().unwrap();
+                    relay_tx.complete(msg_rx);
                 }
             }
         }

@@ -53,7 +53,7 @@ pub fn roman_numerals(mut value: u64) -> String {
             v if v >= 10 => ("X", 10),
             v if v >= 5 => ("V", 5),
             v if v >= 1 => ("I", 1),
-            _ => break
+            _ => break,
         };
         numerals.push_str(numeral);
         value -= sub;
