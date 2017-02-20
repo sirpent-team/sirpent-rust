@@ -161,18 +161,28 @@ fn server(listener: TcpListener,
 
 /// Find an unused name based upon the `desired_name`.
 fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: String) -> String {
-    let mut name = desired_name;
-    loop {
-        // Locked once each iteration to ensure nothing can be added between the uniqueness
-        // check and the insertion.
+    // Use the desired name if it's unused.
+    {
         let mut names_lock = names.lock().unwrap();
-        if names_lock.contains(&name) {
-            name += "_";
-        } else {
-            // Reserve the new name.
+        if !names_lock.contains(&desired_name) {
+            // Reserve this name.
+            names_lock.insert(desired_name.clone());
+            return desired_name;
+        }
+    }
+
+    // Find a unique name.
+    let mut n = 1;
+    loop {
+        let name = format!("{}_{}", desired_name, roman_numerals(n));
+        println!("{:?}", name);
+        let mut names_lock = names.lock().unwrap();
+        if !names_lock.contains(&name) {
+            // Reserve this name.
             names_lock.insert(name.clone());
             return name;
         }
+        n += 1;
     }
 }
 

@@ -42,6 +42,25 @@ pub fn retain_oks<O>(h: HashMap<String, Result<O>>) -> HashMap<String, O> {
         .collect()
 }
 
+pub fn roman_numerals(mut value: u64) -> String {
+    let mut numerals = "".to_string();
+    while value > 0 {
+        let (numeral, sub) = match value {
+            v if v >= 1000 => ("M", 1000),
+            v if v >= 500 => ("D", 500),
+            v if v >= 100 => ("C", 100),
+            v if v >= 50 => ("L", 50),
+            v if v >= 10 => ("X", 10),
+            v if v >= 5 => ("V", 5),
+            v if v >= 1 => ("I", 1),
+            _ => break
+        };
+        numerals.push_str(numeral);
+        value -= sub;
+    }
+    numerals
+}
+
 // Constants from https://github.com/rust-lang-deprecated/time/blob/master/src/duration.rs
 /// The number of nanoseconds in a millisecond.
 const NANOS_PER_MILLI: u64 = 1000_000;
