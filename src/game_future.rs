@@ -41,9 +41,9 @@ enum GameFutureStage<CmdSink>
     StartTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), io::Error>),
     AskMoves(BoxFuture<(HashMap<String, (Msg, CmdSink)>), io::Error>),
     AdvanceTurn(HashMap<String, Msg>),
-    NotifyDead(BoxFuture<HashMap<String, CmdSink>, io::Error>),
     LoopDecision,
-    Concluded,
+    Concluding(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), io::Error>),
+    EndOfGame,
 }
 
 enum GameFutureStageControl {
@@ -105,9 +105,11 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         let turn = self.game.as_ref().unwrap().turn_state.clone();
         let turn_msg = Msg::Turn { turn: turn };
 
-        let f1 = group_transmit(players, MessageMode::Constant(turn_msg.clone())).map(retain_oks);
-        let f2 = group_transmit(spectators, MessageMode::Constant(turn_msg)).map(retain_oks);
-        let turn_future = f1.join(f2).boxed();
+        let players_txing = group_transmit(players, MessageMode::Constant(turn_msg.clone()))
+            .map(retain_oks);
+        let spectators_txing = group_transmit(spectators, MessageMode::Constant(turn_msg))
+            .map(retain_oks);
+        let turn_future = players_txing.join(spectators_txing).boxed();
         return (StartTurn(turn_future), Continue);
     }
 
@@ -163,33 +165,24 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         let ref new_turn = self.game.as_ref().unwrap().turn_state;
         println!("Advanced turn to {:?}", new_turn.clone());
 
-        let mut players = self.players
-            .take()
-            .unwrap();
-        let (casualty_players, living_players) = players.drain()
-            .partition(|&(ref name, _)| new_turn.casualties.contains_key(name));
-        self.players = Some(living_players);
-        let die_future = group_transmit(casualty_players, MessageMode::Constant(Msg::Died))
-            .map(retain_oks)
-            .boxed();
-        return (GameFutureStage::NotifyDead(die_future), Continue);
-    }
-
-    fn notify_dead(&mut self,
-                   mut future: BoxFuture<HashMap<String, CmdSink>, io::Error>)
-                   -> GameFuturePollReturn<CmdSink> {
-        let casualty_players = match future.poll() {
-            Ok(Async::Ready(players)) => players,
-            _ => return (GameFutureStage::NotifyDead(future), Suspend),
-        };
-        self.players.as_mut().unwrap().extend(casualty_players.into_iter());
-
         return (GameFutureStage::LoopDecision, Continue);
     }
 
     fn loop_decision(&mut self) -> GameFuturePollReturn<CmdSink> {
         if self.game.as_ref().unwrap().concluded() {
-            return (GameFutureStage::Concluded, Continue);
+            let turn = self.game.as_ref().unwrap().turn_state.clone();
+            let game_over_msg = Msg::GameOver { turn: turn };
+
+            let players = self.players.take().unwrap();
+            let spectators = self.spectators.take().unwrap();
+
+            let players_txing = group_transmit(players,
+                                               MessageMode::Constant(game_over_msg.clone()))
+                .map(retain_oks);
+            let spectators_txing = group_transmit(spectators, MessageMode::Constant(game_over_msg))
+                .map(retain_oks);
+            let concluding_future = players_txing.join(spectators_txing).boxed();
+            return (GameFutureStage::Concluding(concluding_future), Continue);
         } else {
             // Returns players despite no future being run. Believed negligible-cost.
             let players = self.players.take().unwrap();
@@ -197,6 +190,20 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
             let players_done = future::ok((players, spectators)).boxed();
             return (GameFutureStage::ReadyForTurn(players_done), Continue);
         }
+    }
+
+    fn conclude(&mut self,
+                mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
+                                  io::Error>)
+                -> GameFuturePollReturn<CmdSink> {
+        let (players, spectators) = match future.poll() {
+            Ok(Async::Ready(pair)) => pair,
+            _ => return (GameFutureStage::StartTurn(future), Suspend),
+        };
+
+        self.players = Some(players);
+        self.spectators = Some(spectators);
+        return (GameFutureStage::EndOfGame, Continue);
     }
 }
 
@@ -218,9 +225,9 @@ impl<CmdSink, R> Future for GameFuture<CmdSink, R>
                 GameFutureStage::StartTurn(future) => self.start_turn(future),
                 GameFutureStage::AskMoves(future) => self.ask_moves(future),
                 GameFutureStage::AdvanceTurn(move_msgs) => self.advance_turn(move_msgs),
-                GameFutureStage::NotifyDead(future) => self.notify_dead(future),
                 GameFutureStage::LoopDecision => self.loop_decision(),
-                GameFutureStage::Concluded => {
+                GameFutureStage::Concluding(future) => self.conclude(future),
+                GameFutureStage::EndOfGame => {
                     let game = self.game.take().unwrap();
                     let players = self.players.take().unwrap();
                     let spectators = self.spectators.take().unwrap();

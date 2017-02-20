@@ -22,18 +22,12 @@ pub enum Msg {
         grid: Grid,
         timeout: Option<Duration>,
     },
-    #[serde(rename = "close")]
-    Close { reason: String },
     #[serde(rename = "new_game")]
     NewGame { game: GameState },
     #[serde(rename = "turn")]
     Turn { turn: TurnState },
     #[serde(rename = "move")]
     Move { direction: Direction },
-    #[serde(rename = "died")]
-    Died,
-    #[serde(rename = "won")]
-    Won,
     #[serde(rename = "game_over")]
     GameOver { turn: TurnState },
 }

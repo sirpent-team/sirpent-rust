@@ -47,14 +47,14 @@ impl<Id, CmdSink> Future for GroupReceiveTimeout<Id, CmdSink>
                 Ok(Async::Ready(Some(v))) => self.items.as_mut().unwrap().push(v),
                 Ok(Async::Ready(None)) => return Ok(Async::Ready(self.items.take().unwrap())),
                 Ok(Async::NotReady) => break,
-                Err(e) => return Err(io_error_from_error(e))
+                Err(e) => return Err(io_error_from_error(e)),
             }
         }
 
         match self.sleep.poll() {
             Ok(Async::Ready(())) => Ok(Async::Ready(self.items.take().unwrap())),
             Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => Err(io_error_from_error(e))
+            Err(e) => Err(io_error_from_error(e)),
         }
     }
 }
