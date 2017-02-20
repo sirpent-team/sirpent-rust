@@ -1,6 +1,9 @@
 use std::io;
 use std::error;
 use std::collections::HashMap;
+use futures::{Future, Stream, Sink, Poll, StartSend};
+
+use errors::*;
 
 pub fn io_error_from_str(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
@@ -14,7 +17,7 @@ pub fn io_error_broken_pipe() -> io::Error {
     io::Error::new(io::ErrorKind::BrokenPipe, "Broken channel.")
 }
 
-pub fn retain_oks<O, E>(h: HashMap<String, Result<O, E>>) -> HashMap<String, O> {
+pub fn retain_oks<O>(h: HashMap<String, Result<O>>) -> HashMap<String, O> {
     h.into_iter()
         .filter_map(|(id, result)| {
             match result {
@@ -23,4 +26,70 @@ pub fn retain_oks<O, E>(h: HashMap<String, Result<O, E>>) -> HashMap<String, O> 
             }
         })
         .collect()
+}
+
+pub fn map2error<S>(inner: S) -> MapToError<S> {
+    MapToError::new(inner)
+}
+
+pub struct MapToError<S> {
+    inner: S,
+}
+
+impl<S> MapToError<S> {
+    pub fn new(inner: S) -> MapToError<S> {
+        MapToError { inner: inner }
+    }
+}
+
+impl<S> Future for MapToError<S>
+    where S: Future,
+          S::Error: Into<Error>
+{
+    type Item = S::Item;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match self.inner.poll() {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+impl<S> Stream for MapToError<S>
+    where S: Stream,
+          S::Error: Into<Error>
+{
+    type Item = S::Item;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        match self.inner.poll() {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+impl<S> Sink for MapToError<S>
+    where S: Sink,
+          S::SinkError: Into<Error>
+{
+    type SinkItem = S::SinkItem;
+    type SinkError = Error;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        match self.inner.start_send(item) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        match self.inner.poll_complete() {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.into()),
+        }
+    }
 }

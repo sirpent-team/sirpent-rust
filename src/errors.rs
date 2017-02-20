@@ -27,6 +27,7 @@ error_chain! {
         FutureMpscSendCmd(::futures::sync::mpsc::SendError<Cmd>);
         FutureMpscSendMsg(::futures::sync::mpsc::SendError<Msg>);
         FutureOneshot(::futures::sync::oneshot::Canceled);
+        TokioTimer(::tokio_timer::TimerError);
     }
 
     // Define additional `ErrorKind` variants. The syntax here is

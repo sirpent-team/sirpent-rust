@@ -1,4 +1,3 @@
-use std::io;
 use std::hash::Hash;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -8,13 +7,11 @@ use futures::sync::oneshot;
 
 use clients::*;
 
-pub fn group_receive<Id, CmdSink>
-    (clients: HashMap<Id, CmdSink>,
-     timeout: Option<Duration>)
-     -> BoxFuture<HashMap<Id, Result<(Msg, CmdSink), CmdSink::SinkError>>, io::Error>
+pub fn group_receive<Id, CmdSink>(clients: HashMap<Id, CmdSink>,
+                                  timeout: Option<Duration>)
+                                  -> BoxFuture<HashMap<Id, Result<(Msg, CmdSink)>>, Error>
     where Id: Eq + Hash + Clone + Debug + Send + 'static,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
-          CmdSink::SinkError: Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     let vec_vec_results = match timeout {
         Some(timeout) => GroupReceiveTimeout::new(clients, timeout).boxed(),
@@ -29,17 +26,17 @@ pub fn group_receive<Id, CmdSink>
 
 pub struct GroupReceive<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     group_command: Option<GroupCommand<Id, CmdSink>>,
     ready_queue: HashMap<Id, oneshot::Receiver<Msg>>,
     receive_queue: VecDeque<(Id, CmdSink, oneshot::Receiver<Msg>)>,
-    completed: Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>,
+    completed: Vec<(Id, Result<(Msg, CmdSink)>)>,
 }
 
 impl<Id, CmdSink> GroupReceive<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     pub fn new(clients: HashMap<Id, CmdSink>) -> Self {
         let mut cmds = HashMap::new();
@@ -79,7 +76,13 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
             match oneshot_rx.poll() {
                 Ok(Async::Ready(msg)) => self.complete_client(client_id, Ok((msg, cmd_tx))),
                 Ok(Async::NotReady) => reenqueue.push_back((client_id, cmd_tx, oneshot_rx)),
-                Err(_) => unimplemented!(), //self.complete_client(client_id, Err(e)),
+                Err(e) => {
+                    self.complete_client(client_id,
+                                         Err(e).chain_err(|| {
+                                             "oneshot had been cancelled in GroupReceive receive \
+                                              queue"
+                                         }))
+                }
             }
         }
 
@@ -87,33 +90,35 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
         self.receive_queue.append(&mut reenqueue);
     }
 
-    fn enqueue_for_receive(&mut self,
-                           commanded_clients: Vec<(Id, Result<CmdSink, CmdSink::SinkError>)>) {
+    fn enqueue_for_receive(&mut self, commanded_clients: Vec<(Id, Result<CmdSink>)>) {
         for (client_id, result) in commanded_clients {
             match result {
                 Ok(cmd_tx) => {
                     let oneshot_rx = self.ready_queue.remove(&client_id).unwrap();
                     self.receive_queue.push_back((client_id, cmd_tx, oneshot_rx));
                 }
-                Err(e) => self.complete_client(client_id, Err(e)),
+                Err(e) => {
+                    self.complete_client(client_id,
+                                         Err(e).chain_err(|| {
+                                             "commanding receive errored in GroupReceive"
+                                         }))
+                }
             }
         }
     }
 
     /// Mark a client as complete. Nicer way to wrap taking out of Option.
-    fn complete_client(&mut self,
-                       client_id: Id,
-                       result: Result<(Msg, CmdSink), CmdSink::SinkError>) {
+    fn complete_client(&mut self, client_id: Id, result: Result<(Msg, CmdSink)>) {
         self.completed.push((client_id, result))
     }
 }
 
 impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
-    type Item = Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>;
-    type Error = io::Error;
+    type Item = Vec<(Id, Result<(Msg, CmdSink)>)>;
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         while let Some(mut group_command_) = self.group_command.take() {
@@ -133,7 +138,7 @@ impl<Id, CmdSink> Stream for GroupReceive<Id, CmdSink>
                 // If the GroupCommand errors, the logic of what to do is unclear.
                 // At the time of writing it can't error.
                 // @TODO: Decide good rules here.
-                Err(_) => unimplemented!(),
+                Err(e) => return Err(e).chain_err(|| "GroupCommand errored inside GroupReceive"),
             }
             self.group_command = Some(group_command_);
         }

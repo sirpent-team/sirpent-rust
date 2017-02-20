@@ -1,4 +1,3 @@
-use std::io;
 use std::hash::Hash;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -6,21 +5,20 @@ use std::collections::HashMap;
 use futures::{Future, Stream, Sink, Poll, Async};
 use tokio_timer::{Timer, Sleep};
 
-use utils::*;
 use clients::*;
 
 pub struct GroupReceiveTimeout<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     group_receive: GroupReceive<Id, CmdSink>,
-    items: Option<Vec<Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>>>,
+    items: Option<Vec<Vec<(Id, Result<(Msg, CmdSink)>)>>>,
     sleep: Sleep,
 }
 
 impl<Id, CmdSink> GroupReceiveTimeout<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     pub fn new(clients: HashMap<Id, CmdSink>, timeout: Duration) -> Self {
         GroupReceiveTimeout {
@@ -33,10 +31,10 @@ impl<Id, CmdSink> GroupReceiveTimeout<Id, CmdSink>
 
 impl<Id, CmdSink> Future for GroupReceiveTimeout<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
-    type Item = Vec<Vec<(Id, Result<(Msg, CmdSink), CmdSink::SinkError>)>>;
-    type Error = io::Error;
+    type Item = Vec<Vec<(Id, Result<(Msg, CmdSink)>)>>;
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         assert!(self.items.is_some());
@@ -47,14 +45,14 @@ impl<Id, CmdSink> Future for GroupReceiveTimeout<Id, CmdSink>
                 Ok(Async::Ready(Some(v))) => self.items.as_mut().unwrap().push(v),
                 Ok(Async::Ready(None)) => return Ok(Async::Ready(self.items.take().unwrap())),
                 Ok(Async::NotReady) => break,
-                Err(e) => return Err(io_error_from_error(e)),
+                Err(e) => bail!(e),
             }
         }
 
         match self.sleep.poll() {
             Ok(Async::Ready(())) => Ok(Async::Ready(self.items.take().unwrap())),
             Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => Err(io_error_from_error(e)),
+            Err(e) => bail!(e),
         }
     }
 }

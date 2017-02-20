@@ -1,4 +1,3 @@
-use std::io;
 use rand::Rng;
 use std::marker::Send;
 use std::time::Duration;
@@ -8,11 +7,11 @@ use futures::{future, Async, BoxFuture, Future, Sink, Poll};
 use net::*;
 use game::*;
 use utils::*;
+use errors::*;
 use clients::*;
 
 pub struct GameFuture<CmdSink, R>
-    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
-          CmdSink::SinkError: Send + 'static,
+    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
           R: Rng
 {
     game: Option<Game<R>>,
@@ -23,16 +22,15 @@ pub struct GameFuture<CmdSink, R>
 }
 
 enum GameFutureStage<CmdSink>
-    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
-          CmdSink::SinkError: Send + 'static
+    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     StartOfGame,
-    ReadyForTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), io::Error>),
-    StartTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), io::Error>),
-    AskMoves(BoxFuture<(HashMap<String, (Msg, CmdSink)>), io::Error>),
+    ReadyForTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
+    StartTurn(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
+    AskMoves(BoxFuture<(HashMap<String, (Msg, CmdSink)>), Error>),
     AdvanceTurn(HashMap<String, Msg>),
     LoopDecision,
-    Concluding(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), io::Error>),
+    Concluding(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
     EndOfGame,
 }
 
@@ -47,8 +45,7 @@ use self::GameFutureStageControl::*;
 type GameFuturePollReturn<CmdSink> = (GameFutureStage<CmdSink>, GameFutureStageControl);
 
 impl<CmdSink, R> GameFuture<CmdSink, R>
-    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
-          CmdSink::SinkError: Send + 'static,
+    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
           R: Rng
 {
     pub fn new(mut game: Game<R>,
@@ -85,7 +82,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
     fn ready_for_turn(&mut self,
                       mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                            io::Error>)
+                                            Error>)
                       -> GameFuturePollReturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
@@ -105,7 +102,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
     fn start_turn(&mut self,
                   mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                        io::Error>)
+                                        Error>)
                   -> GameFuturePollReturn<CmdSink> {
         let (mut players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
@@ -123,7 +120,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
     }
 
     fn ask_moves(&mut self,
-                 mut future: BoxFuture<(HashMap<String, (Msg, CmdSink)>), io::Error>)
+                 mut future: BoxFuture<(HashMap<String, (Msg, CmdSink)>), Error>)
                  -> GameFuturePollReturn<CmdSink> {
         let mut answers = match future.poll() {
             Ok(Async::Ready(answers)) => answers,
@@ -184,7 +181,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
     fn conclude(&mut self,
                 mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                      io::Error>)
+                                      Error>)
                 -> GameFuturePollReturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
@@ -198,8 +195,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 }
 
 impl<CmdSink, R> Future for GameFuture<CmdSink, R>
-    where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
-          CmdSink::SinkError: Send + 'static,
+    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
           R: Rng
 {
     type Item = (Game<R>, HashMap<String, CmdSink>, HashMap<String, CmdSink>);

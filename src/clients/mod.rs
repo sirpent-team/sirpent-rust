@@ -6,7 +6,7 @@ use futures::{Future, Stream, Sink, Poll, Async, AsyncSink};
 use futures::sync::{mpsc, oneshot};
 
 use net::*;
-use utils::*;
+use errors::*;
 
 pub mod command;
 pub mod receive;
@@ -62,8 +62,8 @@ impl RaceableOneshotSender {
 
 pub struct Client<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream>
     where Id: Eq + Hash + Clone,
-          ClientMsgSink: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static,
+          ClientMsgSink: Sink<SinkItem = Msg, SinkError = Error> + 'static,
+          ClientMsgStream: Stream<Item = Msg, Error = Error> + 'static,
           ServerCmdStream: Stream<Item = Cmd, Error = ()> + 'static
 {
     pub client_id: Id,
@@ -81,8 +81,8 @@ impl<Id, ClientMsgSink, ClientMsgStream> Client<Id,
                                                 ClientMsgStream,
                                                 mpsc::Receiver<Cmd>>
     where Id: Eq + Hash + Clone,
-          ClientMsgSink: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static
+          ClientMsgSink: Sink<SinkItem = Msg, SinkError = Error> + 'static,
+          ClientMsgStream: Stream<Item = Msg, Error = Error> + 'static
 {
     pub fn bounded
         (client_id: Id,
@@ -110,8 +110,8 @@ impl<Id, ClientMsgSink, ClientMsgStream> Client<Id,
                                                 ClientMsgStream,
                                                 mpsc::UnboundedReceiver<Cmd>>
     where Id: Eq + Hash + Clone,
-          ClientMsgSink: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static
+          ClientMsgSink: Sink<SinkItem = Msg, SinkError = Error> + 'static,
+          ClientMsgStream: Stream<Item = Msg, Error = Error> + 'static
 {
     pub fn unbounded(client_id: Id,
                      client_tx: ClientMsgSink,
@@ -140,14 +140,14 @@ impl<Id, ClientMsgSink, ClientMsgStream> Client<Id,
 impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
     for Client<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream>
     where Id: Eq + Hash + Clone,
-          ClientMsgSink: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          ClientMsgStream: Stream<Item = Msg, Error = io::Error> + 'static,
+          ClientMsgSink: Sink<SinkItem = Msg, SinkError = Error> + 'static,
+          ClientMsgStream: Stream<Item = Msg, Error = Error> + 'static,
           ServerCmdStream: Stream<Item = Cmd, Error = ()> + 'static
 {
     type Item = ();
-    type Error = io::Error;
+    type Error = Error;
 
-    fn poll(&mut self) -> Poll<(), io::Error> {
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         // First check for anything being instructed.
         // This is first because it provides possible messages to send and possible places
         // to send messages - both needed later.
@@ -159,8 +159,8 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                         Cmd::Transmit(msg_tx) => {
                             if let Some(queue_limit) = self.queue_limit {
                                 if self.msg_tx_queue.len() >= queue_limit {
-                                    return Err(io_error_from_str("Tried to exceed msg tx queue \
-                                                               capacity."));
+                                    bail!("Tried to exceed msg tx queue \
+                                                               capacity.");
                                 }
                             }
                             self.msg_tx_queue.push_back(msg_tx)
@@ -169,8 +169,8 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                         Cmd::ReceiveInto(msg_relay_tx) => {
                             if let Some(queue_limit) = self.queue_limit {
                                 if self.msg_relay_tx_queue.len() >= queue_limit {
-                                    return Err(io_error_from_str("Tried to exceed msg relay tx \
-                                                               queue capacity."));
+                                    bail!("Tried to exceed msg relay tx \
+                                                               queue capacity.");
                                 }
                             }
                             self.msg_relay_tx_queue.push_back(msg_relay_tx)
@@ -185,7 +185,7 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                     };
                     continue;
                 }
-                Ok(Async::Ready(None)) => return Err(broken_pipe()),
+                Ok(Async::Ready(None)) => bail!(broken_pipe()),
                 Err(()) => unreachable!(),
                 Ok(Async::NotReady) => break,
             }
@@ -203,18 +203,18 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                     }
                     // Go flush the loop if the sender's internal buffer is full.
                     Ok(AsyncSink::NotReady(_)) => break,
-                    Err(e) => return Err(e.into()),
+                    Err(e) => bail!(e),
                 };
             }
             // Start flushing the sender's internal buffer.
             match self.client_tx.poll_complete() {
                 Ok(Async::Ready(())) | Ok(Async::NotReady) => {}
-                Err(e) => return Err(e.into()),
+                Err(e) => bail!(e),
             };
         }
         match self.client_tx.poll_complete() {
             Ok(Async::Ready(())) | Ok(Async::NotReady) => {}
-            Err(e) => return Err(e.into()),
+            Err(e) => bail!(e),
         };
 
         // Third see if there's anything to read from the client.
@@ -222,13 +222,13 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
             Ok(Async::Ready(Some(msg_rx))) => {
                 if let Some(queue_limit) = self.queue_limit {
                     if self.msg_rx_queue.len() >= queue_limit {
-                        return Err(io_error_from_str("Tried to exceed msg rx queue capacity."));
+                        bail!("Tried to exceed msg rx queue capacity.");
                     }
                 }
                 self.msg_rx_queue.push_back(msg_rx)
             }
-            Ok(Async::Ready(None)) => return Err(broken_pipe()),
-            Err(e) => return Err(e.into()),
+            Ok(Async::Ready(None)) => bail!(broken_pipe()),
+            Err(e) => bail!(e),
             _ => {}
         };
 
@@ -247,8 +247,8 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
 
 impl<I, S, T, C> Drop for Client<I, S, T, C>
     where I: Eq + Hash + Clone,
-          S: Sink<SinkItem = Msg, SinkError = io::Error> + 'static,
-          T: Stream<Item = Msg, Error = io::Error> + 'static,
+          S: Sink<SinkItem = Msg, SinkError = Error> + 'static,
+          T: Stream<Item = Msg, Error = Error> + 'static,
           C: Stream<Item = Cmd, Error = ()> + 'static
 {
     fn drop(&mut self) {

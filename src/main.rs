@@ -47,9 +47,9 @@ fn main() {
     let timeout: Option<Duration> = Some(Duration::from_secs(5));
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>> =
+    let players: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>> =
         Arc::new(Mutex::new(HashMap::new()));
-    let spectators: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>> =
+    let spectators: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     // Run TCP server to welcome clients and register them as players.
@@ -89,12 +89,12 @@ fn server(listener: TcpListener,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
           timeout: Option<Duration>,
-          players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
-          spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>)
+          players_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>,
+          spectators_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>)
           -> Box<Future<Item = (), Error = ()>> {
     let clients = listener.incoming()
         .map(move |(socket, addr)| {
-            let msg_transport = socket.framed(MsgCodec);
+            let msg_transport = map2error(socket.framed(MsgCodec));
             let (tx, rx) = msg_transport.split();
             (tx, rx, addr)
         });
@@ -148,10 +148,10 @@ fn server(listener: TcpListener,
 
                 match kind {
                     ClientKind::Spectator => {
-                        spectators_ref.lock().unwrap().insert(name, command_tx);
+                        spectators_ref.lock().unwrap().insert(name, map2error(command_tx));
                     }
                     ClientKind::Player => {
-                        players_ref.lock().unwrap().insert(name, command_tx);
+                        players_ref.lock().unwrap().insert(name, map2error(command_tx));
                     }
                 }
                 ()
@@ -189,8 +189,9 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 
 fn play_games(_: Arc<Mutex<HashSet<String>>>,
               grid: Grid,
-              players_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
-              spectators_pool: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Cmd>>>>,
+              players_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>,
+              spectators_pool: Arc<Mutex<HashMap<String,
+                                                 MapToError<mpsc::UnboundedSender<Cmd>>>>>,
               timer: Timer,
               timeout: Option<Duration>)
               -> BoxFuture<(), ()> {

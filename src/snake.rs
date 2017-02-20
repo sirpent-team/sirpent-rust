@@ -1,6 +1,5 @@
-use std::io;
-
 use grids::*;
+use errors::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct Snake {
@@ -65,8 +64,8 @@ pub enum CauseOfDeath {
     CollidedWithBounds(Vector),
 }
 
-impl From<io::Error> for CauseOfDeath {
-    fn from(io_err: io::Error) -> CauseOfDeath {
+impl From<Error> for CauseOfDeath {
+    fn from(io_err: Error) -> CauseOfDeath {
         CauseOfDeath::NoMoveMade(format!("{}", io_err))
     }
 }

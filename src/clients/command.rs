@@ -1,4 +1,3 @@
-use std::io;
 use std::hash::Hash;
 use std::fmt::Debug;
 use std::collections::{HashMap, VecDeque};
@@ -19,13 +18,11 @@ pub enum CommandMode<Id>
 /// Sends `Cmd` down a group of `Sink`s. Intended for sending an arbitrary command
 /// to a group of clients. Can send the same message to every client or a different
 /// message for each client - see `CommandMode`.
-pub fn group_command<Id, CmdSink>
-    (clients: HashMap<Id, CmdSink>,
-     cmds: CommandMode<Id>)
-     -> BoxFuture<HashMap<Id, Result<CmdSink, CmdSink::SinkError>>, io::Error>
+pub fn group_command<Id, CmdSink>(clients: HashMap<Id, CmdSink>,
+                                  cmds: CommandMode<Id>)
+                                  -> BoxFuture<HashMap<Id, Result<CmdSink>>, Error>
     where Id: Eq + Hash + Clone + Debug + Send + 'static,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
-          CmdSink::SinkError: Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     // @TODO: Try to squash the `Vec<Vec<_>>` somehow.
     GroupCommand::new(clients, cmds)
@@ -42,16 +39,16 @@ pub fn group_command<Id, CmdSink>
 /// group has completed.
 pub struct GroupCommand<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     send_queue: VecDeque<((Id, CmdSink), Cmd)>,
     flushing_queue: VecDeque<(Id, CmdSink)>,
-    completed: Vec<(Id, Result<CmdSink, CmdSink::SinkError>)>,
+    completed: Vec<(Id, Result<CmdSink>)>,
 }
 
 impl<Id, CmdSink> GroupCommand<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
     pub fn new(mut clients: HashMap<Id, CmdSink>, mut cmds: CommandMode<Id>) -> Self {
         // Drain clients into a queue for each to be sent `cmd`.
@@ -96,7 +93,10 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
                 Ok(AsyncSink::NotReady(cmd)) => reenqueue.push_back(((client_id, cmd_tx), cmd)),
                 // If sending the command errored, we can assume the Sink is forever unable to accept
                 // further items. We let the Sink drop and record this failure.
-                Err(e) => self.complete_client(client_id, Err(e)),
+                Err(e) => {
+                    self.complete_client(client_id,
+                                         Err(e).chain_err(|| "sending along cmd_tx errored"))
+                }
             };
         }
 
@@ -121,7 +121,10 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
                 Ok(Async::NotReady) => reenqueue.push_back((client_id, cmd_tx)),
                 // If polling the Sink errored, we can assume the Sink is forever unable to make progress.
                 // We let the Sink drop and record this failure.
-                Err(e) => self.complete_client(client_id, Err(e)),
+                Err(e) => {
+                    self.complete_client(client_id,
+                                         Err(e).chain_err(|| "flushing of cmd_tx errored"))
+                }
             };
         }
 
@@ -130,17 +133,17 @@ impl<Id, CmdSink> GroupCommand<Id, CmdSink>
     }
 
     /// Mark a client as complete. Nicer way to wrap taking out of Option.
-    fn complete_client(&mut self, client_id: Id, result: Result<CmdSink, CmdSink::SinkError>) {
+    fn complete_client(&mut self, client_id: Id, result: Result<CmdSink>) {
         self.completed.push((client_id, result))
     }
 }
 
 impl<Id, CmdSink> Stream for GroupCommand<Id, CmdSink>
     where Id: Eq + Hash + Clone + Debug + Send,
-          CmdSink: Sink<SinkItem = Cmd> + Send + 'static
+          CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
 {
-    type Item = Vec<(Id, Result<CmdSink, CmdSink::SinkError>)>;
-    type Error = io::Error;
+    type Item = Vec<(Id, Result<CmdSink>)>;
+    type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         self.poll_the_send_queue();

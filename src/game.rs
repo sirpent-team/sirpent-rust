@@ -1,10 +1,10 @@
-use std::io;
 use rand::Rng;
 use uuid::Uuid;
 use std::collections::{HashSet, HashMap};
 
 use grids::*;
 use snake::*;
+use errors::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
@@ -80,7 +80,7 @@ impl<R: Rng> Game<R> {
         }
     }
 
-    pub fn advance_turn(&mut self, moves: HashMap<String, io::Result<Direction>>) -> TurnState {
+    pub fn advance_turn(&mut self, moves: HashMap<String, Result<Direction>>) -> TurnState {
         let mut next_turn: TurnState = self.turn_state.clone();
 
         // N.B. does not free memory.
@@ -114,7 +114,7 @@ impl<R: Rng> Game<R> {
 
     fn snake_movement(&mut self,
                       next_turn: &mut TurnState,
-                      mut moves: HashMap<String, io::Result<Direction>>) {
+                      mut moves: HashMap<String, Result<Direction>>) {
         // Apply movement and remove snakes that did not move.
         // Snake plans are Result<Direction, MoveError>. MoveError = String.
         // So we can specify an underlying error rather than just omitting any move.
@@ -153,7 +153,7 @@ impl<R: Rng> Game<R> {
 
     fn snake_collisions(&mut self, next_turn: &mut TurnState) {
         for (name, snake) in &next_turn.snakes {
-            for (coll_player_name, coll_snake) in next_turn.snakes.iter() {
+            for (coll_player_name, coll_snake) in &next_turn.snakes {
                 if snake != coll_snake && snake.has_collided_into(coll_snake) {
                     next_turn.casualties
                         .insert(name.clone(),
@@ -178,7 +178,7 @@ impl<R: Rng> Game<R> {
     fn remove_snakes(&mut self, next_turn: &mut TurnState) {
         // N.B. At one point we .drain()ed the dead_snakes Set. This was removed so it
         // can be used to track which players were killed.
-        for (name, _) in &next_turn.casualties {
+        for name in next_turn.casualties.keys() {
             // Kill snake if not already killed, and drop food at non-head segments within the grid.
             // @TODO: This code is much cleaner than the last draft but still lots goes on here.
             if let Some(dead_snake) = next_turn.snakes.remove(name) {
@@ -196,7 +196,7 @@ impl<R: Rng> Game<R> {
     }
 
     fn manage_food(&mut self, next_turn: &mut TurnState) {
-        for (_, food) in &next_turn.eaten {
+        for food in next_turn.eaten.values() {
             next_turn.food.remove(&food);
         }
 
