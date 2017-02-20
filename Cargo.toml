@@ -26,3 +26,7 @@ square = []
 hexagon = []
 triangle = []
 dev = ["clippy"]
+
+[[bin]]
+name = "sirpent"
+doc = false
