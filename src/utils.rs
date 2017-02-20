@@ -1,9 +1,17 @@
 use std::io;
 use std::error;
+use serde_json;
+use serde::Serialize;
 use std::collections::HashMap;
 use futures::{Future, Stream, Sink, Poll, StartSend};
 
 use errors::*;
+
+pub fn json<T>(value: T) -> Result<String>
+    where T: Serialize
+{
+    serde_json::to_string(&value).chain_err(|| "serialising into json")
+}
 
 pub fn io_error_from_str(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)

@@ -106,16 +106,9 @@ fn server(listener: TcpListener,
             let spectators_ref = spectators_pool.clone();
 
             let fut = msg_tx.send(Msg::version())
-                .map_err(|e| {
-                    println!("{:?}", e);
-                    ()
-                })
                 .and_then(move |msg_tx| {
                     msg_rx.into_future()
-                        .map_err(|(e, _)| {
-                            println!("{:?}", e);
-                            ()
-                        })
+                        .map_err(|(e, _)| e)
                         .and_then(move |(msg, msg_rx)| {
                             if let Some(Msg::Register { desired_name, kind }) = msg {
                                 let name = find_unique_name(&mut names_ref, desired_name);
@@ -126,14 +119,10 @@ fn server(listener: TcpListener,
                                 };
                                 msg_tx.send(welcome_msg)
                                     .map(move |msg_tx| (msg_tx, msg_rx, addr, name, kind))
-                                    .map_err(|e| {
-                                        println!("{:?}", e);
-                                        ()
-                                    })
                                     .boxed()
                             } else {
                                 println!("{:?}", msg);
-                                future::err(()).boxed()
+                                future::err("message was not a Msg::Register".into()).boxed()
                             }
                         })
                 });
@@ -195,10 +184,7 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
               timer: Timer,
               timeout: Option<Duration>)
               -> BoxFuture<(), ()> {
-    Box::new(future::loop_fn((),
-                             move |_| -> BoxFuture<future::Loop<(), ()>, future::Loop<(), ()>> {
-        let game = Game::new(OsRng::new().unwrap(), grid);
-
+    Box::new(future::loop_fn((), move |_| {
         let players_ref = players_pool.clone();
         let spectators_ref = spectators_pool.clone();
 
@@ -206,33 +192,32 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
             println!("Not enough players yet. Waiting 10 seconds.");
             return timer.sleep(Duration::from_secs(10))
                 .map(|_| future::Loop::Continue(()))
-                .map_err(|_| future::Loop::Break(()))
+                .map_err(|_| ())
                 .boxed();
         }
 
-        let mut players_lock = players_pool.lock().unwrap();
-        let players = players_lock.drain().collect();
+        // Acquire players and spectators from those available.
+        // @TODO: Once drained, check we still have sufficient players. No lock between
+        // the waiting loop above and now.
+        let mut players = players_pool.lock().unwrap();
+        let mut spectators = spectators_pool.lock().unwrap();
+        let players = players.drain().collect();
+        let spectators = spectators.drain().collect();
 
-        let mut spectators_lock = spectators_pool.lock().unwrap();
-        let spectators = spectators_lock.drain().collect();
-
+        let game = Game::new(OsRng::new().unwrap(), grid);
         GameFuture::new(game, players, spectators, timeout)
             .map(move |(game, players, spectators)| {
                 println!("End of game! {:?} {:?}", game.game_state, game.turn_state);
 
-                let mut players_lock = players_ref.lock().unwrap();
-                let mut players = players.into_iter();
-                players_lock.extend(&mut players);
-
-                let mut spectators_lock = spectators_ref.lock().unwrap();
-                let mut spectators = spectators.into_iter();
-                spectators_lock.extend(&mut spectators);
+                // Return players and spectators to the waiting pool.
+                let mut players_pool = players_ref.lock().unwrap();
+                let mut spectators_pool = spectators_ref.lock().unwrap();
+                players_pool.extend(&mut players.into_iter());
+                spectators_pool.extend(&mut spectators.into_iter());
 
                 future::Loop::Continue(())
             })
-            .map_err(|_| future::Loop::Break(()))
+            .map_err(|_| ())
             .boxed()
-    })
-        .map(|_| ())
-        .map_err(|_| ()))
+    }))
 }
