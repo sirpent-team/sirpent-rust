@@ -55,6 +55,19 @@ impl<Id, CmdSink> GroupReceive<Id, CmdSink>
         }
     }
 
+    /// This takes out all the clients in the receive queue - those where the request
+    /// to receive a message has been processed. The `oneshot::Receiver` is dropped,
+    /// such that messages won't be queued onto it once this happens.
+    ///
+    /// The stream may have successful elements to poll after calling this.
+    pub fn extract_receive_queue(&mut self) -> Vec<(Id, CmdSink)> {
+        // Try to minimise chance of dropped messages by polling receive queue.
+        self.poll_the_receive_queue();
+
+        // Drain the receive queue and discard the `oneshot::Receiver`.
+        self.receive_queue.drain(..).map(|(client_id, cmd_tx, _)| (client_id, cmd_tx)).collect()
+    }
+
     fn new_client_oneshot() -> (Cmd, oneshot::Receiver<Msg>) {
         // Create a oneshot channel for the received message to be passed back to us on.
         let (oneshot_tx, oneshot_rx) = oneshot::channel();
