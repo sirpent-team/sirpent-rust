@@ -114,7 +114,7 @@ fn server(listener: TcpListener,
                                 let name = find_unique_name(&mut names_ref, desired_name);
                                 let welcome_msg = Msg::Welcome {
                                     name: name.clone(),
-                                    grid: grid.clone(),
+                                    grid: grid.clone().into(),
                                     timeout_millis: timeout,
                                 };
                                 msg_tx.send(welcome_msg)

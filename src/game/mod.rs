@@ -14,6 +14,7 @@ pub use future::*;
 #[derive(Debug)]
 pub struct Game<R: Rng> {
     pub rng: Box<R>,
+    pub grid: Grid,
     pub game_state: GameState,
     pub round_state: RoundState,
 }
@@ -22,6 +23,7 @@ impl<R: Rng> Game<R> {
     pub fn new(rng: R, grid: Grid) -> Self {
         let mut game = Game {
             rng: Box::new(rng),
+            grid: grid.clone(),
             game_state: GameState::new(grid),
             round_state: RoundState::default(),
         };
@@ -43,7 +45,7 @@ impl<R: Rng> Game<R> {
         // Reserve the new name.
         self.game_state.players.insert(final_name.clone());
         // Generate and insert a snake.
-        let head = self.game_state.grid.random_cell(&mut *self.rng);
+        let head = self.grid.random_cell(&mut *self.rng);
         let snake = Snake::new(vec![head]);
         self.round_state.snakes.insert(final_name.clone(), snake);
 
@@ -105,12 +107,8 @@ impl<R: Rng> Game<R> {
                     snake.step_in_direction(direction);
                     next_round.directions.insert(name.clone(), direction);
                 }
-                Some(Err(e)) => {
-                    let cause_of_death = CauseOfDeath::from(e);
-                    next_round.casualties.insert(name.clone(), cause_of_death);
-                }
-                None => {
-                    let cause_of_death = CauseOfDeath::NoMoveMade("".to_string());
+                _ => {
+                    let cause_of_death = CauseOfDeath::NoMoveMade;
                     next_round.casualties.insert(name.clone(), cause_of_death);
                 }
             }
@@ -131,11 +129,10 @@ impl<R: Rng> Game<R> {
 
     fn snake_collisions(&mut self, next_round: &mut RoundState) {
         for (name, snake) in &next_round.snakes {
-            for (coll_player_name, coll_snake) in &next_round.snakes {
+            for (_, coll_snake) in &next_round.snakes {
                 if snake != coll_snake && snake.has_collided_into(coll_snake) {
                     next_round.casualties
-                        .insert(name.clone(),
-                                CauseOfDeath::CollidedWithSnake(coll_player_name.clone()));
+                        .insert(name.clone(), CauseOfDeath::CollidedWithSnake);
                     break;
                 }
             }
@@ -145,9 +142,9 @@ impl<R: Rng> Game<R> {
     fn snake_grid_bounds(&mut self, next_round: &mut RoundState) {
         for (name, snake) in &next_round.snakes {
             for &segment in &snake.segments {
-                if !self.game_state.grid.is_within_bounds(segment) {
+                if !self.grid.is_within_bounds(segment) {
                     next_round.casualties
-                        .insert(name.clone(), CauseOfDeath::CollidedWithBounds(segment));
+                        .insert(name.clone(), CauseOfDeath::CollidedWithBounds);
                 }
             }
         }
@@ -165,7 +162,7 @@ impl<R: Rng> Game<R> {
                     // Only retain segments if within grid.
                     // @TODO: Move this to food management?
                     let corpse_food: Vec<&Vector> = headless_segments.iter()
-                        .filter(|&s| self.game_state.grid.is_within_bounds(*s))
+                        .filter(|&s| self.grid.is_within_bounds(*s))
                         .collect();
                     next_round.food.extend(corpse_food);
                 }
@@ -179,7 +176,7 @@ impl<R: Rng> Game<R> {
         }
 
         if next_round.food.len() < 1 {
-            let new_food = self.game_state.grid.random_cell(&mut *self.rng);
+            let new_food = self.grid.random_cell(&mut *self.rng);
             next_round.food.insert(new_food);
         }
     }

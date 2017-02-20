@@ -2,6 +2,10 @@ use rand::Rng;
 use std::fmt::Debug;
 use serde::{Serialize, Deserialize};
 
+use grids::hexagon::*;
+use grids::square::*;
+use grids::triangle::*;
+
 pub trait DirectionTrait
     : PartialEq + Eq + Copy + Serialize + Deserialize + Clone + Debug {
     fn variants() -> &'static [Self];
@@ -24,4 +28,33 @@ pub trait GridTrait
     fn is_within_bounds(&self, v: Self::Vector) -> bool;
     fn cells(&self) -> Vec<Self::Vector>;
     fn random_cell<R: Rng>(&self, rng: &mut R) -> Self::Vector;
+}
+
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "tiling")]
+pub enum GridEnum {
+    #[serde(rename = "hexagon")]
+    Hexagon(HexagonGrid),
+    #[serde(rename = "square")]
+    Square(SquareGrid),
+    #[serde(rename = "triangle")]
+    Triangle(TriangleGrid),
+}
+
+impl From<HexagonGrid> for GridEnum {
+    fn from(grid: HexagonGrid) -> GridEnum {
+        GridEnum::Hexagon(grid)
+    }
+}
+
+impl From<SquareGrid> for GridEnum {
+    fn from(grid: SquareGrid) -> GridEnum {
+        GridEnum::Square(grid)
+    }
+}
+
+impl From<TriangleGrid> for GridEnum {
+    fn from(grid: TriangleGrid) -> GridEnum {
+        GridEnum::Triangle(grid)
+    }
 }

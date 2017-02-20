@@ -7,7 +7,7 @@ use snake::*;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
     pub uuid: Uuid,
-    pub grid: Grid,
+    pub grid: GridEnum,
     pub players: HashSet<String>,
 }
 
@@ -15,7 +15,7 @@ impl GameState {
     pub fn new(grid: Grid) -> GameState {
         GameState {
             uuid: Uuid::new_v4(),
-            grid: grid,
+            grid: grid.into(),
             players: HashSet::new(),
         }
     }

@@ -21,7 +21,7 @@ pub enum Msg {
     #[serde(rename = "welcome")]
     Welcome {
         name: String,
-        grid: Grid,
+        grid: GridEnum,
         timeout_millis: Option<Milliseconds>,
     },
     #[serde(rename = "game")]

@@ -1,5 +1,4 @@
 use grids::*;
-use errors::*;
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize)]
 pub struct Snake {
@@ -59,15 +58,12 @@ impl Snake {
 // CauseOfDeath converts MoveError to a String in order to be serialisable/deserialisable.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CauseOfDeath {
-    NoMoveMade(String),
-    CollidedWithSnake(String),
-    CollidedWithBounds(Vector),
-}
-
-impl From<Error> for CauseOfDeath {
-    fn from(io_err: Error) -> CauseOfDeath {
-        CauseOfDeath::NoMoveMade(format!("{}", io_err))
-    }
+    #[serde(rename = "no_move_made")]
+    NoMoveMade,
+    #[serde(rename = "collided_with_snake")]
+    CollidedWithSnake,
+    #[serde(rename = "collided_with_bounds")]
+    CollidedWithBounds,
 }
 
 #[cfg(test)]
