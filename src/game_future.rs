@@ -5,20 +5,10 @@ use std::time::Duration;
 use std::collections::HashMap;
 use futures::{future, Async, BoxFuture, Future, Sink, Poll};
 
-use game::*;
 use net::*;
+use game::*;
+use utils::*;
 use clients::*;
-
-fn retain_oks<O, E>(h: HashMap<String, Result<O, E>>) -> HashMap<String, O> {
-    h.into_iter()
-        .filter_map(|(id, result)| {
-            match result {
-                Ok(o) => Some((id, o)),
-                Err(_) => None,
-            }
-        })
-        .collect()
-}
 
 pub struct GameFuture<CmdSink, R>
     where CmdSink: Sink<SinkItem = Cmd> + Send + 'static,
@@ -194,7 +184,7 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
 
     fn conclude(&mut self,
                 mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                  io::Error>)
+                                      io::Error>)
                 -> GameFuturePollReturn<CmdSink> {
         let (players, spectators) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,

@@ -35,6 +35,7 @@ pub enum ClientKind {
 pub enum Cmd {
     Transmit(Msg),
     ReceiveInto(RaceableOneshotSender),
+    DiscardReceiveBuffer,
     Close,
 }
 
@@ -173,6 +174,9 @@ impl<Id, ClientMsgSink, ClientMsgStream, ServerCmdStream> Future
                                 }
                             }
                             self.msg_relay_tx_queue.push_back(msg_relay_tx)
+                        }
+                        Cmd::DiscardReceiveBuffer => {
+                            self.msg_rx_queue.drain(..);
                         }
                         Cmd::Close => {
                             // @TODO: Implement.

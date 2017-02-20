@@ -23,7 +23,6 @@ use tokio_core::io::Io;
 use tokio_timer::Timer;
 
 use sirpent::*;
-use sirpent::clients::*;
 
 fn main() {
     drop(env_logger::init());

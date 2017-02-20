@@ -27,6 +27,8 @@ pub use snake::*;
 pub use net::*;
 pub use game::*;
 pub use game_future::*;
+pub use clients::*;
+pub use utils::*;
 
 #[cfg(test)]
 mod tests {
