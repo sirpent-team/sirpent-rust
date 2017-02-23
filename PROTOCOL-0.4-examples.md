@@ -34,14 +34,14 @@
 
 
 ``` json
-{"msg": "version", "sirpent": "X.X.X", "protocol": "0.4"}
-{"msg": "register", "desired_name": "your_players_name", "kind": "player"}
-{"msg": "register", "desired_name": "your_players_name", "kind": "spectator"}
-{"msg": "welcome", "name": "your_players_name_", "grid": _, "timeout_millis": 5000}
-{"msg": "game", "game": _}
-{"msg": "round", "round": _, "game_uuid": "123e4567-e89b-12d3-a456-426655440000"}
-{"msg": "move", "direction": "north"}
-{"msg": "outcome", "winners": ["player1"], "conclusion": _, "game_uuid": "123e4567-e89b-12d3-a456-426655440000"}
+{"kind": "version", "data": {"sirpent": "X.X.X", "protocol": "0.4"}}
+{"kind": "register", "data": {"desired_name": "your_players_name", "kind": "player"}}
+{"kind": "register", "data": {"desired_name": "your_players_name", "kind": "spectator"}}
+{"kind": "welcome", "data": {"name": "your_players_name_", "grid": _, "timeout_millis": 5000}}
+{"kind": "game", "data": {"game": _}}
+{"kind": "round", "data": {"round": _, "game_uuid": "123e4567-e89b-12d3-a456-426655440000"}}
+{"kind": "move", "data": {"direction": "north"}}
+{"kind": "outcome", "data": {"winners": ["player1"], "conclusion": _, "game_uuid": "123e4567-e89b-12d3-a456-426655440000"}}
 ```
 
 ``` json

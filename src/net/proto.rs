@@ -31,10 +31,10 @@ impl Codec for MsgCodec {
                 Err(_) => return Err(io_error_from_str("invalid string")),
             };
 
-            let msg: Result<Msg, serde_json::Error> = serde_json::from_str(line);
-            return match msg {
+            // Attempt JSON decode into Msg.
+            return match serde_json::from_str(line) {
                 Ok(msg) => Ok(Some(msg)),
-                Err(e) => Err(io_error_from_error(e)),
+                Err(e) => Err(io_error_from_error(e))
             };
         }
 
@@ -42,16 +42,12 @@ impl Codec for MsgCodec {
     }
 
     fn encode(&mut self, msg: Msg, buf: &mut Vec<u8>) -> io::Result<()> {
-        let msg_str = match serde_json::to_string(&msg) {
-            Ok(s) => s,
-            Err(e) => return Err(io_error_from_error(e)),
-        };
-
-        for byte in msg_str.as_bytes() {
-            buf.push(*byte);
-        }
-
+        // Attempt Msg encode into JSON.
+        let msg_str = serde_json::to_string(&msg).map_err(io_error_from_error)?;
+        // Write to output buffer followed by a newline.
+        buf.extend_from_slice(msg_str.as_bytes());
         buf.push(b'\n');
+
         Ok(())
     }
 }
