@@ -31,3 +31,6 @@ dev = ["clippy"]
 [[bin]]
 name = "sirpent"
 doc = false
+
+[replace]
+"serde:0.9.8" = { git = "https://github.com/serde-rs/serde", rev = "8e5f472e27dc2c5679e6e0f507d37e6b80c09edd" }
