@@ -1,25 +1,42 @@
 mod client;
-mod group;
+mod room;
 
 pub use self::client::*;
-pub use self::group::*;
+pub use self::room::*;
 
-use futures::Future;
+use futures::{Future, Sink, StartSend, Poll};
 use uuid::Uuid;
 use net::Msg;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 use std::time::Duration;
 use futures::sync::oneshot;
+use std::ops::{Deref, DerefMut};
+
+#[derive(Hash, Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ClientId {
+    client: Uuid,
+    communicator: Uuid,
+}
+
+impl ClientId {
+    pub fn client_id(&self) -> Uuid {
+        self.client
+    }
+
+    pub fn communicator_id(&self) -> Uuid {
+        self.communicator
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Timeout {
+pub enum ClientTimeout {
     None,
     Optional(Duration),
     Disconnecting(Duration),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Status {
+pub enum ClientStatus {
     Ready,
     Waiting,
     Gone,
@@ -27,27 +44,80 @@ pub enum Status {
 
 pub enum Command {
     // Send a message to a single client.
-    Transmit(Uuid, Msg),
+    Transmit(ClientId, Msg),
     // Send specific messages to specific clients.
-    TransmitToGroup(HashMap<Uuid, Msg>),
+    TransmitToGroup(HashMap<ClientId, Msg>),
     // Send a message to all clients on the other end.
     Broadcast(Msg),
     // Receive a message from a single client into a `oneshot::Receiver`.
-    ReceiveInto(Uuid, oneshot::Sender<Msg>, Timeout),
+    ReceiveInto(ClientId, oneshot::Sender<Msg>, ClientTimeout),
     // Receive one message from each specified clients into `oneshot::Receiver`s.
-    ReceiveFromGroupInto(Vec<Uuid>, oneshot::Sender<HashMap<Uuid, Msg>>, Timeout),
+    ReceiveFromGroupInto(HashSet<ClientId>, oneshot::Sender<HashMap<ClientId, Msg>>, ClientTimeout),
     // Discard all messages already received from a client.
-    DiscardReceiveBuffer(Uuid),
+    DiscardReceiveBuffer(ClientId),
     // Discard all messages already received from specified clients.
-    DiscardReceiveBufferForGroup(Vec<Uuid>),
+    DiscardReceiveBufferForGroup(HashSet<ClientId>),
     // Receive a message from a single client into a `oneshot::Receiver`.
-    StatusInto(Uuid, oneshot::Sender<Status>),
+    StatusInto(ClientId, oneshot::Sender<ClientStatus>),
     // Receive one message from each specified clients into `oneshot::Receiver`s.
-    StatusFromGroupInto(Vec<Uuid>, oneshot::Sender<HashMap<Uuid, Status>>),
+    StatusFromGroupInto(HashSet<ClientId>, oneshot::Sender<HashMap<ClientId, ClientStatus>>),
     // Disconnect a single client.
-    Close(Uuid),
+    Close(ClientId),
     // Disconnect specified clients.
-    CloseGroup(Vec<Uuid>),
+    CloseGroup(HashSet<ClientId>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandChannel<C>
+    where C: Sink<SinkItem = Command> + Send + Clone + 'static
+{
+    id: Uuid,
+    cmd_tx: C,
+}
+
+impl<C> CommandChannel<C>
+    where C: Sink<SinkItem = Command> + Send + Clone + 'static
+{
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn can_command(&self, client_id: &ClientId) -> bool {
+        self.id == client_id.communicator_id()
+    }
+}
+
+impl<C> Sink for CommandChannel<C>
+    where C: Sink<SinkItem = Command> + Send + Clone + 'static
+{
+    type SinkItem = C::SinkItem;
+    type SinkError = C::SinkError;
+
+    fn start_send(&mut self, item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        self.cmd_tx.start_send(item)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.cmd_tx.poll_complete()
+    }
+}
+
+impl<C> Deref for CommandChannel<C>
+    where C: Sink<SinkItem = Command> + Send + Clone + 'static
+{
+    type Target = C;
+
+    fn deref(&self) -> &C {
+        &self.cmd_tx
+    }
+}
+
+impl<C> DerefMut for CommandChannel<C>
+    where C: Sink<SinkItem = Command> + Send + Clone + 'static
+{
+    fn deref_mut(&mut self) -> &mut C {
+        &mut self.cmd_tx
+    }
 }
 
 pub trait Commander {
@@ -59,7 +129,7 @@ pub trait Commander {
     fn transmit(&mut self, msg: Self::Transmit) -> Box<Future<Item = (), Error = Self::Error>>;
 
     fn receive(&mut self,
-               optionality: Timeout)
+               optionality: ClientTimeout)
                -> Box<Future<Item = Self::Receive, Error = Self::Error>>;
 
     fn status(&mut self) -> Box<Future<Item = Self::Status, Error = Self::Error>>;
