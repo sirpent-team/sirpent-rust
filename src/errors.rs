@@ -1,5 +1,6 @@
 use net::*;
 use net::clients::*;
+use net::command::*;
 
 error_chain! {
     // The type defined for this error. These are the conventional
@@ -25,6 +26,7 @@ error_chain! {
         Io(::std::io::Error);
         Serde(::serde_json::Error);
         FutureMpscSendCmd(::futures::sync::mpsc::SendError<Cmd>);
+        FutureMpscSendCommand(::futures::sync::mpsc::SendError<Command>);
         FutureMpscSendMsg(::futures::sync::mpsc::SendError<Msg>);
         FutureOneshot(::futures::sync::oneshot::Canceled);
         TokioTimer(::tokio_timer::TimerError);

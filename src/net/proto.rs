@@ -34,7 +34,7 @@ impl Codec for MsgCodec {
             // Attempt JSON decode into Msg.
             return match serde_json::from_str(line) {
                 Ok(msg) => Ok(Some(msg)),
-                Err(e) => Err(io_error_from_error(e))
+                Err(e) => Err(io_error_from_error(e)),
             };
         }
 

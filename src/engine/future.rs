@@ -144,13 +144,12 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
     }
 
     fn advance_round(&mut self, mut moves: HashMap<String, Msg>) -> GameFuturePollreturn<CmdSink> {
-        let directions = moves.drain().filter_map(|(name, msg)| {
-            if let Msg::Move { direction } = msg {
+        let directions = moves.drain()
+            .filter_map(|(name, msg)| if let Msg::Move { direction } = msg {
                 Some((name.clone(), Ok(direction)))
             } else {
                 None
-            }
-        });
+            });
         self.game.as_mut().unwrap().advance_round(directions.collect());
 
         let new_round = &self.game.as_ref().unwrap().round_state;

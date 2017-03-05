@@ -1,8 +1,15 @@
 mod client;
 mod group;
 
-use self::client::*;
-use self::group::*;
+pub use self::client::*;
+pub use self::group::*;
+
+use futures::Future;
+use uuid::Uuid;
+use net::Msg;
+use std::collections::HashMap;
+use std::time::Duration;
+use futures::sync::oneshot;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Timeout {
@@ -12,15 +19,21 @@ pub enum Timeout {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Status {
+    Ready,
+    Waiting,
+    Gone,
+}
+
 pub enum Command {
     // Send a message to a single client.
-    Transmit((Uuid, Msg)),
+    Transmit(Uuid, Msg),
     // Send specific messages to specific clients.
     TransmitToGroup(HashMap<Uuid, Msg>),
     // Send a message to all clients on the other end.
     Broadcast(Msg),
     // Receive a message from a single client into a `oneshot::Receiver`.
-    ReceiveInto((Uuid, oneshot::Sender<Msg>), Timeout),
+    ReceiveInto(Uuid, oneshot::Sender<Msg>, Timeout),
     // Receive one message from each specified clients into `oneshot::Receiver`s.
     ReceiveFromGroupInto(Vec<Uuid>, oneshot::Sender<HashMap<Uuid, Msg>>, Timeout),
     // Discard all messages already received from a client.
@@ -28,7 +41,7 @@ pub enum Command {
     // Discard all messages already received from specified clients.
     DiscardReceiveBufferForGroup(Vec<Uuid>),
     // Receive a message from a single client into a `oneshot::Receiver`.
-    StatusInto((Uuid, oneshot::Sender<Status>)),
+    StatusInto(Uuid, oneshot::Sender<Status>),
     // Receive one message from each specified clients into `oneshot::Receiver`s.
     StatusFromGroupInto(Vec<Uuid>, oneshot::Sender<HashMap<Uuid, Status>>),
     // Disconnect a single client.
@@ -38,15 +51,18 @@ pub enum Command {
 }
 
 pub trait Commander {
-    type Transmit = Msg;
-    type Receive = Msg;
-    type Status = Status;
+    type Transmit;
+    type Receive;
+    type Status;
+    type Error;
 
-    fn transmit(&mut self, msg: Self::Transmit) -> Future<Item = (), Error = Error>;
+    fn transmit(&mut self, msg: Self::Transmit) -> Box<Future<Item = (), Error = Self::Error>>;
 
-    fn receive(&mut self, optionality: Timeout) -> Future<Item = Self::Receive, Error = Error>;
+    fn receive(&mut self,
+               optionality: Timeout)
+               -> Box<Future<Item = Self::Receive, Error = Self::Error>>;
 
-    fn status(&mut self) -> Future<Item = Self::Status, Error = Error>;
+    fn status(&mut self) -> Box<Future<Item = Self::Status, Error = Self::Error>>;
 
-    fn close(&mut self) -> Future<Item = (), Error = Error>;
+    fn close(&mut self) -> Box<Future<Item = (), Error = Self::Error>>;
 }

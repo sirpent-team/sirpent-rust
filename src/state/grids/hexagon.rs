@@ -186,8 +186,8 @@ mod tests {
 
     #[test]
     fn triangle_inequality() {
-        quickcheck(triangle_inequality_prop as fn(HexagonVector, HexagonVector, HexagonVector)
-                                                  -> bool);
+        quickcheck(triangle_inequality_prop as
+                   fn(HexagonVector, HexagonVector, HexagonVector) -> bool);
     }
 
     fn symmetry_prop(v: HexagonVector, w: HexagonVector) -> bool {

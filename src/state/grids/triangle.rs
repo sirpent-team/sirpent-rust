@@ -172,8 +172,8 @@ mod tests {
 
     #[test]
     fn triangle_inequality() {
-        quickcheck(triangle_inequality_prop as fn(TriangleVector, TriangleVector, TriangleVector)
-                                                  -> bool);
+        quickcheck(triangle_inequality_prop as
+                   fn(TriangleVector, TriangleVector, TriangleVector) -> bool);
     }
 
     fn symmetry_prop(v: TriangleVector, w: TriangleVector) -> bool {
