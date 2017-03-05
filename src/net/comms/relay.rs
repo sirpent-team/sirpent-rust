@@ -1,29 +1,57 @@
-use futures::{Stream, Sink};
+use std::fmt::Debug;
 use std::collections::{HashMap, VecDeque};
+use futures::{Stream, Sink};
+use uuid::Uuid;
 use super::*;
 
 /// Relays messages between server connections (e.g., `Codec`-wrapped TCP Sockets)
 /// and implementations of `Communicator`. One instance of this acts as a relay for
 /// many clients. As polling this could potentially do a lot of work it is suggested
 /// to run this in a dedicated thread.
-// @TODO: It would make some sense to use `ClientRelay` as a boxed trait object,
-// where `Message` had to match that on Relay but other details could vary. Errors
-// could be forced to `io::Error` or something for interoperability until a more
-// solid implementation is refineable.
-//
-// The issue with doing this is that it's vtable overhead for no benefit in the
-// general case. If someone really wants to do this they can coerce the channels
-// to have the same types using some custom futures code, or suggest a change.
-// Even then it would be best to have a separate homogenous relay rather than
-// putting needless overhead onto the ordinary case.
-pub struct Relay<Message, CommandStream, ClientSink, ClientStream>
-    where CommandStream: Stream<Item = Command> + 'static,
+pub struct Relay<Message, NewClientStream, CommandStream, ClientSink, ClientStream, ClientName>
+    where NewClientStream: Stream<Item = (ClientSink, ClientStream, ClientName)>,
+          CommandStream: Stream<Item = Command> + 'static,
           ClientSink: Sink<SinkItem = Message> + 'static,
-          ClientStream: Stream<Item = Message> + 'static
+          ClientStream: Stream<Item = Message> + 'static,
+          ClientName: Debug + 'static
 {
+    relay_id: Uuid,
+    new_clients_rx: NewClientStream,
     command_rx: CommandStream,
-    clients: HashMap<ClientId, ClientRelay<Message, ClientSink, ClientStream>>,
+    clients: HashMap<ClientId, ClientRelay<Message, ClientSink, ClientStream, ClientName>>,
     queue_limit: Option<usize>,
+}
+
+impl<Message, NewClientStream, CommandStream, ClientSink, ClientStream, ClientName>
+    Relay<Message, NewClientStream, CommandStream, ClientSink, ClientStream, ClientName>
+    where NewClientStream: Stream<Item = (ClientSink, ClientStream, ClientName)>,
+          CommandStream: Stream<Item = Command> + 'static,
+          ClientSink: Sink<SinkItem = Message> + 'static,
+          ClientStream: Stream<Item = Message> + 'static,
+          ClientName: Debug + 'static
+{
+}
+
+impl<Message, NewClientStream, CommandStream, ClientSink, ClientStream, ClientName>
+    Relay<Message, NewClientStream, CommandStream, ClientSink, ClientStream, ClientName>
+    where NewClientStream: Stream<Item = (ClientSink, ClientStream, ClientName)>,
+          CommandStream: Stream<Item = Command> + 'static,
+          ClientSink: Sink<SinkItem = Message> + 'static,
+          ClientStream: Stream<Item = Message> + 'static,
+          ClientName: Debug + 'static
+{
+    pub fn bind_to_listener(new_clients_rx: NewClientStream,
+                            command_rx: CommandStream,
+                            queue_limit: Option<usize>)
+                            -> Self {
+        Relay {
+            relay_id: Uuid::new_v4(),
+            new_clients_rx: new_clients_rx,
+            command_rx: command_rx,
+            clients: HashMap::new(),
+            queue_limit: queue_limit,
+        }
+    }
 }
 
 // @TODO: Research as part of implementation.
@@ -42,13 +70,41 @@ pub struct Relay<Message, CommandStream, ClientSink, ClientStream>
 // The need for `tx_queue` is unclear. For a socket server, if these messages start queueing
 // up then we need to worry the client is broken - but even then I don't know for sure. Again,
 // it provides a potentially-slightly-costly guarantee of something I am otherwise unsure of.
-pub struct ClientRelay<Message, ClientSink, ClientStream>
+pub struct ClientRelay<Message, ClientSink, ClientStream, ClientName>
     where ClientSink: Sink<SinkItem = Message> + 'static,
-          ClientStream: Stream<Item = Message> + 'static
+          ClientStream: Stream<Item = Message> + 'static,
+          ClientName: Debug + 'static
 {
+    client_id: ClientId,
+    client_name: Option<ClientName>,
     tx: ClientSink,
     rx: ClientStream,
     tx_queue: VecDeque<Message>,
     rx_queue: VecDeque<Message>,
     forward_tx_queue: VecDeque<oneshot::Sender<Message>>,
+}
+
+impl<Message, ClientSink, ClientStream, ClientName> ClientRelay<Message,
+                                                                ClientSink,
+                                                                ClientStream,
+                                                                ClientName>
+    where ClientSink: Sink<SinkItem = Message> + 'static,
+          ClientStream: Stream<Item = Message> + 'static,
+          ClientName: Debug + 'static
+{
+    pub fn new(tx: ClientSink,
+               rx: ClientStream,
+               client_name: Option<ClientName>,
+               relay_id: Uuid)
+               -> Self {
+        ClientRelay {
+            client_id: ClientId::new_for_relay(relay_id),
+            client_name: client_name,
+            tx: tx,
+            rx: rx,
+            tx_queue: VecDeque::new(),
+            rx_queue: VecDeque::new(),
+            forward_tx_queue: VecDeque::new(),
+        }
+    }
 }

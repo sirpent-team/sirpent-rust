@@ -103,17 +103,14 @@ mod tests {
     }
 
     fn mock_command_channel(tx: mpsc::Sender<Command>) -> CommandChannel<mpsc::Sender<Command>> {
-        CommandChannel {
-            id: Uuid::new_v4(),
-            cmd_tx: tx,
-        }
+        CommandChannel::new_for_relay(Uuid::new_v4(), tx)
     }
 
     fn mock_client(command_channel: &CommandChannel<mpsc::Sender<Command>>)
                    -> Client<mpsc::Sender<Command>, mpsc::SendError<Command>> {
         let client_id = ClientId {
-            client: Uuid::new_v4(),
-            communicator: command_channel.id(),
+            client_id: Uuid::new_v4(),
+            relay_id: command_channel.relay_id(),
         };
         Client::new(client_id, None, command_channel.clone()).unwrap()
     }

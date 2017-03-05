@@ -15,17 +15,24 @@ use futures::sync::oneshot;
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ClientId {
-    client: Uuid,
-    communicator: Uuid,
+    client_id: Uuid,
+    relay_id: Uuid,
 }
 
 impl ClientId {
-    pub fn client_id(&self) -> Uuid {
-        self.client
+    pub fn new_for_relay(relay_id: Uuid) -> ClientId {
+        ClientId {
+            client_id: Uuid::new_v4(),
+            relay_id: relay_id,
+        }
     }
 
-    pub fn communicator_id(&self) -> Uuid {
-        self.communicator
+    pub fn client_id(&self) -> Uuid {
+        self.client_id
+    }
+
+    pub fn relay_id(&self) -> Uuid {
+        self.relay_id
     }
 }
 
@@ -72,19 +79,26 @@ pub enum Command {
 pub struct CommandChannel<C>
     where C: Sink<SinkItem = Command> + Send + Clone + 'static
 {
-    id: Uuid,
+    relay_id: Uuid,
     cmd_tx: C,
 }
 
 impl<C> CommandChannel<C>
     where C: Sink<SinkItem = Command> + Send + Clone + 'static
 {
-    pub fn id(&self) -> Uuid {
-        self.id
+    pub fn new_for_relay(relay_id: Uuid, cmd_tx: C) -> CommandChannel<C> {
+        CommandChannel {
+            relay_id: relay_id,
+            cmd_tx: cmd_tx,
+        }
+    }
+
+    pub fn relay_id(&self) -> Uuid {
+        self.relay_id
     }
 
     pub fn can_command(&self, client_id: &ClientId) -> bool {
-        self.id == client_id.communicator_id()
+        self.relay_id == client_id.relay_id()
     }
 }
 
