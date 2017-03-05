@@ -1,7 +1,6 @@
 use futures::{Sink, Future};
-use net::command::Command;
 use errors::Error;
-use net::command::*;
+use super::*;
 use net::Msg;
 use futures::sync::oneshot;
 
@@ -22,6 +21,21 @@ impl<S, E> Client<S, E>
     where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
           E: Into<Error> + 'static
 {
+    pub fn new(id: ClientId,
+               name: Option<String>,
+               cmd_tx: CommandChannel<S>)
+               -> Result<Client<S, E>, Error> {
+        if !cmd_tx.can_command(&id) {
+            return Err(format!("Attempted to add a client to a room using a different listener")
+                .into());
+        }
+        Ok(Client {
+            id: id,
+            name: name,
+            cmd_tx: cmd_tx,
+        })
+    }
+
     pub fn id(&self) -> ClientId {
         self.id
     }
@@ -30,16 +44,12 @@ impl<S, E> Client<S, E>
         self.name.clone()
     }
 
-    pub fn join(self, room: &mut Room<S, E>) -> Result<bool, Error> {
-        room.add(self.id)
-    }
-
     fn command(&mut self, cmd: Command) -> Box<Future<Item = (), Error = Error>> {
         Box::new(self.cmd_tx.clone().send(cmd).map(|_| ()).map_err(|e| e.into()))
     }
 }
 
-impl<S, E> Commander for Client<S, E>
+impl<S, E> Communicator for Client<S, E>
     where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
           E: Into<Error> + 'static
 {
@@ -101,14 +111,11 @@ mod tests {
 
     fn mock_client(command_channel: &CommandChannel<mpsc::Sender<Command>>)
                    -> Client<mpsc::Sender<Command>, mpsc::SendError<Command>> {
-        Client {
-            id: ClientId {
-                client: Uuid::new_v4(),
-                communicator: command_channel.id(),
-            },
-            name: None,
-            cmd_tx: command_channel.clone(),
-        }
+        let client_id = ClientId {
+            client: Uuid::new_v4(),
+            communicator: command_channel.id(),
+        };
+        Client::new(client_id, None, command_channel.clone()).unwrap()
     }
 
     #[test]

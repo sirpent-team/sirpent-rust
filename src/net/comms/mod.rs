@@ -1,8 +1,10 @@
 mod client;
 mod room;
+mod relay;
 
 pub use self::client::*;
 pub use self::room::*;
+pub use self::relay::*;
 
 use futures::{Future, Sink, StartSend, Poll};
 use uuid::Uuid;
@@ -10,7 +12,6 @@ use net::Msg;
 use std::collections::{HashSet, HashMap};
 use std::time::Duration;
 use futures::sync::oneshot;
-use std::ops::{Deref, DerefMut};
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ClientId {
@@ -102,25 +103,7 @@ impl<C> Sink for CommandChannel<C>
     }
 }
 
-impl<C> Deref for CommandChannel<C>
-    where C: Sink<SinkItem = Command> + Send + Clone + 'static
-{
-    type Target = C;
-
-    fn deref(&self) -> &C {
-        &self.cmd_tx
-    }
-}
-
-impl<C> DerefMut for CommandChannel<C>
-    where C: Sink<SinkItem = Command> + Send + Clone + 'static
-{
-    fn deref_mut(&mut self) -> &mut C {
-        &mut self.cmd_tx
-    }
-}
-
-pub trait Commander {
+pub trait Communicator {
     type Transmit;
     type Receive;
     type Status;

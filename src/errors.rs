@@ -1,6 +1,6 @@
 use net::*;
 use net::clients::*;
-use net::command::*;
+use net::comms::*;
 
 error_chain! {
     // The type defined for this error. These are the conventional
