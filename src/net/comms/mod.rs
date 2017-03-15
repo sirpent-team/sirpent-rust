@@ -14,14 +14,14 @@ use std::time::Duration;
 use futures::sync::oneshot;
 
 #[derive(Hash, Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ClientId {
+pub struct CommunicationId {
     client_id: Uuid,
     relay_id: Uuid,
 }
 
-impl ClientId {
-    pub fn new_for_relay(relay_id: Uuid) -> ClientId {
-        ClientId {
+impl CommunicationId {
+    pub fn new_for_relay(relay_id: Uuid) -> CommunicationId {
+        CommunicationId {
             client_id: Uuid::new_v4(),
             relay_id: relay_id,
         }
@@ -52,27 +52,30 @@ pub enum ClientStatus {
 
 pub enum Command {
     // Send a message to a single client.
-    Transmit(ClientId, Msg),
+    Transmit(CommunicationId, Msg),
     // Send specific messages to specific clients.
-    TransmitToGroup(HashMap<ClientId, Msg>),
+    TransmitToGroup(HashMap<CommunicationId, Msg>),
     // Send a message to all clients on the other end.
     Broadcast(Msg),
     // Receive a message from a single client into a `oneshot::Receiver`.
-    ReceiveInto(ClientId, oneshot::Sender<Msg>, ClientTimeout),
+    ReceiveInto(CommunicationId, oneshot::Sender<Msg>, ClientTimeout),
     // Receive one message from each specified clients into `oneshot::Receiver`s.
-    ReceiveFromGroupInto(HashSet<ClientId>, oneshot::Sender<HashMap<ClientId, Msg>>, ClientTimeout),
+    ReceiveFromGroupInto(HashSet<CommunicationId>,
+                         oneshot::Sender<HashMap<CommunicationId, Msg>>,
+                         ClientTimeout),
     // Discard all messages already received from a client.
-    DiscardReceiveBuffer(ClientId),
+    DiscardReceiveBuffer(CommunicationId),
     // Discard all messages already received from specified clients.
-    DiscardReceiveBufferForGroup(HashSet<ClientId>),
+    DiscardReceiveBufferForGroup(HashSet<CommunicationId>),
     // Receive a message from a single client into a `oneshot::Receiver`.
-    StatusInto(ClientId, oneshot::Sender<ClientStatus>),
+    StatusInto(CommunicationId, oneshot::Sender<ClientStatus>),
     // Receive one message from each specified clients into `oneshot::Receiver`s.
-    StatusFromGroupInto(HashSet<ClientId>, oneshot::Sender<HashMap<ClientId, ClientStatus>>),
+    StatusFromGroupInto(HashSet<CommunicationId>,
+                        oneshot::Sender<HashMap<CommunicationId, ClientStatus>>),
     // Disconnect a single client.
-    Close(ClientId),
+    Close(CommunicationId),
     // Disconnect specified clients.
-    CloseGroup(HashSet<ClientId>),
+    CloseGroup(HashSet<CommunicationId>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -97,8 +100,8 @@ impl<C> CommandChannel<C>
         self.relay_id
     }
 
-    pub fn can_command(&self, client_id: &ClientId) -> bool {
-        self.relay_id == client_id.relay_id()
+    pub fn can_command(&self, comm_id: &CommunicationId) -> bool {
+        self.relay_id == comm_id.relay_id()
     }
 }
 

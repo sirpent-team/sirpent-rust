@@ -28,7 +28,7 @@ pub struct Relay<M, C, L, S, T, N>
     listener_rx: L,
     queue_limit: Option<usize>,
     client_relays: HashMap<CommunicationId, ClientRelay<M, S, T, N>>,
-    transmits: HashSet<oneshot::Sender<StatusReply>>,
+    operations: VecDeque<Box<Future<Item = (), Error = ()>>>,
     receives: HashSet<oneshot::Sender<ReceiveReply<M>>>,
 }
 
@@ -322,4 +322,39 @@ impl<T, M> ClientRelayRx<T, M>
             }
         }
     }
+}
+
+
+
+
+
+
+
+
+
+
+pub enum Command {
+    // Send specific messages to specific clients.
+    Transmit(HashMap<CommunicationId, Msg>),
+    // Send a message to all clients on the other end.
+    Broadcast(Msg),
+    // Receive a message from a single client into a `oneshot::Receiver`.
+    ReceiveInto(CommunicationId, oneshot::Sender<Msg>, ClientTimeout),
+    // Receive one message from each specified clients into `oneshot::Receiver`s.
+    ReceiveFromGroupInto(HashSet<CommunicationId>,
+                         oneshot::Sender<HashMap<CommunicationId, Msg>>,
+                         ClientTimeout),
+    // Discard all messages already received from a client.
+    DiscardReceiveBuffer(CommunicationId),
+    // Discard all messages already received from specified clients.
+    DiscardReceiveBufferForGroup(HashSet<CommunicationId>),
+    // Receive a message from a single client into a `oneshot::Receiver`.
+    StatusInto(CommunicationId, oneshot::Sender<ClientStatus>),
+    // Receive one message from each specified clients into `oneshot::Receiver`s.
+    StatusFromGroupInto(HashSet<CommunicationId>,
+                        oneshot::Sender<HashMap<CommunicationId, ClientStatus>>),
+    // Disconnect a single client.
+    Close(CommunicationId),
+    // Disconnect specified clients.
+    CloseGroup(HashSet<CommunicationId>),
 }

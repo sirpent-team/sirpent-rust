@@ -10,9 +10,9 @@ pub struct Room<S, E>
     where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
           E: Into<Error> + 'static
 {
-    client_ids: HashSet<ClientId>,
+    client_ids: HashSet<CommunicationId>,
     // @TODO: Use this. Option<ClientName>==None will be simulated by missing entries.
-    //client_names: HashMap<ClientId, ClientName>,
+    //client_names: HashMap<CommunicationId, ClientName>,
     // Channel to command communications with.
     cmd_tx: CommandChannel<S>,
 }
@@ -28,7 +28,7 @@ impl<S, E> Room<S, E>
         }
     }
 
-    pub fn client_ids(&self) -> HashSet<ClientId> {
+    pub fn client_ids(&self) -> HashSet<CommunicationId> {
         self.client_ids.clone()
     }
 
@@ -40,7 +40,7 @@ impl<S, E> Room<S, E>
         self.insert(client.id())
     }
 
-    pub fn insert(&mut self, id: ClientId) -> Result<bool, Error> {
+    pub fn insert(&mut self, id: CommunicationId) -> Result<bool, Error> {
         if !self.cmd_tx.can_command(&id) {
             return Err(format!("Attempted to add a client to a room using a different listener")
                 .into());
@@ -48,7 +48,7 @@ impl<S, E> Room<S, E>
         Ok(self.client_ids.insert(id))
     }
 
-    pub fn contains(&self, id: &ClientId) -> bool {
+    pub fn contains(&self, id: &CommunicationId) -> bool {
         self.client_ids.contains(&id)
     }
 
@@ -61,9 +61,9 @@ impl<S, E> Communicator for Room<S, E>
     where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
           E: Into<Error> + 'static
 {
-    type Transmit = HashMap<ClientId, Msg>;
-    type Receive = HashMap<ClientId, Msg>;
-    type Status = HashMap<ClientId, ClientStatus>;
+    type Transmit = HashMap<CommunicationId, Msg>;
+    type Receive = HashMap<CommunicationId, Msg>;
+    type Status = HashMap<CommunicationId, ClientStatus>;
     type Error = Error;
 
     fn transmit(&mut self, msgs: Self::Transmit) -> Box<Future<Item = (), Error = Error>> {
@@ -116,7 +116,7 @@ mod tests {
 
     fn mock_client(command_channel: &CommandChannel<mpsc::Sender<Command>>)
                    -> Client<mpsc::Sender<Command>, mpsc::SendError<Command>> {
-        let client_id = ClientId {
+        let client_id = CommunicationId {
             client_id: Uuid::new_v4(),
             relay_id: command_channel.relay_id(),
         };
@@ -134,8 +134,8 @@ mod tests {
         let cmd_tx = mock_command_channel(tx.clone());
         let client = mock_client(&cmd_tx);
 
-        // First adding of a `ClientId` to a Room returns `Ok(true)`.
-        // Second indicates the `ClientId` was already present with `Ok(false)`.
+        // First adding of a `CommunicationId` to a Room returns `Ok(true)`.
+        // Second indicates the `CommunicationId` was already present with `Ok(false)`.
         let mut room = mock_room(&cmd_tx);
         assert!(!room.contains(&client.id()));
         assert!(room.insert(client.id()).unwrap());
@@ -143,7 +143,7 @@ mod tests {
         assert!(!room.insert(client.id()).unwrap());
         assert!(room.contains(&client.id()));
 
-        // This tests that a `ClientId` cannot be added to a room unless the communicator IDs
+        // This tests that a `CommunicationId` cannot be added to a room unless the communicator IDs
         // match. Notably this isn't the same as, "the underlying Sink is not the same," for
         // unfortunate implementation details mentioned below.
         let (tx2, _) = mpsc::channel(1);
@@ -174,8 +174,8 @@ mod tests {
         let cmd_tx = mock_command_channel(tx.clone());
         let client = mock_client(&cmd_tx);
 
-        // First adding of a `ClientId` to a Room returns `Ok(true)`.
-        // Second indicates the `ClientId` was already present with `Ok(false)`.
+        // First adding of a `CommunicationId` to a Room returns `Ok(true)`.
+        // Second indicates the `CommunicationId` was already present with `Ok(false)`.
         let mut room = mock_room(&cmd_tx);
         assert!(!room.contains(&client.id()));
         assert!(room.join(&client).unwrap());
@@ -183,7 +183,7 @@ mod tests {
         assert!(!room.join(&client).unwrap());
         assert!(room.contains(&client.id()));
 
-        // This tests that a `ClientId` cannot be added to a room unless the communicator IDs
+        // This tests that a `CommunicationId` cannot be added to a room unless the communicator IDs
         // match. Notably this isn't the same as, "the underlying Sink is not the same," for
         // unfortunate implementation details mentioned below.
         let (tx2, _) = mpsc::channel(1);

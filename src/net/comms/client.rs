@@ -10,7 +10,7 @@ pub struct Client<S, E>
           E: Into<Error> + 'static
 {
     // Clients are identified by UUID.
-    id: ClientId,
+    id: CommunicationId,
     // Clients can also have an ID specific to their communication form, e.g., SocketAddr.
     name: Option<String>,
     // Channel to command communications with.
@@ -21,7 +21,7 @@ impl<S, E> Client<S, E>
     where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
           E: Into<Error> + 'static
 {
-    pub fn new(id: ClientId,
+    pub fn new(id: CommunicationId,
                name: Option<String>,
                cmd_tx: CommandChannel<S>)
                -> Result<Client<S, E>, Error> {
@@ -36,7 +36,7 @@ impl<S, E> Client<S, E>
         })
     }
 
-    pub fn id(&self) -> ClientId {
+    pub fn id(&self) -> CommunicationId {
         self.id
     }
 
@@ -108,7 +108,7 @@ mod tests {
 
     fn mock_client(command_channel: &CommandChannel<mpsc::Sender<Command>>)
                    -> Client<mpsc::Sender<Command>, mpsc::SendError<Command>> {
-        let client_id = ClientId {
+        let client_id = CommunicationId {
             client_id: Uuid::new_v4(),
             relay_id: command_channel.relay_id(),
         };
