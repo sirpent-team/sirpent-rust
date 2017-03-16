@@ -1,5 +1,5 @@
 use futures::{Future, BoxFuture};
-use futures::future::join_all;
+use futures::future::{join_all, JoinAll};
 use super::*;
 use std::collections::HashMap;
 
@@ -38,6 +38,13 @@ impl<T, R> Room<T, R>
     pub fn contains(&self, id: &ClientId) -> bool {
         self.clients.contains_key(id)
     }
+
+    fn communicate_on_clients<F, G>(&mut self, f: F) -> JoinAll<Vec<G>>
+        where F: FnMut(&mut Client<T, R>) -> G,
+              G: Future
+    {
+        join_all(self.clients.values_mut().map(f).collect::<Vec<_>>())
+    }
 }
 
 impl<T, R> Communicator for Room<T, R>
@@ -57,9 +64,7 @@ impl<T, R> Communicator for Room<T, R>
     }
 
     fn receive(&mut self, timeout: ClientTimeout) -> BoxFuture<Self::Receive, ()> {
-        let client_futures =
-            self.clients.values_mut().map(|client| client.receive(timeout)).collect::<Vec<_>>();
-        join_all(client_futures)
+        self.communicate_on_clients(|client| client.receive(timeout))
             .map(|results| {
                 let mut statuses = HashMap::new();
                 let mut msgs = HashMap::new();
@@ -73,15 +78,15 @@ impl<T, R> Communicator for Room<T, R>
     }
 
     fn status(&mut self) -> BoxFuture<Self::Status, ()> {
-        let client_futures =
-            self.clients.values_mut().map(|client| client.status()).collect::<Vec<_>>();
-        join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
+        self.communicate_on_clients(|client| client.status())
+            .map(|results| results.into_iter().collect())
+            .boxed()
     }
 
     fn close(&mut self) -> BoxFuture<Self::Status, ()> {
-        let client_futures =
-            self.clients.values_mut().map(|client| client.close()).collect::<Vec<_>>();
-        join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
+        self.communicate_on_clients(|client| client.close())
+            .map(|results| results.into_iter().collect())
+            .boxed()
     }
 }
 
