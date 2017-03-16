@@ -58,7 +58,7 @@ impl<T, R> Communicator for Room<T, R>
 
     fn receive(&mut self, timeout: ClientTimeout) -> BoxFuture<Self::Receive, ()> {
         let client_futures =
-            self.clients.iter_mut().map(|(_, client)| client.receive(timeout)).collect::<Vec<_>>();
+            self.clients.values_mut().map(|client| client.receive(timeout)).collect::<Vec<_>>();
         join_all(client_futures)
             .map(|results| {
                 let mut statuses = HashMap::new();
@@ -74,13 +74,13 @@ impl<T, R> Communicator for Room<T, R>
 
     fn status(&mut self) -> BoxFuture<Self::Status, ()> {
         let client_futures =
-            self.clients.iter_mut().map(|(_, client)| client.status()).collect::<Vec<_>>();
+            self.clients.values_mut().map(|client| client.status()).collect::<Vec<_>>();
         join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
     }
 
     fn close(&mut self) -> BoxFuture<Self::Status, ()> {
         let client_futures =
-            self.clients.iter_mut().map(|(_, client)| client.close()).collect::<Vec<_>>();
+            self.clients.values_mut().map(|client| client.close()).collect::<Vec<_>>();
         join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
     }
 }
