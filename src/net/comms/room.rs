@@ -1,91 +1,83 @@
-use futures::{Sink, Future};
+use futures::{Sink, Future, BoxFuture};
 use errors::Error;
 use super::*;
 use net::Msg;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashMap;
 use futures::sync::oneshot;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Room<S, E>
-    where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
-          E: Into<Error> + 'static
+#[derive(Clone)]
+pub struct Room<T, R>
+    where T: Send + 'static,
+          R: Send + 'static
 {
-    client_ids: HashSet<CommunicationId>,
-    // @TODO: Use this. Option<ClientName>==None will be simulated by missing entries.
-    //client_names: HashMap<CommunicationId, ClientName>,
-    // Channel to command communications with.
-    cmd_tx: CommandChannel<S>,
+    clients: HashMap<ClientId, Client<T, R>>,
 }
 
-impl<S, E> Room<S, E>
-    where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
-          E: Into<Error> + 'static
+impl<T, R> Room<T, R>
+    where T: Send + 'static,
+          R: Send + 'static
 {
-    pub fn new(cmd_tx: CommandChannel<S>) -> Room<S, E> {
-        Room {
-            client_ids: HashSet::new(),
-            cmd_tx: cmd_tx,
-        }
+    pub fn new() -> Room<T, R> {
+        Room { clients: HashMap::new() }
     }
 
-    pub fn client_ids(&self) -> HashSet<CommunicationId> {
-        self.client_ids.clone()
+    pub fn client_ids(&self) -> HashSet<ClientId> {
+        self.clients.keys().cloned().collect()
     }
 
     // Unfortunately this has to take a pointer to give the option of keeping the `Client`
     // around. I'd rather taken it by value and force people to explictly clone to do that,
     // but with `futures::sync::mpsc::SendError` not being `Clone` one cannot clone that
     // natural case of `Client`.
-    pub fn join(&mut self, client: &Client<S, E>) -> Result<bool, Error> {
-        self.insert(client.id())
-    }
-
-    pub fn insert(&mut self, id: CommunicationId) -> Result<bool, Error> {
-        if !self.cmd_tx.can_command(&id) {
-            return Err(format!("Attempted to add a client to a room using a different listener")
-                .into());
+    pub fn insert(&mut self, client: Client<T, R>) -> bool {
+        if self.contains(&client.id()) {
+            return false;
         }
-        Ok(self.client_ids.insert(id))
+        self.clients.insert(client.id(), client);
+        true
     }
 
-    pub fn contains(&self, id: &CommunicationId) -> bool {
-        self.client_ids.contains(&id)
+    pub fn contains(&self, id: &ClientId) -> bool {
+        self.clients.contains_key(id)
     }
 
-    fn command(&mut self, cmd: Command) -> Box<Future<Item = (), Error = Error>> {
-        Box::new(self.cmd_tx.clone().send(cmd).map(|_| ()).map_err(|e| e.into()))
+    fn command(&mut self,
+               cmds: HashMap<ClientId, Command<T, R>>)
+               -> BoxFuture<HashMap<ClientId, Result<(), Error>>, Error> {
+        let client_command_futures = cmds.into_iter()
+            .map(|(client_id, cmd)| self.clients.get_mut(&client_id).command(cmd))
+            .collect::<HashMap<ClientId, Box<Future<Item = (), Error = Error>>>>();
+        collect_results(client_command_futures).boxed()
     }
 }
 
-impl<S, E> Communicator for Room<S, E>
-    where S: Sink<SinkItem = Command, SinkError = E> + Send + Clone + 'static,
-          E: Into<Error> + 'static
+impl<T, R> Communicator for Room<T, R>
+    where T: Send + 'static,
+          R: Send + 'static
 {
-    type Transmit = HashMap<CommunicationId, Msg>;
-    type Receive = HashMap<CommunicationId, Msg>;
-    type Status = HashMap<CommunicationId, ClientStatus>;
-    type Error = Error;
+    type Transmit = HashMap<ClientId, T>;
+    type Receive = (HashMap<ClientId, ClientStatus>, HashMap<ClientId, R>);
+    type Status = HashMap<ClientId, ClientStatus>;
+    type Error = ();
 
-    fn transmit(&mut self, msgs: Self::Transmit) -> Box<Future<Item = (), Error = Error>> {
+    fn transmit(&mut self, msgs: Self::Transmit) -> BoxFuture<Self::Status, ()> {
         let cmd = Command::TransmitToGroup(msgs);
         Box::new(self.command(cmd))
     }
 
-    fn receive(&mut self,
-               timeout: ClientTimeout)
-               -> Box<Future<Item = Self::Receive, Error = Error>> {
+    fn receive(&mut self, timeout: ClientTimeout) -> BoxFuture<Self::Receive, ()> {
         let (msg_forward_tx, msg_forward_rx) = oneshot::channel();
         let cmd = Command::ReceiveFromGroupInto(self.client_ids(), msg_forward_tx, timeout);
         Box::new(self.command(cmd).and_then(|_| msg_forward_rx.map_err(|e| e.into())))
     }
 
-    fn status(&mut self) -> Box<Future<Item = Self::Status, Error = Error>> {
+    fn status(&mut self) -> BoxFuture<Self::Status, ()> {
         let (status_tx, status_rx) = oneshot::channel();
         let cmd = Command::StatusFromGroupInto(self.client_ids(), status_tx);
         Box::new(self.command(cmd).and_then(|_| status_rx.map_err(|e| e.into())))
     }
 
-    fn close(&mut self) -> Box<Future<Item = (), Error = Error>> {
+    fn close(&mut self) -> BoxFuture<Self::Status, ()> {
         let cmd = Command::CloseGroup(self.client_ids());
         Box::new(self.command(cmd))
     }
