@@ -1,9 +1,7 @@
-use futures::{Sink, Future, BoxFuture};
-use errors::Error;
+use futures::{Future, BoxFuture};
+use futures::future::join_all;
 use super::*;
-use net::Msg;
 use std::collections::HashMap;
-use futures::sync::oneshot;
 
 #[derive(Clone)]
 pub struct Room<T, R>
@@ -21,7 +19,7 @@ impl<T, R> Room<T, R>
         Room { clients: HashMap::new() }
     }
 
-    pub fn client_ids(&self) -> HashSet<ClientId> {
+    pub fn client_ids(&self) -> Vec<ClientId> {
         self.clients.keys().cloned().collect()
     }
 
@@ -40,15 +38,6 @@ impl<T, R> Room<T, R>
     pub fn contains(&self, id: &ClientId) -> bool {
         self.clients.contains_key(id)
     }
-
-    fn command(&mut self,
-               cmds: HashMap<ClientId, Command<T, R>>)
-               -> BoxFuture<HashMap<ClientId, Result<(), Error>>, Error> {
-        let client_command_futures = cmds.into_iter()
-            .map(|(client_id, cmd)| self.clients.get_mut(&client_id).command(cmd))
-            .collect::<HashMap<ClientId, Box<Future<Item = (), Error = Error>>>>();
-        collect_results(client_command_futures).boxed()
-    }
 }
 
 impl<T, R> Communicator for Room<T, R>
@@ -61,25 +50,38 @@ impl<T, R> Communicator for Room<T, R>
     type Error = ();
 
     fn transmit(&mut self, msgs: Self::Transmit) -> BoxFuture<Self::Status, ()> {
-        let cmd = Command::TransmitToGroup(msgs);
-        Box::new(self.command(cmd))
+        let client_futures = msgs.into_iter()
+            .filter_map(|(id, msg)| self.clients.get_mut(&id).map(|client| client.transmit(msg)))
+            .collect::<Vec<_>>();
+        join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
     }
 
     fn receive(&mut self, timeout: ClientTimeout) -> BoxFuture<Self::Receive, ()> {
-        let (msg_forward_tx, msg_forward_rx) = oneshot::channel();
-        let cmd = Command::ReceiveFromGroupInto(self.client_ids(), msg_forward_tx, timeout);
-        Box::new(self.command(cmd).and_then(|_| msg_forward_rx.map_err(|e| e.into())))
+        let client_futures =
+            self.clients.iter_mut().map(|(_, client)| client.receive(timeout)).collect::<Vec<_>>();
+        join_all(client_futures)
+            .map(|results| {
+                let mut statuses = HashMap::new();
+                let mut msgs = HashMap::new();
+                for (id, (status, msg)) in results.into_iter() {
+                    statuses.insert(id, status);
+                    msg.and_then(|msg| msgs.insert(id, msg));
+                }
+                (statuses, msgs)
+            })
+            .boxed()
     }
 
     fn status(&mut self) -> BoxFuture<Self::Status, ()> {
-        let (status_tx, status_rx) = oneshot::channel();
-        let cmd = Command::StatusFromGroupInto(self.client_ids(), status_tx);
-        Box::new(self.command(cmd).and_then(|_| status_rx.map_err(|e| e.into())))
+        let client_futures =
+            self.clients.iter_mut().map(|(_, client)| client.status()).collect::<Vec<_>>();
+        join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
     }
 
     fn close(&mut self) -> BoxFuture<Self::Status, ()> {
-        let cmd = Command::CloseGroup(self.client_ids());
-        Box::new(self.command(cmd))
+        let client_futures =
+            self.clients.iter_mut().map(|(_, client)| client.close()).collect::<Vec<_>>();
+        join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
     }
 }
 

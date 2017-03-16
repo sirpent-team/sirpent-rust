@@ -72,7 +72,7 @@ impl<T, R> Communicator for Client<T, R>
           R: Send + 'static
 {
     type Transmit = T;
-    type Receive = (ClientId, ClientStatus, Option<R>);
+    type Receive = (ClientId, (ClientStatus, Option<R>));
     type Status = (ClientId, ClientStatus);
     type Error = ();
 
@@ -91,8 +91,8 @@ impl<T, R> Communicator for Client<T, R>
                 Err(e) => future::err(e).boxed(),
             })
             .then(move |v| match v {
-                Ok(m) => future::ok((id, ClientStatus::Ready, Some(m))).boxed(),
-                Err(e) => future::ok((id, e, None)).boxed(),
+                Ok(m) => future::ok((id, (ClientStatus::Ready, Some(m)))).boxed(),
+                Err(e) => future::ok((id, (e, None))).boxed(),
             })
             .boxed()
     }
