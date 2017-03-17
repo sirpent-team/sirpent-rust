@@ -7,15 +7,15 @@ use super::*;
 use net::*;
 use utils::*;
 
+type RoomStatus = <Room as Communicator>::Status;
+
 enum GameFutureStage {
     StartOfGame,
-    ReadyForRound(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, ClientStatus>),
-                            ()>),
-    StartRound(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, ClientStatus>), ()>),
-    AskMoves(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, Msg>), ()>),
-    AdvanceRound(HashMap<ClientId, Msg>),
+    ReadyForRound(BoxFuture<(RoomStatus, RoomStatus), ()>),
+    StartRound(BoxFuture<(RoomStatus, RoomStatus), ()>),
+    AskMoves(BoxFuture<(RoomStatus, HashMap<ClientId, Msg>), ()>),
     LoopDecision,
-    Concluding(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, ClientStatus>), ()>),
+    Concluding(BoxFuture<(RoomStatus, RoomStatus), ()>),
     EndOfGame,
 }
 
@@ -87,9 +87,7 @@ impl<R> GameFuture<R>
     }
 
     fn ready_for_round(&mut self,
-                       mut future: BoxFuture<(HashMap<ClientId, ClientStatus>,
-                                              HashMap<ClientId, ClientStatus>),
-                                             ()>)
+                       mut future: BoxFuture<(RoomStatus, RoomStatus), ()>)
                        -> GameFuturePollReturn {
         let (player_statuses, spectator_statuses) = match future.poll() {
             Ok(Async::Ready(v)) => v,
@@ -110,9 +108,7 @@ impl<R> GameFuture<R>
     }
 
     fn start_round(&mut self,
-                   mut future: BoxFuture<(HashMap<ClientId, ClientStatus>,
-                                          HashMap<ClientId, ClientStatus>),
-                                         ()>)
+                   mut future: BoxFuture<(RoomStatus, RoomStatus), ()>)
                    -> GameFuturePollReturn {
         let (player_statuses, spectator_statuses) = match future.poll() {
             Ok(Async::Ready(v)) => v,
@@ -125,24 +121,20 @@ impl<R> GameFuture<R>
     }
 
     fn ask_moves(&mut self,
-                 mut future: BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, Msg>),
-                                       ()>)
+                 mut future: BoxFuture<(RoomStatus, HashMap<ClientId, Msg>), ()>)
                  -> GameFuturePollReturn {
-        let (living_player_statuses, msgs) = match future.poll() {
+        let (living_player_statuses, mut msgs) = match future.poll() {
             Ok(Async::Ready(v)) => v,
             _ => return (AskMoves(future), Suspend),
         };
-        (AdvanceRound(msgs), Continue)
-    }
 
-    fn advance_round(&mut self, mut moves: HashMap<ClientId, Msg>) -> GameFuturePollReturn {
-        let directions = moves.drain()
-            .filter_map(|(id, msg)| if let Msg::Move { direction } = msg {
-                Some((self.all_players.name_of(&id).unwrap().clone(), direction))
-            } else {
-                None
-            })
-            .collect();
+        let mut directions = HashMap::with_capacity(msgs.len());
+        for (id, msg) in msgs.into_iter() {
+            if let Msg::Move { direction } = msg {
+                let name = self.all_players.name_of(&id).unwrap().clone();
+                directions.insert(name, direction);
+            }
+        }
         self.game.as_mut().unwrap().next(Event::Turn(directions));
 
         let new_round = &self.game.as_ref().unwrap().round_state;
@@ -168,9 +160,7 @@ impl<R> GameFuture<R>
     }
 
     fn conclude(&mut self,
-                mut future: BoxFuture<(HashMap<ClientId, ClientStatus>,
-                                       HashMap<ClientId, ClientStatus>),
-                                      ()>)
+                mut future: BoxFuture<(RoomStatus, RoomStatus), ()>)
                 -> GameFuturePollReturn {
         let (player_statuses, spectator_statuses) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
@@ -195,7 +185,6 @@ impl<R> Future for GameFuture<R>
                 ReadyForRound(future) => self.ready_for_round(future),
                 StartRound(future) => self.start_round(future),
                 AskMoves(future) => self.ask_moves(future),
-                AdvanceRound(move_msgs) => self.advance_round(move_msgs),
                 LoopDecision => self.loop_decision(),
                 Concluding(future) => self.conclude(future),
                 EndOfGame => {
