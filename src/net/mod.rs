@@ -11,6 +11,11 @@ use tokio_core::net::TcpStream;
 
 use utils::*;
 
+// Use `comms`. Define some local type aliases and reexport some plain comms one.
+pub use comms::{self, ClientId, ClientStatus, ClientTimeout, Communicator};
+pub type Client = comms::Client<Msg, Msg>;
+pub type Room = comms::Room<Msg, Msg>;
+
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum ClientKind {
     #[serde(rename = "player")]

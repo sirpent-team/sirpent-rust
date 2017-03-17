@@ -26,7 +26,6 @@ use sirpent::utils::*;
 use sirpent::net::*;
 use sirpent::engine::*;
 use sirpent::state::*;
-use sirpent::net::clients::*;
 
 fn main() {
     drop(env_logger::init());

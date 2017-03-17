@@ -1,34 +1,21 @@
 use rand::Rng;
-use std::marker::Send;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use futures::{future, Async, BoxFuture, Future, Sink, Poll};
+use futures::{future, Async, BoxFuture, Future, Poll};
 
 use super::*;
 use net::*;
-use net::clients::*;
 use utils::*;
 
-pub struct GameFuture<CmdSink, R>
-    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
-          R: Rng
-{
-    game: Option<Game<R>>,
-    players: Option<HashMap<String, CmdSink>>,
-    spectators: Option<HashMap<String, CmdSink>>,
-    current_stage: Option<GameFutureStage<CmdSink>>,
-    timeout: Option<Milliseconds>,
-}
-
-enum GameFutureStage<CmdSink>
-    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static
-{
+enum GameFutureStage {
     StartOfGame,
-    ReadyForRound(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
-    StartRound(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
-    AskMoves(BoxFuture<(HashMap<String, (Msg, CmdSink)>), Error>),
-    AdvanceRound(HashMap<String, Msg>),
+    ReadyForRound(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, ClientStatus>),
+                            ()>),
+    StartRound(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, ClientStatus>), ()>),
+    AskMoves(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, Msg>), ()>),
+    AdvanceRound(HashMap<ClientId, Msg>),
     LoopDecision,
-    Concluding(BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>), Error>),
+    Concluding(BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, ClientStatus>), ()>),
     EndOfGame,
 }
 
@@ -37,120 +24,126 @@ enum GameFutureStageControl {
     Suspend,
 }
 
+pub struct GameFuture<R>
+    where R: Rng
+{
+    game: Option<Game<R>>,
+    all_players: Room,
+    living_players: Room,
+    spectators: Arc<Mutex<Room>>,
+    current_stage: Option<GameFutureStage>,
+    timeout: Option<Milliseconds>,
+}
+
 use self::GameFutureStage::*;
 use self::GameFutureStageControl::*;
 
-type GameFuturePollreturn<CmdSink> = (GameFutureStage<CmdSink>, GameFutureStageControl);
+type GameFuturePollReturn = (GameFutureStage, GameFutureStageControl);
 
-impl<CmdSink, R> GameFuture<CmdSink, R>
-    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
-          R: Rng
+impl<R> GameFuture<R>
+    where R: Rng
 {
     pub fn new(mut game: Game<R>,
-               players: HashMap<String, CmdSink>,
-               spectators: HashMap<String, CmdSink>,
+               players: Room,
+               spectators: Arc<Mutex<Room>>,
                timeout: Option<Milliseconds>)
                -> Self {
-        for name in players.keys() {
-            game.add_player(name.clone());
+        for name in players.client_names() {
+            if let Some(name) = name {
+                game.add_player(name.clone());
+            }
         }
 
         GameFuture {
             game: Some(game),
-            players: Some(players),
-            spectators: Some(spectators),
+            all_players: players.clone(),
+            living_players: players,
+            spectators: spectators,
             current_stage: Some(StartOfGame),
             timeout: timeout,
         }
     }
 
-    fn start_of_game(&mut self) -> GameFuturePollreturn<CmdSink> {
+    fn all_players(&mut self) -> &mut Room {
+        &mut self.all_players //.expect("Players must be present.")
+    }
+
+    fn living_players(&mut self) -> &mut Room {
+        &mut self.living_players //.expect("Players must be present.")
+    }
+
+    // fn spectators(&mut self) -> MutexGuard<Room> {
+    //     self.spectators.lock().unwrap() //.expect("Spectators must be present.").lock().unwrap()
+    // }
+
+    fn start_of_game(&mut self) -> GameFuturePollReturn {
         let game = self.game.as_ref().unwrap().game_state.clone();
         let new_game_msg = Msg::Game { game: game };
 
-        let players = self.players.take().unwrap();
-        let spectators = self.spectators.take().unwrap();
-
-        let f1 = group_transmit(players, MessageMode::Constant(new_game_msg.clone()))
-            .map(retain_oks);
-        let f2 = group_transmit(spectators, MessageMode::Constant(new_game_msg)).map(retain_oks);
-        let new_game_future = f1.join(f2).boxed();
+        let players_txing = self.all_players().broadcast(new_game_msg.clone());
+        let spectators_txing = self.spectators.lock().unwrap().broadcast(new_game_msg);
+        let new_game_future = players_txing.join(spectators_txing).boxed();
         (ReadyForRound(new_game_future), Continue)
     }
 
     fn ready_for_round(&mut self,
-                       mut future: BoxFuture<(HashMap<String, CmdSink>,
-                                              HashMap<String, CmdSink>),
-                                             Error>)
-                       -> GameFuturePollreturn<CmdSink> {
-        let (players, spectators) = match future.poll() {
-            Ok(Async::Ready(pair)) => pair,
+                       mut future: BoxFuture<(HashMap<ClientId, ClientStatus>,
+                                              HashMap<ClientId, ClientStatus>),
+                                             ()>)
+                       -> GameFuturePollReturn {
+        let (player_statuses, spectator_statuses) = match future.poll() {
+            Ok(Async::Ready(v)) => v,
             _ => return (ReadyForRound(future), Suspend),
         };
 
-        let game = self.game.as_ref().unwrap();
-        let round = game.round_state.clone();
-        let game_uuid = game.game_state.uuid;
+        let round = self.game.as_ref().unwrap().round_state.clone();
+        let game_uuid = self.game.as_ref().unwrap().game_state.uuid;
         let round_msg = Msg::Round {
             round: round,
             game_uuid: game_uuid,
         };
 
-        let players_txing = group_transmit(players, MessageMode::Constant(round_msg.clone()))
-            .map(retain_oks);
-        let spectators_txing = group_transmit(spectators, MessageMode::Constant(round_msg))
-            .map(retain_oks);
+        let players_txing = self.all_players().broadcast(round_msg.clone());
+        let spectators_txing = self.spectators.lock().unwrap().broadcast(round_msg);
         let round_future = players_txing.join(spectators_txing).boxed();
         (StartRound(round_future), Continue)
     }
 
     fn start_round(&mut self,
-                   mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                         Error>)
-                   -> GameFuturePollreturn<CmdSink> {
-        let (mut players, spectators) = match future.poll() {
-            Ok(Async::Ready(pair)) => pair,
-            _ => return (StartRound(future), Suspend),
+                   mut future: BoxFuture<(HashMap<ClientId, ClientStatus>,
+                                          HashMap<ClientId, ClientStatus>),
+                                         ()>)
+                   -> GameFuturePollReturn {
+        let (player_statuses, spectator_statuses) = match future.poll() {
+            Ok(Async::Ready(v)) => v,
+            _ => return (ReadyForRound(future), Suspend),
         };
-        self.spectators = Some(spectators);
 
-        let round = self.game.as_ref().unwrap().round_state.clone();
-        let (living_players, dead_players) = players.drain()
-            .partition(|&(ref name, _)| round.snakes.contains_key(name));
-        self.players = Some(dead_players);
-
-        let move_future = group_receive(living_players, self.timeout).map(retain_oks).boxed();
-        (AskMoves(move_future), Continue)
+        let rxing_timeout = ClientTimeout::keep_alive_after(self.timeout.map(|m| *m));
+        let living_players_rxing = self.living_players().receive(rxing_timeout).boxed();
+        (AskMoves(living_players_rxing), Continue)
     }
 
     fn ask_moves(&mut self,
-                 mut future: BoxFuture<(HashMap<String, (Msg, CmdSink)>), Error>)
-                 -> GameFuturePollreturn<CmdSink> {
-        let mut answers = match future.poll() {
-            Ok(Async::Ready(answers)) => answers,
+                 mut future: BoxFuture<(HashMap<ClientId, ClientStatus>, HashMap<ClientId, Msg>),
+                                       ()>)
+                 -> GameFuturePollReturn {
+        let (living_player_statuses, msgs) = match future.poll() {
+            Ok(Async::Ready(v)) => v,
             _ => return (AskMoves(future), Suspend),
         };
-        let mut living_players = HashMap::with_capacity(answers.len());
-        let msgs = answers.drain()
-            .map(|(name, (msg, cmd_tx))| {
-                living_players.insert(name.clone(), cmd_tx);
-                (name, msg)
-            })
-            .collect();
-
-        self.players.as_mut().unwrap().extend(living_players.into_iter());
-
         (AdvanceRound(msgs), Continue)
     }
 
-    fn advance_round(&mut self, mut moves: HashMap<String, Msg>) -> GameFuturePollreturn<CmdSink> {
+    fn advance_round(&mut self, mut moves: HashMap<ClientId, Msg>) -> GameFuturePollReturn {
         let directions = moves.drain()
-            .filter_map(|(name, msg)| if let Msg::Move { direction } = msg {
-                Some((name.clone(), Ok(direction)))
+            .filter_map(|(id, msg)| if let Msg::Move { direction } = msg {
+                Some((self.all_players.name_of(&id).unwrap().clone(), Ok(direction)))
             } else {
                 None
-            });
-        self.game.as_mut().unwrap().advance_round(directions.collect());
+            })
+            .collect();
+        self.game.as_mut().unwrap().advance_round(directions);
 
         let new_round = &self.game.as_ref().unwrap().round_state;
         println!("Advanced round to {:?}", new_round.clone());
@@ -158,52 +151,39 @@ impl<CmdSink, R> GameFuture<CmdSink, R>
         (LoopDecision, Continue)
     }
 
-    fn loop_decision(&mut self) -> GameFuturePollreturn<CmdSink> {
+    fn loop_decision(&mut self) -> GameFuturePollReturn {
         if self.game.as_ref().unwrap().concluded() {
-            let game = self.game.as_ref().unwrap();
-            let round = game.round_state.clone();
-            let game_uuid = game.game_state.uuid;
+            let round = self.game.as_ref().unwrap().round_state.clone();
+            let game_uuid = self.game.as_ref().unwrap().game_state.uuid;
             let game_over_msg = Msg::outcome(round, game_uuid);
 
-            let players = self.players.take().unwrap();
-            let spectators = self.spectators.take().unwrap();
-
-            let players_txing = group_transmit(players,
-                                               MessageMode::Constant(game_over_msg.clone()))
-                .map(retain_oks);
-            let spectators_txing = group_transmit(spectators, MessageMode::Constant(game_over_msg))
-                .map(retain_oks);
+            let players_txing = self.all_players().broadcast(game_over_msg.clone());
+            let spectators_txing = self.spectators.lock().unwrap().broadcast(game_over_msg);
             let concluding_future = players_txing.join(spectators_txing).boxed();
             (Concluding(concluding_future), Continue)
         } else {
-            // returns players despite no future being run. Believed negligible-cost.
-            let players = self.players.take().unwrap();
-            let spectators = self.spectators.take().unwrap();
-            let players_done = future::ok((players, spectators)).boxed();
-            (ReadyForRound(players_done), Continue)
+            // While this type needs superceding, this empty future is a particular codesmell.
+            (ReadyForRound(future::ok((HashMap::new(), HashMap::new())).boxed()), Continue)
         }
     }
 
     fn conclude(&mut self,
-                mut future: BoxFuture<(HashMap<String, CmdSink>, HashMap<String, CmdSink>),
-                                      Error>)
-                -> GameFuturePollreturn<CmdSink> {
-        let (players, spectators) = match future.poll() {
+                mut future: BoxFuture<(HashMap<ClientId, ClientStatus>,
+                                       HashMap<ClientId, ClientStatus>),
+                                      ()>)
+                -> GameFuturePollReturn {
+        let (player_statuses, spectator_statuses) = match future.poll() {
             Ok(Async::Ready(pair)) => pair,
             _ => return (StartRound(future), Suspend),
         };
-
-        self.players = Some(players);
-        self.spectators = Some(spectators);
         (EndOfGame, Continue)
     }
 }
 
-impl<CmdSink, R> Future for GameFuture<CmdSink, R>
-    where CmdSink: Sink<SinkItem = Cmd, SinkError = Error> + Send + 'static,
-          R: Rng
+impl<R> Future for GameFuture<R>
+    where R: Rng
 {
-    type Item = (Game<R>, HashMap<String, CmdSink>, HashMap<String, CmdSink>);
+    type Item = (Game<R>, Room, Arc<Mutex<Room>>);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -220,9 +200,9 @@ impl<CmdSink, R> Future for GameFuture<CmdSink, R>
                 Concluding(future) => self.conclude(future),
                 EndOfGame => {
                     let game = self.game.take().unwrap();
-                    let players = self.players.take().unwrap();
-                    let spectators = self.spectators.take().unwrap();
-                    let return_triple = (game, players, spectators);
+                    let all_players = self.all_players.clone();
+                    let spectators = self.spectators.clone();
+                    let return_triple = (game, all_players, spectators);
                     return Ok(Async::Ready(return_triple));
                 }
             };
