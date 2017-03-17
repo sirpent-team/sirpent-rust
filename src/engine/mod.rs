@@ -3,14 +3,27 @@ use std::collections::HashMap;
 
 use state::*;
 use state::grids::*;
-use errors::*;
 
 mod future;
 
 pub use self::future::*;
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum State {
+    Start,
+    Round,
+    End,
+    InvalidTransition(Box<State>, Event),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Event {
+    Turn(HashMap<String, Direction>),
+}
+
 #[derive(Debug)]
 pub struct Game<R: Rng> {
+    state: State,
     pub rng: Box<R>,
     pub grid: Grid,
     pub game_state: GameState,
@@ -20,6 +33,7 @@ pub struct Game<R: Rng> {
 impl<R: Rng> Game<R> {
     pub fn new(rng: R, grid: Grid) -> Self {
         let mut game = Game {
+            state: State::Start,
             rng: Box::new(rng),
             grid: grid,
             game_state: GameState::new(grid),
@@ -50,7 +64,22 @@ impl<R: Rng> Game<R> {
         final_name
     }
 
-    pub fn concluded(&self) -> bool {
+    pub fn next(&mut self, event: Event) {
+        self.state = match (self.state.clone(), event) {
+            (State::Start, Event::Turn(directions)) |
+            (State::Round, Event::Turn(directions)) => {
+                self.advance_round(directions);
+                if self.concluded() {
+                    State::End
+                } else {
+                    State::Round
+                }
+            }
+            (s, e) => State::InvalidTransition(Box::new(s), e),
+        };
+    }
+
+    fn concluded(&self) -> bool {
         let number_of_living_snakes = self.round_state.snakes.len();
         match number_of_living_snakes {
             0 | 1 => true,
@@ -58,7 +87,19 @@ impl<R: Rng> Game<R> {
         }
     }
 
-    pub fn advance_round(&mut self, moves: HashMap<String, Result<Direction>>) -> RoundState {
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
+    pub fn game_state(&self) -> &GameState {
+        &self.game_state
+    }
+
+    pub fn round_state(&self) -> &RoundState {
+        &self.round_state
+    }
+
+    fn advance_round(&mut self, moves: HashMap<String, Direction>) -> RoundState {
         let mut next_round: RoundState = self.round_state.clone();
 
         // N.B. does not free memory.
@@ -92,7 +133,7 @@ impl<R: Rng> Game<R> {
 
     fn snake_movement(&mut self,
                       next_round: &mut RoundState,
-                      mut moves: HashMap<String, Result<Direction>>) {
+                      mut moves: HashMap<String, Direction>) {
         // Apply movement and remove snakes that did not move.
         // Snake plans are Result<Direction, MoveError>. MoveError = String.
         // So we can specify an underlying error rather than just omitting any move.
@@ -101,7 +142,7 @@ impl<R: Rng> Game<R> {
 
         for (name, snake) in &mut next_round.snakes {
             match moves.remove(name) {
-                Some(Ok(direction)) => {
+                Some(direction) => {
                     snake.step_in_direction(direction);
                     next_round.directions.insert(name.clone(), direction);
                 }

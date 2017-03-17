@@ -138,12 +138,12 @@ impl<R> GameFuture<R>
     fn advance_round(&mut self, mut moves: HashMap<ClientId, Msg>) -> GameFuturePollReturn {
         let directions = moves.drain()
             .filter_map(|(id, msg)| if let Msg::Move { direction } = msg {
-                Some((self.all_players.name_of(&id).unwrap().clone(), Ok(direction)))
+                Some((self.all_players.name_of(&id).unwrap().clone(), direction))
             } else {
                 None
             })
             .collect();
-        self.game.as_mut().unwrap().advance_round(directions);
+        self.game.as_mut().unwrap().next(Event::Turn(directions));
 
         let new_round = &self.game.as_ref().unwrap().round_state;
         println!("Advanced round to {:?}", new_round.clone());
