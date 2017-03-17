@@ -92,8 +92,4 @@ mod test {
     pub fn mock_client(tx: mpsc::Sender<TinyCommand>) -> Client<TinyMsg, TinyMsg> {
         Client::new(None, tx)
     }
-
-    pub fn mock_room() -> Room<TinyMsg, TinyMsg> {
-        Room::new()
-    }
 }

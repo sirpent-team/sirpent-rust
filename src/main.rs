@@ -1,3 +1,4 @@
+/*
 extern crate log;
 extern crate env_logger;
 extern crate futures;
@@ -237,3 +238,4 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
             .boxed()
     }))
 }
+*/

@@ -17,8 +17,9 @@ impl<T, R> Room<T, R>
     where T: Send + 'static,
           R: Send + 'static
 {
-    pub fn new() -> Room<T, R> {
-        Room { clients: HashMap::new() }
+    pub fn new(clients: Vec<Client<T, R>>) -> Room<T, R> {
+        let clients = clients.into_iter().map(|c| (c.id(), c)).collect();
+        Room { clients: clients }
     }
 
     pub fn client_ids(&self) -> Vec<ClientId> {
@@ -42,6 +43,15 @@ impl<T, R> Room<T, R>
               G: Future
     {
         join_all(self.clients.values_mut().map(f).collect::<Vec<_>>())
+    }
+}
+
+impl<T, R> Default for Room<T, R>
+    where T: Send + 'static,
+          R: Send + 'static
+{
+    fn default() -> Room<T, R> {
+        Room { clients: HashMap::new() }
     }
 }
 
@@ -90,31 +100,29 @@ impl<T, R> Communicator for Room<T, R>
 
 #[cfg(test)]
 mod tests {
-    /*
     use super::*;
     use super::test::*;
-    use uuid::Uuid;
-    use futures::sync::mpsc;
-    use futures::{Stream, executor};
-    use std::sync::Arc;
+    use futures::Stream;
 
     #[test]
     fn can_transmit() {
-        let (tx, rx) = mpsc::channel(1);
-        let uuid = Uuid::new_v4();
-        let mut group = Group::new(uuid, None, tx);
-        let mut rx_stream = rx.wait().peekable();
-        for _ in 0..10 {
-            let msg = Msg::version();
-            client.transmit(msg.clone()).wait().unwrap();
-            match rx_stream.next() {
-                Some(Ok(Command::Transmit(uuid2, msg2))) => {
-                    assert!(uuid == uuid2);
-                    assert!(msg == msg2);
-                }
-                _ => assert!(false),
-            }
+        let (rx0, client0) = mock_client_channelled();
+        let mut client0_rx = rx0.wait().peekable();
+        let client0_id = client0.id();
+
+        let (rx1, client1) = mock_client_channelled();
+        let mut client1_rx = rx1.wait().peekable();
+        let client1_id = client1.id();
+
+        let mut room = Room::new(vec![client0, client1]);
+
+        let mut msgs = HashMap::new();
+        msgs.insert(client0_id, TinyMsg::A);
+        msgs.insert(client1_id, TinyMsg::B("entropy".to_string()));
+        room.transmit(msgs).wait().unwrap();
+        match (client0_rx.next(), client1_rx.next()) {
+            (Some(Ok(_)), Some(Ok(_))) => {}
+            _ => assert!(false),
         }
     }
-    */
 }

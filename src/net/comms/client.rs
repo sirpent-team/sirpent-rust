@@ -138,21 +138,25 @@ mod tests {
         let (_, client1) = mock_client_channelled();
 
         // Adding of a `Client` to a `Room` returns `true`.
-        let mut room = mock_room();
-        assert!(room.client_ids().is_empty());
+        let mut room = Room::default();
+        assert_eq!(room.client_ids().len(), 0);
         assert!(client0.clone().join(&mut room));
-        assert!(room.client_ids() == vec![client0.id]);
+        assert_eq!(room.client_ids(), vec![client0.id]);
 
         // Adding a `Client` whose ID was already present returns `false` and doesn't
         // add a duplicate.
         let client0_id = client0.id;
         assert!(!client0.join(&mut room));
-        assert!(room.client_ids() == vec![client0_id]);
+        assert_eq!(room.client_ids(), vec![client0_id]);
 
         // Adding a different-IDed `Client` to a `Room` works.
         let client1_id = client1.id;
         assert!(client1.join(&mut room));
-        assert!(room.client_ids() == vec![client0_id, client1_id]);
+        // Extended comparison necessary because ordering not preserved.
+        let client_ids = room.client_ids();
+        assert!(client_ids.len() == 2);
+        assert!(client_ids.contains(&client0_id));
+        assert!(client_ids.contains(&client1_id));
     }
 
     #[test]
@@ -167,8 +171,8 @@ mod tests {
 
             match rx_stream.next() {
                 Some(Ok(Command::Transmit(client_id, msg2))) => {
-                    assert!(client_id == client.id());
-                    assert!(msg == msg2);
+                    assert_eq!(client_id, client.id());
+                    assert_eq!(msg, msg2);
                 }
                 _ => assert!(false),
             }
@@ -191,7 +195,7 @@ mod tests {
 
             match rx_stream.next().unwrap().unwrap() {
                 Command::ReceiveInto(client_id, ClientTimeout::None, msg_forward_tx) => {
-                    assert!(client_id == client.id());
+                    assert_eq!(client_id, client.id());
                     msg_forward_tx.complete(msg.clone());
                 }
                 _ => assert!(false),
@@ -199,9 +203,9 @@ mod tests {
 
             match future.wait_future() {
                 Ok((id, status, maybe_msg)) => {
-                    assert!(id == client.id);
-                    assert!(status == ClientStatus::Ready);
-                    assert!(msg == maybe_msg.unwrap());
+                    assert_eq!(id, client.id);
+                    assert_eq!(status, ClientStatus::Ready);
+                    assert_eq!(msg, maybe_msg.unwrap());
                 }
                 _ => assert!(false),
             }
@@ -226,7 +230,7 @@ mod tests {
         for &mut (ref mut msg, _) in &mut futures {
             match rx_stream.next().unwrap().unwrap() {
                 Command::ReceiveInto(client_id, ClientTimeout::None, msg_forward_tx) => {
-                    assert!(client_id == client.id);
+                    assert_eq!(client_id, client.id);
                     msg_forward_tx.complete(msg.clone());
                 }
                 _ => assert!(false),
@@ -236,9 +240,9 @@ mod tests {
         for &mut (ref mut msg, ref mut future) in &mut futures {
             match future.wait_future() {
                 Ok((id, status, maybe_msg)) => {
-                    assert!(id == client.id);
-                    assert!(status == ClientStatus::Ready);
-                    assert!(msg.clone() == maybe_msg.unwrap());
+                    assert_eq!(id, client.id);
+                    assert_eq!(status, ClientStatus::Ready);
+                    assert_eq!(msg.clone(), maybe_msg.unwrap());
                 }
                 _ => assert!(false),
             }
@@ -258,7 +262,7 @@ mod tests {
 
             match rx_stream.next().unwrap().unwrap() {
                 Command::StatusInto(client_id, status_reply_tx) => {
-                    assert!(client_id == client.id());
+                    assert_eq!(client_id, client.id());
                     status_reply_tx.complete(ClientStatus::Ready);
                 }
                 _ => assert!(false),
@@ -266,8 +270,8 @@ mod tests {
 
             match future.wait_future() {
                 Ok((id, status)) => {
-                    assert!(id == client.id);
-                    assert!(status == ClientStatus::Ready);
+                    assert_eq!(id, client.id);
+                    assert_eq!(status, ClientStatus::Ready);
                 }
                 _ => assert!(false),
             }
@@ -285,8 +289,8 @@ mod tests {
             client.transmit(msg.clone()).wait().unwrap();
             match rx_stream.next() {
                 Some(Ok(Command::Transmit(client_id, msg2))) => {
-                    assert!(client_id == client.id());
-                    assert!(msg == msg2);
+                    assert_eq!(client_id, client.id());
+                    assert_eq!(msg, msg2);
                 }
                 _ => assert!(false),
             }

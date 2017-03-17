@@ -18,8 +18,8 @@ struct ClientRelay<A, B, T, R>
           B: Stream<Item = R> + 'static,
           A::SinkError: Debug,
           B::Error: Debug,
-          T: Send + 'static,
-          R: Send + 'static
+          T: Clone + Debug + PartialEq + Send + 'static,
+          R: Clone + Debug + PartialEq + Send + 'static
 {
     id: ClientId,
     name: Option<String>,
@@ -34,8 +34,8 @@ impl<A, B, T, R> ClientRelay<A, B, T, R>
           B: Stream<Item = R> + 'static,
           A::SinkError: Debug,
           B::Error: Debug,
-          T: Send + 'static,
-          R: Send + 'static
+          T: Clone + Debug + PartialEq + Send + 'static,
+          R: Clone + Debug + PartialEq + Send + 'static
 {
     pub fn new(id: ClientId,
                name: Option<String>,
@@ -132,8 +132,8 @@ impl<A, B, T, R> Future for ClientRelay<A, B, T, R>
           B: Stream<Item = R> + 'static,
           A::SinkError: Debug,
           B::Error: Debug,
-          T: Send + 'static,
-          R: Send + 'static
+          T: Clone + Debug + PartialEq + Send + 'static,
+          R: Clone + Debug + PartialEq + Send + 'static
 {
     type Item = ();
     type Error = RelayError<A::SinkError, B::Error>;
@@ -166,7 +166,7 @@ impl<A, B, T, R> Future for ClientRelay<A, B, T, R>
 struct ClientRelayTx<A, T>
     where A: Sink<SinkItem = T> + 'static,
           A::SinkError: Debug,
-          T: Send + 'static
+          T: Clone + Debug + PartialEq + Send + 'static
 {
     tx: A,
     buffer: VecDeque<T>,
@@ -175,7 +175,7 @@ struct ClientRelayTx<A, T>
 impl<A, T> ClientRelayTx<A, T>
     where A: Sink<SinkItem = T> + 'static,
           A::SinkError: Debug,
-          T: Send + 'static
+          T: Clone + Debug + PartialEq + Send + 'static
 {
     fn new(tx: A) -> ClientRelayTx<A, T> {
         ClientRelayTx {
@@ -214,7 +214,7 @@ impl<A, T> ClientRelayTx<A, T>
 struct ClientRelayRx<B, R>
     where B: Stream<Item = R> + 'static,
           B::Error: Debug,
-          R: Send + 'static
+          R: Clone + Debug + PartialEq + Send + 'static
 {
     rx: B,
     buffer: VecDeque<R>,
@@ -225,7 +225,7 @@ struct ClientRelayRx<B, R>
 impl<B, R> ClientRelayRx<B, R>
     where B: Stream<Item = R> + 'static,
           B::Error: Debug,
-          R: Send + 'static
+          R: Clone + Debug + PartialEq + Send + 'static
 {
     fn new(rx: B) -> ClientRelayRx<B, R> {
         ClientRelayRx {
