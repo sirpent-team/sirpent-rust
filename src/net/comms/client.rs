@@ -1,5 +1,4 @@
 use futures::{Sink, Future, BoxFuture, future};
-use errors::Error;
 use super::*;
 use futures::sync::{mpsc, oneshot};
 
@@ -20,15 +19,12 @@ impl<T, R> Client<T, R>
     where T: Send + 'static,
           R: Send + 'static
 {
-    pub fn new(id: ClientId,
-               name: Option<String>,
-               cmd_tx: mpsc::Sender<Command<T, R>>)
-               -> Result<Client<T, R>, Error> {
-        Ok(Client {
-            id: id,
+    pub fn new(name: Option<String>, cmd_tx: mpsc::Sender<Command<T, R>>) -> Client<T, R> {
+        Client {
+            id: Uuid::new_v4(),
             name: name,
             cmd_tx: cmd_tx,
-        })
+        }
     }
 
     pub fn id(&self) -> ClientId {
@@ -37,6 +33,14 @@ impl<T, R> Client<T, R>
 
     pub fn name(&self) -> Option<String> {
         self.name.clone()
+    }
+
+    pub fn join(self, room: &mut Room<T, R>) -> bool {
+        if room.contains(&self.id) {
+            return false;
+        }
+        room.clients.insert(self.id, self);
+        true
     }
 
     fn command(&mut self, cmd: Command<T, R>) -> BoxFuture<ClientStatus, ClientStatus> {
@@ -72,7 +76,7 @@ impl<T, R> Communicator for Client<T, R>
           R: Send + 'static
 {
     type Transmit = T;
-    type Receive = (ClientId, (ClientStatus, Option<R>));
+    type Receive = (ClientId, ClientStatus, Option<R>);
     type Status = (ClientId, ClientStatus);
     type Error = ();
 
@@ -91,8 +95,8 @@ impl<T, R> Communicator for Client<T, R>
                 Err(e) => future::err(e).boxed(),
             })
             .then(move |v| match v {
-                Ok(m) => future::ok((id, (ClientStatus::Ready, Some(m)))).boxed(),
-                Err(e) => future::ok((id, (e, None))).boxed(),
+                Ok(m) => future::ok((id, ClientStatus::Ready, Some(m))).boxed(),
+                Err(e) => future::ok((id, e, None)).boxed(),
             })
             .boxed()
     }
@@ -124,43 +128,41 @@ impl<T, R> Communicator for Client<T, R>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use super::test::*;
     use futures::sync::mpsc;
     use futures::{Stream, executor};
-    use std::sync::Arc;
-    use net::Msg;
 
-    fn unpark_noop() -> Arc<executor::Unpark> {
-        struct Foo;
+    #[test]
+    fn can_join_room() {
+        let (_, client0) = mock_client_channelled();
+        let (_, client1) = mock_client_channelled();
 
-        impl executor::Unpark for Foo {
-            fn unpark(&self) {}
-        }
+        // Adding of a `Client` to a `Room` returns `true`.
+        let mut room = mock_room();
+        assert!(room.client_ids().is_empty());
+        assert!(client0.clone().join(&mut room));
+        assert!(room.client_ids() == vec![client0.id]);
 
-        Arc::new(Foo)
-    }
+        // Adding a `Client` whose ID was already present returns `false` and doesn't
+        // add a duplicate.
+        let client0_id = client0.id;
+        assert!(!client0.join(&mut room));
+        assert!(room.client_ids() == vec![client0_id]);
 
-    fn mock_command_channel(tx: mpsc::Sender<Command>) -> CommandChannel<mpsc::Sender<Command>> {
-        CommandChannel::new_for_relay(Uuid::new_v4(), tx)
-    }
-
-    fn mock_client(command_channel: &CommandChannel<mpsc::Sender<Command>>)
-                   -> Client<mpsc::Sender<Command>, mpsc::SendError<Command>> {
-        let client_id = CommunicationId {
-            client_id: Uuid::new_v4(),
-            relay_id: command_channel.relay_id(),
-        };
-        Client::new(client_id, None, command_channel.clone()).unwrap()
+        // Adding a different-IDed `Client` to a `Room` works.
+        let client1_id = client1.id;
+        assert!(client1.join(&mut room));
+        assert!(room.client_ids() == vec![client0_id, client1_id]);
     }
 
     #[test]
     fn can_transmit() {
         let (tx, rx) = mpsc::channel(1);
         let mut rx_stream = rx.wait().peekable();
-        let mut client = mock_client(&mock_command_channel(tx));
+        let mut client = mock_client(tx);
 
         for _ in 0..10 {
-            let msg = Msg::version();
+            let msg = TinyMsg::A;
             client.transmit(msg.clone()).wait().unwrap();
 
             match rx_stream.next() {
@@ -177,10 +179,10 @@ mod tests {
     fn can_receive() {
         let (tx, rx) = mpsc::channel(1);
         let mut rx_stream = rx.wait().peekable();
-        let mut client = mock_client(&mock_command_channel(tx));
+        let mut client = mock_client(tx);
 
         for _ in 0..10 {
-            let msg = Msg::version();
+            let msg = TinyMsg::B("ABC".to_string());
             let receive = client.receive(ClientTimeout::None);
 
             let mut future = executor::spawn(receive.fuse());
@@ -188,7 +190,7 @@ mod tests {
             assert!(future.poll_future(unpark_noop()).unwrap().is_not_ready());
 
             match rx_stream.next().unwrap().unwrap() {
-                Command::ReceiveInto(client_id, msg_forward_tx, ClientTimeout::None) => {
+                Command::ReceiveInto(client_id, ClientTimeout::None, msg_forward_tx) => {
                     assert!(client_id == client.id());
                     msg_forward_tx.complete(msg.clone());
                 }
@@ -196,7 +198,11 @@ mod tests {
             }
 
             match future.wait_future() {
-                Ok(msg2) => assert!(msg == msg2),
+                Ok((id, status, maybe_msg)) => {
+                    assert!(id == client.id);
+                    assert!(status == ClientStatus::Ready);
+                    assert!(msg == maybe_msg.unwrap());
+                }
                 _ => assert!(false),
             }
         }
@@ -206,12 +212,12 @@ mod tests {
     fn can_receive_queued() {
         let (tx, rx) = mpsc::channel(1);
         let mut rx_stream = rx.wait().peekable();
-        let mut client = mock_client(&mock_command_channel(tx));
+        let mut client = mock_client(tx);
 
         let mut futures = vec![];
 
         for _ in 0..10 {
-            let msg = Msg::version();
+            let msg = TinyMsg::A;
             let mut future = executor::spawn(client.receive(ClientTimeout::None));
             assert!(future.poll_future(unpark_noop()).unwrap().is_not_ready());
             futures.push((msg, future));
@@ -219,8 +225,8 @@ mod tests {
 
         for &mut (ref mut msg, _) in &mut futures {
             match rx_stream.next().unwrap().unwrap() {
-                Command::ReceiveInto(client_id, msg_forward_tx, ClientTimeout::None) => {
-                    assert!(client_id == client.id());
+                Command::ReceiveInto(client_id, ClientTimeout::None, msg_forward_tx) => {
+                    assert!(client_id == client.id);
                     msg_forward_tx.complete(msg.clone());
                 }
                 _ => assert!(false),
@@ -229,7 +235,11 @@ mod tests {
 
         for &mut (ref mut msg, ref mut future) in &mut futures {
             match future.wait_future() {
-                Ok(msg2) => assert!(msg.clone() == msg2),
+                Ok((id, status, maybe_msg)) => {
+                    assert!(id == client.id);
+                    assert!(status == ClientStatus::Ready);
+                    assert!(msg.clone() == maybe_msg.unwrap());
+                }
                 _ => assert!(false),
             }
         }
@@ -239,7 +249,7 @@ mod tests {
     fn can_status() {
         let (tx, rx) = mpsc::channel(1);
         let mut rx_stream = rx.wait().peekable();
-        let mut client = mock_client(&mock_command_channel(tx));
+        let mut client = mock_client(tx);
 
         for _ in 0..10 {
             let mut future = executor::spawn(client.status());
@@ -255,7 +265,10 @@ mod tests {
             }
 
             match future.wait_future() {
-                Ok(status) => assert!(status == ClientStatus::Ready),
+                Ok((id, status)) => {
+                    assert!(id == client.id);
+                    assert!(status == ClientStatus::Ready);
+                }
                 _ => assert!(false),
             }
         }
@@ -265,10 +278,10 @@ mod tests {
     fn can_close() {
         let (tx, rx) = mpsc::channel(1);
         let mut rx_stream = rx.wait().peekable();
-        let mut client = mock_client(&mock_command_channel(tx));
+        let mut client = mock_client(tx);
 
         for _ in 0..10 {
-            let msg = Msg::version();
+            let msg = TinyMsg::B("test".to_string());
             client.transmit(msg.clone()).wait().unwrap();
             match rx_stream.next() {
                 Some(Ok(Command::Transmit(client_id, msg2))) => {

@@ -1,10 +1,10 @@
 use uuid::Uuid;
 use std::collections::HashSet;
 
+use super::*;
 use utils::*;
 use state::*;
 use state::grids::*;
-use net::clients::*;
 
 pub static PROTOCOL_VERSION: &'static str = "0.4";
 

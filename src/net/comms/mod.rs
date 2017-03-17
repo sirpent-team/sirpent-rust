@@ -1,17 +1,15 @@
 mod client;
 mod room;
-//mod relay;
+mod relay;
 
 pub use self::client::*;
 pub use self::room::*;
-//pub use self::relay::*;
+pub use self::relay::*;
 
-use futures::{Future, Poll, Async, BoxFuture};
-use futures::stream::Stream;
+use futures::{Future, Poll, BoxFuture};
 use uuid::Uuid;
 use std::time::Duration;
 use futures::sync::oneshot;
-use std::mem;
 
 pub type ClientId = Uuid;
 
@@ -25,7 +23,8 @@ pub enum ClientTimeout {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClientStatus {
     Ready,
-    Closed,
+    Closed, 
+    //Missing,
 }
 
 pub enum Command<T, R>
@@ -59,46 +58,42 @@ pub trait Communicator {
     fn close(&mut self) -> BoxFuture<Self::Status, Self::Error>;
 }
 
-/// A future which collects all of the outputs of a stream into a vector of Result<Item, Error>.
-///
-/// This future is created by the `Stream::collect_results` method.
-#[must_use = "streams do nothing unless polled"]
-pub struct CollectResults<S>
-    where S: Stream
-{
-    stream: S,
-    items: Vec<Result<S::Item, S::Error>>,
-}
+// Utilities for testing `Communicator` implementations.
+#[cfg(test)]
+mod test {
+    use super::*;
+    use futures::sync::mpsc;
+    use futures::executor;
+    use std::sync::Arc;
 
-pub fn new<S>(s: S) -> CollectResults<S>
-    where S: Stream
-{
-    CollectResults {
-        stream: s,
-        items: Vec::new(),
+    #[derive(Clone, PartialEq, Debug)]
+    pub enum TinyMsg {
+        A,
+        B(String),
     }
-}
 
-impl<S: Stream> CollectResults<S> {
-    fn finish(&mut self) -> Vec<Result<S::Item, S::Error>> {
-        mem::replace(&mut self.items, Vec::new())
-    }
-}
+    pub type TinyCommand = Command<TinyMsg, TinyMsg>;
 
-impl<S> Future for CollectResults<S>
-    where S: Stream
-{
-    type Item = Vec<Result<S::Item, S::Error>>;
-    type Error = ();
+    pub fn unpark_noop() -> Arc<executor::Unpark> {
+        struct Foo;
 
-    fn poll(&mut self) -> Poll<Self::Item, ()> {
-        loop {
-            match self.stream.poll() {
-                Ok(Async::Ready(Some(e))) => self.items.push(Ok(e)),
-                Ok(Async::Ready(None)) => return Ok(Async::Ready(self.finish())),
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => self.items.push(Err(e)),
-            }
+        impl executor::Unpark for Foo {
+            fn unpark(&self) {}
         }
+
+        Arc::new(Foo)
+    }
+
+    pub fn mock_client_channelled() -> (mpsc::Receiver<TinyCommand>, Client<TinyMsg, TinyMsg>) {
+        let (tx, rx) = mpsc::channel(1);
+        (rx, mock_client(tx))
+    }
+
+    pub fn mock_client(tx: mpsc::Sender<TinyCommand>) -> Client<TinyMsg, TinyMsg> {
+        Client::new(None, tx)
+    }
+
+    pub fn mock_room() -> Room<TinyMsg, TinyMsg> {
+        Room::new()
     }
 }
