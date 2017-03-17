@@ -36,11 +36,7 @@ impl<T, R> Client<T, R>
     }
 
     pub fn join(self, room: &mut Room<T, R>) -> bool {
-        if room.contains(&self.id) {
-            return false;
-        }
-        room.clients.insert(self.id, self);
-        true
+        room.insert(self)
     }
 
     fn command(&mut self, cmd: Command<T, R>) -> BoxFuture<ClientStatus, ClientStatus> {

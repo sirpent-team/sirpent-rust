@@ -8,9 +8,7 @@ pub struct Room<T, R>
     where T: Send + 'static,
           R: Send + 'static
 {
-    // @TODO: When RFC1422 is stable, make this `pub(super)`.
-    #[doc(hidden)]
-    pub clients: HashMap<ClientId, Client<T, R>>,
+    clients: HashMap<ClientId, Client<T, R>>,
 }
 
 impl<T, R> Room<T, R>
@@ -26,6 +24,8 @@ impl<T, R> Room<T, R>
         self.clients.keys().cloned().collect()
     }
 
+    // @TODO: Exists only for `Client::join`. When RFC1422 is stable, make this `pub(super)`.
+    #[doc(hidden)]
     pub fn insert(&mut self, client: Client<T, R>) -> bool {
         if self.contains(&client.id()) {
             return false;
@@ -38,7 +38,11 @@ impl<T, R> Room<T, R>
         self.clients.contains_key(id)
     }
 
-    fn communicate_on_clients<F, G>(&mut self, f: F) -> JoinAll<Vec<G>>
+    fn client_mut(&mut self, id: &ClientId) -> Option<&mut Client<T, R>> {
+        self.clients.get_mut(id)
+    }
+
+    fn communicate_with_all_clients<F, G>(&mut self, f: F) -> JoinAll<Vec<G>>
         where F: FnMut(&mut Client<T, R>) -> G,
               G: Future
     {
@@ -66,13 +70,13 @@ impl<T, R> Communicator for Room<T, R>
 
     fn transmit(&mut self, msgs: Self::Transmit) -> BoxFuture<Self::Status, ()> {
         let client_futures = msgs.into_iter()
-            .filter_map(|(id, msg)| self.clients.get_mut(&id).map(|client| client.transmit(msg)))
+            .filter_map(|(id, msg)| self.client_mut(&id).map(|client| client.transmit(msg)))
             .collect::<Vec<_>>();
         join_all(client_futures).map(|results| results.into_iter().collect()).boxed()
     }
 
     fn receive(&mut self, timeout: ClientTimeout) -> BoxFuture<Self::Receive, ()> {
-        self.communicate_on_clients(|client| client.receive(timeout))
+        self.communicate_with_all_clients(|client| client.receive(timeout))
             .map(|results| {
                 let mut statuses = HashMap::new();
                 let mut msgs = HashMap::new();
@@ -86,13 +90,13 @@ impl<T, R> Communicator for Room<T, R>
     }
 
     fn status(&mut self) -> BoxFuture<Self::Status, ()> {
-        self.communicate_on_clients(|client| client.status())
+        self.communicate_with_all_clients(|client| client.status())
             .map(|results| results.into_iter().collect())
             .boxed()
     }
 
     fn close(&mut self) -> BoxFuture<Self::Status, ()> {
-        self.communicate_on_clients(|client| client.close())
+        self.communicate_with_all_clients(|client| client.close())
             .map(|results| results.into_iter().collect())
             .boxed()
     }
