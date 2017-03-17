@@ -16,7 +16,7 @@ use std::convert::Into;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
-use futures::{future, BoxFuture, Future, Stream, Sink};
+use futures::{future, BoxFuture, Future, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
 use tokio_timer::Timer;
@@ -100,63 +100,49 @@ fn server(listener: TcpListener,
         });
 
     let server = clients.for_each(move |(msg_tx, msg_rx, addr)| {
+            let (mut client, client_relay) =
+                client(Some(format!("{}", addr)), Some(16), msg_tx, msg_rx);
+            handle.spawn(client_relay.map_err(|e| {
+                println!("CLIENTRELAY ERROR: {:?}", e);
+                ()
+            }));
+
             // @TODO: If and when I build a client object, keep addr handy in it.
             let mut names_ref = names.clone();
             let players_ref = players_pool.clone();
             let spectators_ref = spectators_pool.clone();
 
-            let fut = msg_tx.send(Msg::version())
-                .and_then(move |msg_tx| {
-                    msg_rx.into_future()
-                        .map_err(|(e, _)| e)
-                        .and_then(move |(msg, msg_rx)| {
-                            if let Some(Msg::Register { desired_name, kind }) = msg {
-                                let name = find_unique_name(&mut names_ref, desired_name);
-                                let welcome_msg = Msg::Welcome {
-                                    name: name.clone(),
-                                    grid: grid.into(),
-                                    timeout_millis: timeout,
-                                };
-                                msg_tx.send(welcome_msg)
-                                    .map(move |msg_tx| (msg_tx, msg_rx, addr, name, kind))
-                                    .boxed()
-                            } else {
-                                println!("{:?}", msg);
-                                future::err(format!("message was not a Msg::Register :: {:?}", msg)
-                                        .into())
-                                    .boxed()
-                            }
-                        })
-                });
+            let version_tx = client.transmit(Msg::version());
+            let register_rx = client.receive(ClientTimeout::disconnect_after(timeout.map(|m| *m)));
+            handle.spawn(version_tx.join(register_rx)
+                .and_then(move |(_, (_, _, maybe_msg))| {
+                    if let Some(Msg::Register { desired_name, kind }) = maybe_msg {
+                        let name = find_unique_name(&mut names_ref, desired_name);
+                        client.rename(Some(name.clone()));
 
-            let handle2 = handle.clone();
-            let fut = fut.map(move |(msg_tx, msg_rx, _, name, kind)| {
-                // As `name` is already available as this point, we can use it directly.
-                // But when creating Client earlier and then renaming it, format!("{}", addr).
-                let (client, client_relay) = client(Some(name), None, msg_tx, msg_rx);
-                handle2.spawn(client_relay.map_err(|e| {
-                    println!("CLIENTRELAY ERROR: {:?}", e);
-                    ()
+                        let welcome_tx = client.transmit(Msg::Welcome {
+                                name: name,
+                                grid: grid.into(),
+                                timeout_millis: timeout,
+                            })
+                            .map(|_| ());
+
+                        match kind {
+                            ClientKind::Spectator => {
+                                spectators_ref.lock().unwrap().insert(client);
+                            }
+                            ClientKind::Player => {
+                                players_ref.lock().unwrap().push(client);
+                            }
+                        }
+
+                        welcome_tx.boxed()
+                    } else {
+                        println!("Error welcoming client: unexpected {:?}", maybe_msg);
+                        future::err(()).boxed()
+                    }
                 }));
 
-                match kind {
-                    ClientKind::Spectator => {
-                        spectators_ref.lock().unwrap().insert(client);
-                    }
-                    ClientKind::Player => {
-                        players_ref.lock().unwrap().push(client);
-                    }
-                }
-                ()
-            });
-
-            // Close clients with unsuccessful handshakes.
-            let fut = fut.map_err(|e| {
-                println!("Error welcoming client: {:?}", e);
-                ()
-            });
-
-            handle.clone().spawn(fut);
             Ok(())
         })
         .then(|_| Ok(()));
