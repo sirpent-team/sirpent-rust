@@ -3,14 +3,11 @@ use rand::Rng;
 use super::traits::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SquareDirection {
-    #[serde(rename = "north")]
     North,
-    #[serde(rename = "east")]
     East,
-    #[serde(rename = "south")]
     South,
-    #[serde(rename = "west")]
     West,
 }
 

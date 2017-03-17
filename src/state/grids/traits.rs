@@ -31,13 +31,10 @@ pub trait GridTrait
 }
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "tiling")]
+#[serde(tag = "tiling", rename_all = "snake_case")]
 pub enum GridEnum {
-    #[serde(rename = "hexagon")]
     Hexagon(HexagonGrid),
-    #[serde(rename = "square")]
     Square(SquareGrid),
-    #[serde(rename = "triangle")]
     Triangle(TriangleGrid),
 }
 

@@ -9,28 +9,21 @@ use state::grids::*;
 pub static PROTOCOL_VERSION: &'static str = "0.4";
 
 #[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data")]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum Msg {
-    #[serde(rename = "version")]
     Version { sirpent: String, protocol: String },
-    #[serde(rename = "register")]
     Register {
         desired_name: String,
         kind: ClientKind,
     },
-    #[serde(rename = "welcome")]
     Welcome {
         name: String,
         grid: GridEnum,
         timeout_millis: Option<Milliseconds>,
     },
-    #[serde(rename = "game")]
     Game { game: GameState },
-    #[serde(rename = "round")]
     Round { round: RoundState, game_uuid: Uuid },
-    #[serde(rename = "move")]
     Move { direction: Direction },
-    #[serde(rename = "outcome")]
     Outcome {
         winners: HashSet<String>,
         conclusion: RoundState,

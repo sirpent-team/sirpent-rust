@@ -4,14 +4,13 @@ use std::cmp::max;
 use super::traits::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HexagonDirection {
-    #[serde(rename = "north")]
     North,
     #[serde(rename = "northeast")]
     NorthEast,
     #[serde(rename = "southeast")]
     SouthEast,
-    #[serde(rename = "south")]
     South,
     #[serde(rename = "southwest")]
     SouthWest,

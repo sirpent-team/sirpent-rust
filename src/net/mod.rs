@@ -18,10 +18,9 @@ pub type Client = comms::Client<Msg, Msg>;
 pub type Room = comms::Room<Msg, Msg>;
 
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ClientKind {
-    #[serde(rename = "player")]
     Player,
-    #[serde(rename = "spectator")]
     Spectator,
 }
 

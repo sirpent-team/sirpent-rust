@@ -58,12 +58,10 @@ impl Snake {
 // Useful for debugging and statistics.
 // CauseOfDeath converts MoveError to a String in order to be serialisable/deserialisable.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CauseOfDeath {
-    #[serde(rename = "no_move_made")]
     NoMoveMade,
-    #[serde(rename = "collided_with_snake")]
     CollidedWithSnake,
-    #[serde(rename = "collided_with_bounds")]
     CollidedWithBounds,
 }
 
