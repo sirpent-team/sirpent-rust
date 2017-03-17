@@ -23,12 +23,15 @@ extern crate serde_json;
 extern crate quickcheck;
 extern crate futures;
 extern crate tokio_core;
+extern crate tokio_io;
 extern crate tokio_timer;
+extern crate bytes;
 #[macro_use]
 extern crate error_chain;
+extern crate comms;
 
 pub mod state;
-//pub mod engine;
+pub mod engine;
 pub mod net;
 pub mod utils;
 mod errors;
