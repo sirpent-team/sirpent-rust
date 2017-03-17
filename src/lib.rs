@@ -28,7 +28,7 @@ extern crate tokio_timer;
 extern crate bytes;
 #[macro_use]
 extern crate error_chain;
-pub extern crate comms;
+extern crate comms;
 
 pub mod state;
 pub mod engine;

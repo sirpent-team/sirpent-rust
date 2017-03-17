@@ -8,11 +8,12 @@ use serde_json;
 use bytes::{BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder, Framed};
 use tokio_core::net::TcpStream;
+use comms;
 
 use utils::*;
 
 // Use `comms`. Define some local type aliases and reexport some plain comms one.
-pub use comms::{self, ClientId, ClientStatus, ClientTimeout, Communicator};
+pub use comms::{client, ClientId, ClientStatus, ClientTimeout, Communicator};
 pub type Client = comms::Client<Msg, Msg>;
 pub type Room = comms::Room<Msg, Msg>;
 

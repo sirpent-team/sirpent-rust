@@ -6,6 +6,7 @@ extern crate sirpent;
 extern crate serde_json;
 extern crate rand;
 extern crate tokio_timer;
+extern crate tokio_io;
 
 use std::env;
 use std::str;
@@ -14,13 +15,12 @@ use std::thread;
 use std::convert::Into;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use futures::{future, BoxFuture, Future, Stream, Sink};
-use futures::sync::mpsc;
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
-use tokio_core::io::Io;
 use tokio_timer::Timer;
+use tokio_io::AsyncRead;
 
 use sirpent::utils::*;
 use sirpent::net::*;
@@ -50,10 +50,8 @@ fn main() {
     let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-    let spectators: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let players: Arc<Mutex<Vec<Client>>> = Arc::new(Mutex::new(Vec::new()));
+    let spectators: Arc<Mutex<Room>> = Arc::new(Mutex::new(Room::default()));
 
     // Run TCP server to welcome clients and register them as players.
     handle.spawn(server(listener,
@@ -86,14 +84,13 @@ fn main() {
         lp.turn(None);
     }
 }
-
 fn server(listener: TcpListener,
           handle: Handle,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
           timeout: Option<Milliseconds>,
-          players_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>,
-          spectators_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>)
+          players_pool: Arc<Mutex<Vec<Client>>>,
+          spectators_pool: Arc<Mutex<Room>>)
           -> Box<Future<Item = (), Error = ()>> {
     let clients = listener.incoming()
         .map(move |(socket, addr)| {
@@ -134,18 +131,20 @@ fn server(listener: TcpListener,
 
             let handle2 = handle.clone();
             let fut = fut.map(move |(msg_tx, msg_rx, _, name, kind)| {
-                let (client_future, command_tx) = Client::unbounded(name.clone(), msg_tx, msg_rx);
-                handle2.spawn(client_future.map_err(|e| {
-                    println!("{:?}", e);
+                // As `name` is already available as this point, we can use it directly.
+                // But when creating Client earlier and then renaming it, format!("{}", addr).
+                let (client, client_relay) = client(Some(name), None, msg_tx, msg_rx);
+                handle2.spawn(client_relay.map_err(|e| {
+                    println!("CLIENTRELAY ERROR: {:?}", e);
                     ()
                 }));
 
                 match kind {
                     ClientKind::Spectator => {
-                        spectators_ref.lock().unwrap().insert(name, map2error(command_tx));
+                        spectators_ref.lock().unwrap().insert(client);
                     }
                     ClientKind::Player => {
-                        players_ref.lock().unwrap().insert(name, map2error(command_tx));
+                        players_ref.lock().unwrap().push(client);
                     }
                 }
                 ()
@@ -193,9 +192,8 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 
 fn play_games(_: Arc<Mutex<HashSet<String>>>,
               grid: Grid,
-              players_pool: Arc<Mutex<HashMap<String, MapToError<mpsc::UnboundedSender<Cmd>>>>>,
-              spectators_pool: Arc<Mutex<HashMap<String,
-                                                 MapToError<mpsc::UnboundedSender<Cmd>>>>>,
+              players_pool: Arc<Mutex<Vec<Client>>>,
+              spectators_pool: Arc<Mutex<Room>>,
               timer: Timer,
               timeout: Option<Milliseconds>)
               -> BoxFuture<(), ()> {
@@ -215,20 +213,16 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
         // @TODO: Once drained, check we still have sufficient players. No lock between
         // the waiting loop above and now.
         let mut players = players_pool.lock().unwrap();
-        let mut spectators = spectators_pool.lock().unwrap();
-        let players = players.drain().collect();
-        let spectators = spectators.drain().collect();
+        let players = Room::new(players.drain(..).collect());
 
         let game = Game::new(OsRng::new().unwrap(), grid);
-        GameFuture::new(game, players, spectators, timeout)
-            .map(move |(game, players, spectators)| {
+        GameFuture::new(game, players, spectators_ref.clone(), timeout)
+            .map(move |(game, players, _)| {
                 println!("End of game! {:?} {:?}", game.game_state, game.round_state);
 
                 // Return players and spectators to the waiting pool.
                 let mut players_pool = players_ref.lock().unwrap();
-                let mut spectators_pool = spectators_ref.lock().unwrap();
-                players_pool.extend(&mut players.into_iter());
-                spectators_pool.extend(&mut spectators.into_iter());
+                players_pool.extend(players.into_clients());
 
                 future::Loop::Continue(())
             })
