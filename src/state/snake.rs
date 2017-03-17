@@ -32,7 +32,7 @@ impl Snake {
             if my_head == *here {
                 return true;
             }
-            next_candidate += my_head.distance(&here);
+            next_candidate += my_head.distance(here);
         }
         false
     }

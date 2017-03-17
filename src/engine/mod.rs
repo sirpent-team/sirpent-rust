@@ -24,10 +24,10 @@ pub enum Event {
 #[derive(Debug)]
 pub struct Game<R: Rng> {
     state: State,
-    pub rng: Box<R>,
-    pub grid: Grid,
-    pub game_state: GameState,
-    pub round_state: RoundState,
+    rng: Box<R>,
+    grid: Grid,
+    game_state: GameState,
+    round_state: RoundState,
 }
 
 impl<R: Rng> Game<R> {
@@ -211,7 +211,7 @@ impl<R: Rng> Game<R> {
 
     fn manage_food(&mut self, next_round: &mut RoundState) {
         for food in next_round.eaten.values() {
-            next_round.food.remove(&food);
+            next_round.food.remove(food);
         }
 
         if next_round.food.len() < 1 {

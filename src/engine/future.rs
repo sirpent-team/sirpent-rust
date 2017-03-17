@@ -77,8 +77,8 @@ impl<R> GameFuture<R>
     // }
 
     fn start_of_game(&mut self) -> GameFuturePollReturn {
-        let game = self.game.as_ref().unwrap().game_state.clone();
-        let new_game_msg = Msg::Game { game: game };
+        let game = self.game.as_ref().unwrap().game_state().clone();
+        let new_game_msg = Msg::Game { game: Box::new(game) };
 
         let players_txing = self.all_players().broadcast(new_game_msg.clone());
         let spectators_txing = self.spectators.lock().unwrap().broadcast(new_game_msg);
@@ -94,10 +94,10 @@ impl<R> GameFuture<R>
             _ => return (ReadyForRound(future), Suspend),
         };
 
-        let round = self.game.as_ref().unwrap().round_state.clone();
-        let game_uuid = self.game.as_ref().unwrap().game_state.uuid;
+        let round = self.game.as_ref().unwrap().round_state().clone();
+        let game_uuid = self.game.as_ref().unwrap().game_state().uuid;
         let round_msg = Msg::Round {
-            round: round,
+            round: Box::new(round),
             game_uuid: game_uuid,
         };
 
@@ -123,13 +123,13 @@ impl<R> GameFuture<R>
     fn ask_moves(&mut self,
                  mut future: BoxFuture<(RoomStatus, HashMap<ClientId, Msg>), ()>)
                  -> GameFuturePollReturn {
-        let (living_player_statuses, mut msgs) = match future.poll() {
+        let (living_player_statuses, msgs) = match future.poll() {
             Ok(Async::Ready(v)) => v,
             _ => return (AskMoves(future), Suspend),
         };
 
         let mut directions = HashMap::with_capacity(msgs.len());
-        for (id, msg) in msgs.into_iter() {
+        for (id, msg) in msgs {
             if let Msg::Move { direction } = msg {
                 let name = self.all_players.name_of(&id).unwrap().clone();
                 directions.insert(name, direction);
@@ -137,16 +137,16 @@ impl<R> GameFuture<R>
         }
         self.game.as_mut().unwrap().next(Event::Turn(directions));
 
-        let new_round = &self.game.as_ref().unwrap().round_state;
-        println!("Advanced round to {:?}", new_round.clone());
+        let new_round = &self.game.as_ref().unwrap().round_state().clone();
+        println!("Advanced round to {:?}", new_round);
 
         (LoopDecision, Continue)
     }
 
     fn loop_decision(&mut self) -> GameFuturePollReturn {
         if self.game.as_ref().unwrap().concluded() {
-            let round = self.game.as_ref().unwrap().round_state.clone();
-            let game_uuid = self.game.as_ref().unwrap().game_state.uuid;
+            let round = self.game.as_ref().unwrap().round_state().clone();
+            let game_uuid = self.game.as_ref().unwrap().game_state().uuid;
             let game_over_msg = Msg::outcome(round, game_uuid);
 
             let players_txing = self.all_players().broadcast(game_over_msg.clone());

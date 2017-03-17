@@ -21,12 +21,15 @@ pub enum Msg {
         grid: GridEnum,
         timeout_millis: Option<Milliseconds>,
     },
-    Game { game: GameState },
-    Round { round: RoundState, game_uuid: Uuid },
+    Game { game: Box<GameState> },
+    Round {
+        round: Box<RoundState>,
+        game_uuid: Uuid,
+    },
     Move { direction: Direction },
     Outcome {
         winners: HashSet<String>,
-        conclusion: RoundState,
+        conclusion: Box<RoundState>,
         game_uuid: Uuid,
     },
 }
@@ -42,7 +45,7 @@ impl Msg {
     pub fn outcome(final_round_state: RoundState, game_uuid: Uuid) -> Msg {
         Msg::Outcome {
             winners: final_round_state.snakes.keys().cloned().collect(),
-            conclusion: final_round_state,
+            conclusion: Box::new(final_round_state),
             game_uuid: game_uuid,
         }
     }

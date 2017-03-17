@@ -32,7 +32,7 @@ fn main() {
 
     // Take the first command line argument as an address to listen on, or fall
     // back to just some localhost default.
-    let addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
+    let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let addr = addr.parse::<SocketAddr>().unwrap();
 
     // Initialize the various data structures we're going to use in our server.
@@ -57,7 +57,7 @@ fn main() {
     handle.spawn(server(listener,
                         handle.clone(),
                         names.clone(),
-                        grid.clone(),
+                        grid,
                         timeout,
                         players.clone(),
                         spectators.clone()));
@@ -71,7 +71,7 @@ fn main() {
         thread::sleep(Milliseconds::new(10000).into());
         let mut lp = Core::new().unwrap();
         lp.run(play_games(names.clone(),
-                            grid.clone(),
+                            grid,
                             players.clone(),
                             spectators.clone(),
                             timer.clone(),
@@ -114,7 +114,7 @@ fn server(listener: TcpListener,
                                 let name = find_unique_name(&mut names_ref, desired_name);
                                 let welcome_msg = Msg::Welcome {
                                     name: name.clone(),
-                                    grid: grid.clone().into(),
+                                    grid: grid.into(),
                                     timeout_millis: timeout,
                                 };
                                 msg_tx.send(welcome_msg)
@@ -218,7 +218,9 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
         let game = Game::new(OsRng::new().unwrap(), grid);
         GameFuture::new(game, players, spectators_ref.clone(), timeout)
             .map(move |(game, players, _)| {
-                println!("End of game! {:?} {:?}", game.game_state, game.round_state);
+                println!("End of game! {:?} {:?}",
+                         game.game_state(),
+                         game.round_state());
 
                 // Return players and spectators to the waiting pool.
                 let mut players_pool = players_ref.lock().unwrap();

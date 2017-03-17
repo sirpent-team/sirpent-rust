@@ -51,7 +51,7 @@ impl Decoder for MsgCodec {
             // Attempt JSON decode into Msg.
             return match serde_json::from_str(line) {
                 Ok(msg) => Ok(Some(msg)),
-                Err(e) => Err(io_error_from_error(e)),
+                Err(e) => Err(io_error_from_error(&e)),
             };
         }
 
@@ -65,7 +65,7 @@ impl Encoder for MsgCodec {
 
     fn encode(&mut self, msg: Msg, buf: &mut BytesMut) -> io::Result<()> {
         // Attempt Msg encode into JSON.
-        let msg_str = serde_json::to_string(&msg).map_err(io_error_from_error)?;
+        let msg_str = serde_json::to_string(&msg).map_err(|e| io_error_from_error(&e))?;
         // Write to output buffer followed by a newline.
         buf.extend(msg_str.as_bytes());
         buf.put(b'\n');

@@ -13,17 +13,17 @@ use futures::{Future, Stream, Sink, Poll, StartSend};
 
 use errors::*;
 
-pub fn json<T>(value: T) -> Result<String>
+pub fn json<T>(value: &T) -> Result<String>
     where T: Serialize
 {
-    serde_json::to_string(&value).chain_err(|| "serialising into json")
+    serde_json::to_string(value).chain_err(|| "serialising into json")
 }
 
 pub fn io_error_from_str(desc: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
 }
 
-pub fn io_error_from_error<E: error::Error>(e: E) -> io::Error {
+pub fn io_error_from_error<E: error::Error>(e: &E) -> io::Error {
     io_error_from_str(&*format!("{:?}", e))
 }
 
