@@ -1,7 +1,7 @@
 sudo: false
 language: rust
 rust:
-- nightly
+- nightly-2017-03-16
 - beta
 - stable
 before_script:
