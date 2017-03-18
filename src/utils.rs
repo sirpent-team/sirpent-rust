@@ -65,6 +65,10 @@ const NANOS_PER_MILLI: u64 = 1000_000;
 /// The number of milliseconds per second.
 const MILLIS_PER_SEC: u64 = 1000;
 
+pub fn milliseconds(milliseconds: u64) -> Milliseconds {
+    Milliseconds::new(milliseconds)
+}
+
 /// Represents a duration in milliseconds.
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub struct Milliseconds {

@@ -184,17 +184,14 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
               timeout: Option<Milliseconds>)
               -> Box<Future<Item = (), Error = ()>> {
     Box::new(future::loop_fn((), move |_| -> Box<Future<Item = _, Error = _>> {
-        //let players_ref = players_pool.clone();
-        //let spectators_ref = spectators_pool.clone();
         let continue_ = future::Loop::Continue(());
+        let timer2 = timer.clone();
 
         let player_queue_ref2 = player_queue_ref.clone();
         let mut players_queue = player_queue_ref.lock().unwrap();
         if players_queue.len() < 2 {
             println!("Not enough players yet. Waiting 10 seconds.");
-            Box::new(timer.sleep(Milliseconds::new(10000).into())
-                .map(|_| continue_)
-                .map_err(|_| ()))
+            Box::new(sleep(&timer, milliseconds(10000)).map(|_| continue_))
         } else {
             // Acquire players and spectators from those available.
             // @TODO: Once drained, check we still have sufficient players. No lock between
@@ -203,7 +200,7 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
 
             let game = Game::new(OsRng::new().unwrap(), grid);
             Box::new(game_future(game, players, spectators_ref.clone(), timeout)
-                .map(move |(game, players, _)| {
+                .and_then(move |(game, players, _)| {
                     println!("End of game! {:?} {:?}",
                              game.game_state(),
                              game.round_state());
@@ -212,8 +209,14 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
                     let mut players_queue = player_queue_ref2.lock().unwrap();
                     players_queue.extend(players.into_clients());
 
-                    continue_
+                    sleep(&timer2, milliseconds(2000)).map(|_| continue_)
                 }))
         }
     }))
+}
+
+fn sleep(timer: &Timer, ms: Milliseconds) -> Box<Future<Item = (), Error = ()>> {
+    Box::new(timer.sleep(ms.into())
+        .map(|_| ())
+        .map_err(|_| ()))
 }
