@@ -16,7 +16,7 @@ use std::convert::Into;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
-use futures::{future, BoxFuture, Future, Stream};
+use futures::{future, Future, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
 use tokio_timer::Timer;
@@ -178,43 +178,42 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 
 fn play_games(_: Arc<Mutex<HashSet<String>>>,
               grid: Grid,
-              players_pool: Arc<Mutex<Vec<Client>>>,
-              spectators_pool: Arc<Mutex<Room>>,
+              player_queue_ref: Arc<Mutex<Vec<Client>>>,
+              spectators_ref: Arc<Mutex<Room>>,
               timer: Timer,
               timeout: Option<Milliseconds>)
-              -> BoxFuture<(), ()> {
-    Box::new(future::loop_fn((), move |_| {
-        let players_ref = players_pool.clone();
-        let spectators_ref = spectators_pool.clone();
+              -> Box<Future<Item = (), Error = ()>> {
+    Box::new(future::loop_fn((), move |_| -> Box<Future<Item = _, Error = _>> {
+        //let players_ref = players_pool.clone();
+        //let spectators_ref = spectators_pool.clone();
+        let continue_ = future::Loop::Continue(());
 
-        while players_pool.lock().unwrap().len() < 2 {
+        let player_queue_ref2 = player_queue_ref.clone();
+        let mut players_queue = player_queue_ref.lock().unwrap();
+        if players_queue.len() < 2 {
             println!("Not enough players yet. Waiting 10 seconds.");
-            return timer.sleep(Milliseconds::new(10000).into())
-                .map(|_| future::Loop::Continue(()))
-                .map_err(|_| ())
-                .boxed();
+            Box::new(timer.sleep(Milliseconds::new(10000).into())
+                .map(|_| continue_)
+                .map_err(|_| ()))
+        } else {
+            // Acquire players and spectators from those available.
+            // @TODO: Once drained, check we still have sufficient players. No lock between
+            // the waiting loop above and now.
+            let players = Room::new(players_queue.drain(..).collect());
+
+            let game = Game::new(OsRng::new().unwrap(), grid);
+            Box::new(game_future(game, players, spectators_ref.clone(), timeout)
+                .map(move |(game, players, _)| {
+                    println!("End of game! {:?} {:?}",
+                             game.game_state(),
+                             game.round_state());
+
+                    // Return players and spectators to the waiting pool.
+                    let mut players_queue = player_queue_ref2.lock().unwrap();
+                    players_queue.extend(players.into_clients());
+
+                    continue_
+                }))
         }
-
-        // Acquire players and spectators from those available.
-        // @TODO: Once drained, check we still have sufficient players. No lock between
-        // the waiting loop above and now.
-        let mut players = players_pool.lock().unwrap();
-        let players = Room::new(players.drain(..).collect());
-
-        let game = Game::new(OsRng::new().unwrap(), grid);
-        GameFuture::new(game, players, spectators_ref.clone(), timeout)
-            .map(move |(game, players, _)| {
-                println!("End of game! {:?} {:?}",
-                         game.game_state(),
-                         game.round_state());
-
-                // Return players and spectators to the waiting pool.
-                let mut players_pool = players_ref.lock().unwrap();
-                players_pool.extend(players.into_clients());
-
-                future::Loop::Continue(())
-            })
-            .map_err(|_| ())
-            .boxed()
     }))
 }

@@ -1,205 +1,130 @@
 use rand::Rng;
+use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use futures::{future, Async, BoxFuture, Future, Poll};
+use futures::{future, Future, IntoFuture};
+use comms::Broadcasting;
 
 use super::*;
 use net::*;
 use utils::*;
 
-type RoomStatus = <Room as Communicator>::Status;
+pub fn game_future<R>(mut game: Game<R>,
+                      players: Room,
+                      spectators_ref: Arc<Mutex<Room>>,
+                      timeout: Option<Milliseconds>)
+                      -> <GameFuture<R> as IntoFuture>::Future
+    where R: Rng + 'static
+{
+    for name in players.client_names() {
+        if let Some(name) = name {
+            game.add_player(name.clone());
+        }
+    }
 
-enum GameFutureStage {
-    StartOfGame,
-    ReadyForRound(BoxFuture<(RoomStatus, RoomStatus), ()>),
-    StartRound(BoxFuture<(RoomStatus, RoomStatus), ()>),
-    AskMoves(BoxFuture<(RoomStatus, HashMap<ClientId, Msg>), ()>),
-    LoopDecision,
-    Concluding(BoxFuture<(RoomStatus, RoomStatus), ()>),
-    EndOfGame,
+    GameFuture {
+            game: game,
+            players: players,
+            spectators_ref: spectators_ref,
+            timeout: timeout.map(|m| *m),
+        }
+        .into_future()
 }
 
-enum GameFutureStageControl {
-    Continue,
-    Suspend,
-}
+type BoxedFuture<I, E> = Box<Future<Item = I, Error = E>>;
 
 pub struct GameFuture<R>
-    where R: Rng
+    where R: Rng + 'static
 {
-    game: Option<Game<R>>,
-    all_players: Room,
-    living_players: Room,
-    spectators: Arc<Mutex<Room>>,
-    current_stage: Option<GameFutureStage>,
-    timeout: Option<Milliseconds>,
+    game: Game<R>,
+    players: Room,
+    spectators_ref: Arc<Mutex<Room>>,
+    timeout: Option<Duration>,
 }
-
-use self::GameFutureStage::*;
-use self::GameFutureStageControl::*;
-
-type GameFuturePollReturn = (GameFutureStage, GameFutureStageControl);
 
 impl<R> GameFuture<R>
-    where R: Rng
+    where R: Rng + 'static
 {
-    pub fn new(mut game: Game<R>,
-               players: Room,
-               spectators: Arc<Mutex<Room>>,
-               timeout: Option<Milliseconds>)
-               -> Self {
-        for name in players.client_names() {
-            if let Some(name) = name {
-                game.add_player(name.clone());
-            }
-        }
-
-        GameFuture {
-            game: Some(game),
-            all_players: players.clone(),
-            living_players: players,
-            spectators: spectators,
-            current_stage: Some(StartOfGame),
-            timeout: timeout,
-        }
+    fn game_tx(self) -> BoxedFuture<Self, ()> {
+        let game_msg = Msg::Game { game: Box::new(self.game.game_state().clone()) };
+        let spectators_ref2 = self.spectators_ref.clone();
+        let spectators = spectators_ref2.lock().unwrap();
+        // N.B. Clones Room and associated Clients. Expensive.
+        let b = (self.players.clone(), spectators.clone()).broadcast(game_msg);
+        Box::new(b.map(|_| self))
     }
 
-    fn all_players(&mut self) -> &mut Room {
-        &mut self.all_players //.expect("Players must be present.")
+    fn round_loop(self) -> BoxedFuture<Self, ()> {
+        Box::new(future::loop_fn(self, |self_| {
+            self_.round_tx()
+                .and_then(Self::move_rx)
+                .map(|(mut self_, msgs)| {
+                    self_.perform_move(msgs);
+                    if self_.game.concluded() {
+                        future::Loop::Break(self_)
+                    } else {
+                        future::Loop::Continue(self_)
+                    }
+                })
+        }))
     }
 
-    fn living_players(&mut self) -> &mut Room {
-        &mut self.living_players //.expect("Players must be present.")
-    }
-
-    // fn spectators(&mut self) -> MutexGuard<Room> {
-    //     self.spectators.lock().unwrap() //.expect("Spectators must be present.").lock().unwrap()
-    // }
-
-    fn start_of_game(&mut self) -> GameFuturePollReturn {
-        let game = self.game.as_ref().unwrap().game_state().clone();
-        let new_game_msg = Msg::Game { game: Box::new(game) };
-
-        let players_txing = self.all_players().broadcast(new_game_msg.clone());
-        let spectators_txing = self.spectators.lock().unwrap().broadcast(new_game_msg);
-        let new_game_future = players_txing.join(spectators_txing).boxed();
-        (ReadyForRound(new_game_future), Continue)
-    }
-
-    fn ready_for_round(&mut self,
-                       mut future: BoxFuture<(RoomStatus, RoomStatus), ()>)
-                       -> GameFuturePollReturn {
-        let (player_statuses, spectator_statuses) = match future.poll() {
-            Ok(Async::Ready(v)) => v,
-            _ => return (ReadyForRound(future), Suspend),
-        };
-
-        let round = self.game.as_ref().unwrap().round_state().clone();
-        let game_uuid = self.game.as_ref().unwrap().game_state().uuid;
+    fn round_tx(self) -> BoxedFuture<Self, ()> {
         let round_msg = Msg::Round {
-            round: Box::new(round),
-            game_uuid: game_uuid,
+            round: Box::new(self.game.round_state().clone()),
+            game_uuid: self.game.game_state().uuid,
         };
-
-        let players_txing = self.all_players().broadcast(round_msg.clone());
-        let spectators_txing = self.spectators.lock().unwrap().broadcast(round_msg);
-        let round_future = players_txing.join(spectators_txing).boxed();
-        (StartRound(round_future), Continue)
+        let spectators_ref2 = self.spectators_ref.clone();
+        let spectators = spectators_ref2.lock().unwrap();
+        // N.B. Clones Room and associated Clients. Expensive.
+        Box::new((self.players.clone(), spectators.clone()).broadcast(round_msg).map(|_| self))
     }
 
-    fn start_round(&mut self,
-                   mut future: BoxFuture<(RoomStatus, RoomStatus), ()>)
-                   -> GameFuturePollReturn {
-        let (player_statuses, spectator_statuses) = match future.poll() {
-            Ok(Async::Ready(v)) => v,
-            _ => return (ReadyForRound(future), Suspend),
-        };
-
-        let rxing_timeout = ClientTimeout::keep_alive_after(self.timeout.map(|m| *m));
-        let living_players_rxing = self.living_players().receive(rxing_timeout).boxed();
-        (AskMoves(living_players_rxing), Continue)
+    fn move_rx(self) -> BoxedFuture<(Self, HashMap<ClientId, Msg>), ()> {
+        let receive_timeout = ClientTimeout::keep_alive_after(self.timeout);
+        Box::new(self.players
+            .filter(|client| self.game.round_state().snakes.contains_key(&client.name().unwrap()))
+            .receive(receive_timeout)
+            .map(|(_, msgs)| (self, msgs)))
     }
 
-    fn ask_moves(&mut self,
-                 mut future: BoxFuture<(RoomStatus, HashMap<ClientId, Msg>), ()>)
-                 -> GameFuturePollReturn {
-        let (living_player_statuses, msgs) = match future.poll() {
-            Ok(Async::Ready(v)) => v,
-            _ => return (AskMoves(future), Suspend),
-        };
-
-        let mut directions = HashMap::with_capacity(msgs.len());
-        for (id, msg) in msgs {
-            if let Msg::Move { direction } = msg {
-                let name = self.all_players.name_of(&id).unwrap().clone();
-                directions.insert(name, direction);
-            }
-        }
-        self.game.as_mut().unwrap().next(Event::Turn(directions));
-
-        let new_round = &self.game.as_ref().unwrap().round_state().clone();
-        println!("Advanced round to {:?}", new_round);
-
-        (LoopDecision, Continue)
+    fn perform_move(&mut self, msgs: HashMap<ClientId, Msg>) {
+        let directions = self.msgs_to_directions(msgs);
+        self.game.next(Event::Turn(directions));
     }
 
-    fn loop_decision(&mut self) -> GameFuturePollReturn {
-        if self.game.as_ref().unwrap().concluded() {
-            let round = self.game.as_ref().unwrap().round_state().clone();
-            let game_uuid = self.game.as_ref().unwrap().game_state().uuid;
-            let game_over_msg = Msg::outcome(round, game_uuid);
-
-            let players_txing = self.all_players().broadcast(game_over_msg.clone());
-            let spectators_txing = self.spectators.lock().unwrap().broadcast(game_over_msg);
-            let concluding_future = players_txing.join(spectators_txing).boxed();
-            (Concluding(concluding_future), Continue)
-        } else {
-            // While this type needs superceding, this empty future is a particular codesmell.
-            (ReadyForRound(future::ok((HashMap::new(), HashMap::new())).boxed()), Continue)
-        }
+    fn outcome_tx(self) -> BoxedFuture<Self, ()> {
+        let outcome_msg = Msg::outcome(self.game.round_state().clone(),
+                                       self.game.game_state().uuid);
+        let spectators_ref2 = self.spectators_ref.clone();
+        let spectators = spectators_ref2.lock().unwrap();
+        // N.B. Clones Room and associated Clients. Expensive.
+        Box::new((self.players.clone(), spectators.clone()).broadcast(outcome_msg).map(|_| self))
     }
 
-    fn conclude(&mut self,
-                mut future: BoxFuture<(RoomStatus, RoomStatus), ()>)
-                -> GameFuturePollReturn {
-        let (player_statuses, spectator_statuses) = match future.poll() {
-            Ok(Async::Ready(pair)) => pair,
-            _ => return (StartRound(future), Suspend),
-        };
-        (EndOfGame, Continue)
+    fn msgs_to_directions(&self, msgs: HashMap<ClientId, Msg>) -> HashMap<String, Direction> {
+        msgs.into_iter()
+            .filter_map(|(id, msg)| if let Msg::Move { direction } = msg {
+                let name = self.players.name_of(&id).unwrap();
+                Some((name, direction))
+            } else {
+                None
+            })
+            .collect()
     }
 }
 
-impl<R> Future for GameFuture<R>
-    where R: Rng
+impl<R> IntoFuture for GameFuture<R>
+    where R: Rng + 'static
 {
+    type Future = BoxedFuture<Self::Item, Self::Error>;
     type Item = (Game<R>, Room, Arc<Mutex<Room>>);
     type Error = ();
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        loop {
-            assert!(self.current_stage.is_some());
-
-            let (new_stage, stage_control) = match self.current_stage.take().unwrap() {
-                StartOfGame => self.start_of_game(),
-                ReadyForRound(future) => self.ready_for_round(future),
-                StartRound(future) => self.start_round(future),
-                AskMoves(future) => self.ask_moves(future),
-                LoopDecision => self.loop_decision(),
-                Concluding(future) => self.conclude(future),
-                EndOfGame => {
-                    let game = self.game.take().unwrap();
-                    let all_players = self.all_players.clone();
-                    let spectators = self.spectators.clone();
-                    let return_triple = (game, all_players, spectators);
-                    return Ok(Async::Ready(return_triple));
-                }
-            };
-            self.current_stage = Some(new_stage);
-            match stage_control {
-                Continue => continue,
-                Suspend => return Ok(Async::NotReady),
-            }
-        }
+    fn into_future(self) -> Self::Future {
+        Box::new(self.game_tx()
+            .and_then(Self::round_loop)
+            .and_then(Self::outcome_tx)
+            .map(|self_| (self_.game, self_.players, self_.spectators_ref)))
     }
 }
