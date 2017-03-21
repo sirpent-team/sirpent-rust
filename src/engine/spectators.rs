@@ -1,8 +1,27 @@
+use std::collections::VecDeque;
+use futures::{Future, Sink, Stream, Poll, Async, AsyncSink};
+use futures::sync::mpsc;
+
+use net::*;
+
 pub struct Spectators {
-    spectator_rx: mpsc::Receiver<Client<Uuid>>,
-    spectators: Room<Uuid>,
+    spectator_rx: mpsc::Receiver<Client<String>>,
+    spectators: Room<String>,
     msg_rx: mpsc::Receiver<Msg>,
     msg_queue: VecDeque<Msg>,
+}
+
+impl Spectators {
+    pub fn new(spectator_rx: mpsc::Receiver<Client<String>>,
+               msg_rx: mpsc::Receiver<Msg>)
+               -> Spectators {
+        Spectators {
+            spectator_rx: spectator_rx,
+            spectators: Room::default(),
+            msg_rx: msg_rx,
+            msg_queue: VecDeque::new(),
+        }
+    }
 }
 
 impl Future for Spectators {
@@ -11,23 +30,23 @@ impl Future for Spectators {
 
     fn poll(&mut self) -> Poll<(), ()> {
         loop {
-            self.spectator_rx.poll() {
+            match self.spectator_rx.poll() {
                 Ok(Async::NotReady) => break,
                 Ok(Async::Ready(Some(client))) => {
                     client.join(&mut self.spectators);
-                },
+                }
                 Ok(Async::Ready(None)) => {
                     // If stream closed, shutdown this future.
                     // @TODO: Guard this a bit better with panics.
                     self.spectator_rx.close();
                     self.spectators.close();
-                },
+                }
                 Err(_) => {}
             }
         }
 
         loop {
-            self.msg_rx.poll() {
+            match self.msg_rx.poll() {
                 Ok(Async::NotReady) => break,
                 Ok(Async::Ready(Some(msg))) => self.msg_queue.push_back(msg),
                 Ok(Async::Ready(None)) => {
@@ -35,17 +54,19 @@ impl Future for Spectators {
                     // @TODO: Guard this a bit better with panics.
                     self.spectator_rx.close();
                     self.spectators.close();
-                },
+                }
                 Err(_) => {}
             }
         }
 
-        while Some(msg) = msg_queue.pop_front() {
-            match self.spectator_rx.start_send(msg) {
-                Ok(AsyncSink::NotReady(msg)) => msg_queue.push_front(msg),
-                Ok(AsyncSink::Ready) => {},
-                Err(e) => msg_queue.push_front(msg),
+        while let Some(msg) = self.msg_queue.pop_front() {
+            let msgs = self.spectators.ids().into_iter().map(|id| (id, msg.clone())).collect();
+            match self.spectators.start_send(msgs) {
+                Ok(AsyncSink::NotReady(_)) | Err(_) => self.msg_queue.push_front(msg),
+                Ok(AsyncSink::Ready) => {}
             }
         }
+
+        Ok(Async::NotReady)
     }
 }

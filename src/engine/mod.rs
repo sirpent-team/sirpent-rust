@@ -5,8 +5,10 @@ use state::*;
 use state::grids::*;
 
 mod future;
+mod spectators;
 
 pub use self::future::*;
+pub use self::spectators::*;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum State {

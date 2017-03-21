@@ -7,6 +7,7 @@ extern crate serde_json;
 extern crate rand;
 extern crate tokio_timer;
 extern crate tokio_io;
+extern crate uuid;
 
 use std::env;
 use std::str;
@@ -16,7 +17,8 @@ use std::convert::Into;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
-use futures::{future, Future, Stream};
+use futures::{future, Future, Sink, Stream};
+use futures::sync::mpsc;
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
 use tokio_timer::Timer;
@@ -50,8 +52,12 @@ fn main() {
     let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players: Arc<Mutex<Vec<Client>>> = Arc::new(Mutex::new(Vec::new()));
-    let spectators: Arc<Mutex<Room>> = Arc::new(Mutex::new(Room::default()));
+    let players: Arc<Mutex<Vec<Client<String>>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let (spectator_tx, spectator_rx) = mpsc::channel(3);
+    let (spectator_msg_tx, spectator_msg_rx) = mpsc::channel(3);
+    let spectators = Spectators::new(spectator_rx, spectator_msg_rx);
+    handle.spawn(spectators);
 
     // Run TCP server to welcome clients and register them as players.
     handle.spawn(server(listener,
@@ -60,7 +66,8 @@ fn main() {
                         grid,
                         timeout,
                         players.clone(),
-                        spectators.clone()));
+                        spectator_tx,
+                        timer.clone()));
 
     // @TODO: Game requirements:
     // * Take existing player clients and play a game of sirpent with them until completion.
@@ -73,7 +80,7 @@ fn main() {
         lp.run(play_games(names.clone(),
                             grid,
                             players.clone(),
-                            spectators.clone(),
+                            spectator_msg_tx,
                             timer.clone(),
                             timeout))
             .unwrap();
@@ -89,56 +96,63 @@ fn server(listener: TcpListener,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
           timeout: Option<Milliseconds>,
-          players_pool: Arc<Mutex<Vec<Client>>>,
-          spectators_pool: Arc<Mutex<Room>>)
+          players_pool: Arc<Mutex<Vec<Client<String>>>>,
+          spectator_tx: mpsc::Sender<Client<String>>,
+          timer: tokio_timer::Timer)
           -> Box<Future<Item = (), Error = ()>> {
     let clients = listener.incoming()
         .map(move |(socket, addr)| {
-            let msg_transport = map2error(socket.framed(MsgCodec));
+            let msg_transport = socket.framed(MsgCodec);
             let (tx, rx) = msg_transport.split();
             (tx, rx, addr)
         });
 
-    let server = clients.for_each(move |(msg_tx, msg_rx, addr)| {
-            let mut client = client(Some(format!("{}", addr)), Some(16), msg_tx, msg_rx);
-            handle.spawn(client_relay.map_err(|e| {
-                println!("CLIENTRELAY ERROR: {:?}", e);
-                ()
-            }));
+    let server = clients.for_each(move |(msg_tx, msg_rx, _)| {
+            let mut client = client(msg_tx, msg_rx);
+
+            let client_timeout = ClientTimeout::disconnect_after(timeout.map(|m| *m),
+                                                                 timer.clone());
+            client.set_timeout(client_timeout);
 
             // @TODO: If and when I build a client object, keep addr handy in it.
             let mut names_ref = names.clone();
             let players_ref = players_pool.clone();
-            let spectators_ref = spectators_pool.clone();
 
-            let version_tx = client.transmit(Msg::version());
-            let register_rx = client.receive(ClientTimeout::disconnect_after(timeout.map(|m| *m)));
-            handle.spawn(version_tx.join(register_rx)
-                .and_then(move |(_, (_, _, maybe_msg))| {
+            let spectator_tx_2 = spectator_tx.clone();
+
+            handle.spawn(client.transmit(Msg::version())
+                .and_then(|client| client.receive())
+                .map_err(|_| ())
+                .and_then(move |(maybe_msg, client)| -> Box<Future<Item = (), Error = ()>> {
                     if let Some(Msg::Register { desired_name, kind }) = maybe_msg {
                         let name = find_unique_name(&mut names_ref, desired_name);
-                        client.rename(Some(name.clone()));
+                        let client = client.rename(name.clone());
 
-                        let welcome_tx = client.transmit(Msg::Welcome {
-                                name: name,
-                                grid: grid.into(),
-                                timeout_millis: timeout,
-                            })
-                            .map(|_| ());
+                        let welcome_tx = Box::new(client.transmit(Msg::Welcome {
+                            name: name,
+                            grid: grid.into(),
+                            timeout_millis: timeout,
+                        }));
 
-                        match kind {
+                        let welcome_tx: Box<Future<Item = (), Error = ()>> = match kind {
                             ClientKind::Spectator => {
-                                spectators_ref.lock().unwrap().insert(client);
+                                        Box::new(welcome_tx.map_err(|_| ()).and_then(|client| {
+                                            spectator_tx_2.send(client).map(|_| ()).map_err(|_| ())
+                                        }))
                             }
                             ClientKind::Player => {
-                                players_ref.lock().unwrap().push(client);
+                                Box::new(welcome_tx.map(move |client| {
+                                        players_ref.lock().unwrap().push(client);
+                                        ()
+                                    })
+                                    .map_err(|_| ()))
                             }
-                        }
+                        };
 
-                        welcome_tx.boxed()
+                        Box::new(welcome_tx)
                     } else {
                         println!("Error welcoming client: unexpected {:?}", maybe_msg);
-                        future::err(()).boxed()
+                        Box::new(future::err(()))
                     }
                 }));
 
@@ -177,8 +191,8 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 
 fn play_games(_: Arc<Mutex<HashSet<String>>>,
               grid: Grid,
-              player_queue_ref: Arc<Mutex<Vec<Client>>>,
-              spectators_ref: Arc<Mutex<Room>>,
+              player_queue_ref: Arc<Mutex<Vec<Client<String>>>>,
+              spectators_ref: mpsc::Sender<Msg>,
               timer: Timer,
               timeout: Option<Milliseconds>)
               -> Box<Future<Item = (), Error = ()>> {
@@ -198,7 +212,11 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
             let players = Room::new(players_queue.drain(..).collect());
 
             let game = Game::new(OsRng::new().unwrap(), grid);
-            Box::new(game_future(game, players, spectators_ref.clone(), timeout)
+            Box::new(game_future(game,
+                                 players,
+                                 spectators_ref.clone(),
+                                 timeout,
+                                 timer.clone())
                 .and_then(move |(game, players, _)| {
                     println!("End of game! {:?} {:?}",
                              game.game_state(),
@@ -206,7 +224,11 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
 
                     // Return players and spectators to the waiting pool.
                     let mut players_queue = player_queue_ref2.lock().unwrap();
-                    players_queue.extend(players.into_clients());
+                    players_queue.extend(players.into_clients()
+                        .0
+                        .into_iter()
+                        .map(|(_, v)| v)
+                        .collect::<Vec<_>>());
 
                     sleep(&timer2, milliseconds(2000)).map(|_| continue_)
                 }))
