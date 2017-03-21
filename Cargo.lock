@@ -119,7 +119,7 @@ dependencies = [
 [[package]]
 name = "comms"
 version = "0.1.0"
-source = "git+https://github.com/sirpent-team/comms?branch=develop#7f4dc51722941f94000609da547f9e78b289a777"
+source = "git+https://github.com/sirpent-team/comms?branch=develop#efd81d53d82ea553afc9265b22920c17a54ec1c7"
 dependencies = [
  "futures 0.1.11 (git+https://github.com/sirpent-team/futures-rs?branch=master2)",
  "tokio-timer 0.1.0 (git+https://github.com/sirpent-team/tokio-timer?branch=traits)",

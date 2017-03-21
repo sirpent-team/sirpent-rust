@@ -29,6 +29,8 @@ impl Future for Spectators {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
+        println!("spectators wakeup {:?}", self.spectators.ready_ids());
+
         loop {
             match self.spectator_rx.poll() {
                 Ok(Async::NotReady) => break,
@@ -59,11 +61,28 @@ impl Future for Spectators {
             }
         }
 
+        match self.spectators.poll_complete() {
+            Ok(Async::Ready(())) => {}
+            Ok(Async::NotReady) => {},
+            Err(_) => {}
+        }
+
         while let Some(msg) = self.msg_queue.pop_front() {
             let msgs = self.spectators.ids().into_iter().map(|id| (id, msg.clone())).collect();
+            println!("{:?}", msgs);
             match self.spectators.start_send(msgs) {
-                Ok(AsyncSink::NotReady(_)) | Err(_) => self.msg_queue.push_front(msg),
+                Ok(AsyncSink::NotReady(_)) |
+                Err(_) => {
+                    self.msg_queue.push_front(msg);
+                    break;
+                },
                 Ok(AsyncSink::Ready) => {}
+            }
+
+            match self.spectators.poll_complete() {
+                Ok(Async::Ready(())) => continue,
+                Ok(Async::NotReady) => break,
+                Err(_) => {}
             }
         }
 

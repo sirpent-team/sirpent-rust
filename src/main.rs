@@ -142,7 +142,9 @@ fn server(listener: TcpListener,
                             }
                             ClientKind::Player => {
                                 Box::new(welcome_tx.map(move |client| {
+                                        println!("prelock1");
                                         players_ref.lock().unwrap().push(client);
+                                        println!("postlock1");
                                         ()
                                     })
                                     .map_err(|_| ()))
@@ -164,14 +166,16 @@ fn server(listener: TcpListener,
 
 /// Find an unused name based upon the `desired_name`.
 fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: String) -> String {
-    // Use the desired name if it's unused.
     {
+        // Use the desired name if it's unused.
+        println!("prelock2");
         let mut names_lock = names.lock().unwrap();
         if !names_lock.contains(&desired_name) {
             // Reserve this name.
             names_lock.insert(desired_name.clone());
             return desired_name;
         }
+        println!("postlock2");
     }
 
     // Find a unique name.
@@ -179,12 +183,14 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
     loop {
         let name = format!("{}_{}", desired_name, roman_numerals(n));
         println!("{:?}", name);
+        println!("prelock3");
         let mut names_lock = names.lock().unwrap();
         if !names_lock.contains(&name) {
             // Reserve this name.
             names_lock.insert(name.clone());
             return name;
         }
+        println!("postlock3");
         n += 1;
     }
 }
@@ -200,16 +206,18 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
         let continue_ = future::Loop::Continue(());
         let timer2 = timer.clone();
 
-        let player_queue_ref2 = player_queue_ref.clone();
+        println!("prelock4");
         let mut players_queue = player_queue_ref.lock().unwrap();
         if players_queue.len() < 2 {
             println!("Not enough players yet. Waiting 10 seconds.");
+            println!("postlock4/1");
             Box::new(sleep(&timer, milliseconds(10000)).map(|_| continue_))
         } else {
             // Acquire players and spectators from those available.
             // @TODO: Once drained, check we still have sufficient players. No lock between
             // the waiting loop above and now.
             let players = Room::new(players_queue.drain(..).collect());
+            println!("postlock4/2");
 
             let game = Game::new(OsRng::new().unwrap(), grid);
             Box::new(game_future(game,
@@ -222,13 +230,13 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
                              game.game_state(),
                              game.round_state());
 
-                    // Return players and spectators to the waiting pool.
-                    let mut players_queue = player_queue_ref2.lock().unwrap();
-                    players_queue.extend(players.into_clients()
-                        .0
-                        .into_iter()
-                        .map(|(_, v)| v)
-                        .collect::<Vec<_>>());
+                    // @TODO: Return players and spectators to the waiting pool.
+                    // let mut players_queue = player_queue_ref2.lock().unwrap();
+                    // players_queue.extend(players.into_clients()
+                    //     .0
+                    //     .into_iter()
+                    //     .map(|(_, v)| v)
+                    //     .collect::<Vec<_>>());
 
                     sleep(&timer2, milliseconds(2000)).map(|_| continue_)
                 }))

@@ -28,10 +28,9 @@
 # ===================================== #
 ```
 
-{"register": {"desired_name": "your_players_name", "kind": "player"}}
-{"register": {"desired_name": "your_players_name", "kind": "spectator"}}
-{"move": {"direction": "north"}}
-
+{"kind": "register", "data": {"desired_name": "play", "kind": "player"}}
+{"kind": "register", "data": {"desired_name": "spectate", "kind": "spectator"}}
+{"kind": "move", "data": {"direction": "north"}}
 
 ``` json
 {"kind": "version", "data": {"sirpent": "X.X.X", "protocol": "0.4"}}
