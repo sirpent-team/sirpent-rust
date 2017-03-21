@@ -5,7 +5,7 @@ dependencies = [
  "ansi_term 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "clippy 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)",
- "comms 0.1.0 (git+https://github.com/sirpent-team/comms)",
+ "comms 0.1.0 (git+https://github.com/sirpent-team/comms?branch=develop)",
  "env_logger 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-chain 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -17,7 +17,7 @@ dependencies = [
  "serde_json 0.9.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-core 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-io 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "tokio-timer 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio-timer 0.1.0 (git+https://github.com/sirpent-team/tokio-timer?branch=traits)",
  "uuid 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -119,10 +119,10 @@ dependencies = [
 [[package]]
 name = "comms"
 version = "0.1.0"
-source = "git+https://github.com/sirpent-team/comms#1c0f23160634fe50d160eef462f65b1c545e6212"
+source = "git+https://github.com/sirpent-team/comms?branch=develop#720a356d40cc3e0642c41470403e7c8313974de5"
 dependencies = [
  "futures 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
- "uuid 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio-timer 0.1.0 (git+https://github.com/sirpent-team/tokio-timer?branch=traits)",
 ]
 
 [[package]]
@@ -488,7 +488,7 @@ dependencies = [
 [[package]]
 name = "tokio-timer"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/sirpent-team/tokio-timer?branch=traits#afee9c96483c64c013e667b9b45b4d445abb679a"
 dependencies = [
  "futures 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "slab 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -575,7 +575,7 @@ dependencies = [
 "checksum cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de1e760d7b6535af4241fca8bd8adf68e2e7edacc6b29f5d399050c5e48cf88c"
 "checksum clippy 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)" = "b442c42e823fb8b70e4a9b6f801d3e4d521999a873d8bd7fb293a47243068783"
 "checksum clippy_lints 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)" = "d428e3083a552a6608091220a6fa70224b067c43cb9898e7b64dc774b294c804"
-"checksum comms 0.1.0 (git+https://github.com/sirpent-team/comms)" = "<none>"
+"checksum comms 0.1.0 (git+https://github.com/sirpent-team/comms?branch=develop)" = "<none>"
 "checksum dbghelp-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97590ba53bcb8ac28279161ca943a924d1fd4a8fb3fa63302591647c4fc5b850"
 "checksum dtoa 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "80c8b71fd71146990a9742fc06dcbbde19161a267e0ad4e572c35162f4578c90"
 "checksum env_logger 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "15abd780e45b3ea4f76b4e9a26ff4843258dd8a3eed2775a0e7368c2e7936c2f"
@@ -622,7 +622,7 @@ dependencies = [
 "checksum thread_local 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "c85048c6260d17cf486ceae3282d9fb6b90be220bf5b28c400f5485ffc29f0c7"
 "checksum tokio-core 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "99e958104a67877907c1454386d5482fe8e965a55d60be834a15a44328e7dc76"
 "checksum tokio-io 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "6a278fde45f1be68e44995227d426aaa4841e0980bb0a21b981092f28c3c8473"
-"checksum tokio-timer 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "36016cdc103d9b52df30b25002b8e8aae16c742dd72d6ba339ce02e674272d89"
+"checksum tokio-timer 0.1.0 (git+https://github.com/sirpent-team/tokio-timer?branch=traits)" = "<none>"
 "checksum toml 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "736b60249cb25337bc196faa43ee12c705e426f3d55c214d73a4e7be06f92cb4"
 "checksum unicode-normalization 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "e28fa37426fceeb5cf8f41ee273faa7c82c47dc8fba5853402841e665fcd86ff"
 "checksum unicode-xid 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "8c1f860d7d29cf02cb2f3f359fd35991af3d30bac52c57d265a3c461074cb4dc"

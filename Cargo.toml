@@ -6,7 +6,7 @@ authors = ["Nathan van Doorn <nvd1234@gmail.com>", "Michael Mokrysz <hi@46b.it>"
 [dependencies]
 futures = "0.1"
 tokio-core = "0.1"
-tokio-timer = "0.1"
+tokio-timer = { git = "https://github.com/sirpent-team/tokio-timer", branch = "traits" }
 tokio-io = "0.1"
 bytes = "0.4"
 log = "0.3"
@@ -19,7 +19,7 @@ serde_json = "0.9"
 serde_derive = "0.9"
 clippy = {version = "*", optional = true}
 error-chain = "0.9"
-comms = { git = "https://github.com/sirpent-team/comms", branch = "master" }
+comms = { git = "https://github.com/sirpent-team/comms", branch = "develop" }
 
 [dev-dependencies]
 quickcheck = "0.2"

@@ -5,17 +5,32 @@ pub use self::msg::*;
 use std::io;
 use std::str;
 use serde_json;
+use std::fmt::Debug;
 use bytes::{BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder, Framed};
 use tokio_core::net::TcpStream;
+use futures::{Sink, Stream};
+use futures::stream::{SplitSink, SplitStream};
+use uuid::Uuid;
+
 use comms;
 
 use utils::*;
 
 // Use `comms`. Define some local type aliases and reexport some plain comms one.
-pub use comms::{client, ClientId, ClientStatus, ClientTimeout, Communicator};
-pub type Client = comms::Client<Msg, Msg>;
-pub type Room = comms::Room<Msg, Msg>;
+pub use comms::{ClientStatus, ClientTimeout};
+pub type Client<I> = comms::Client<I,
+                                   SplitSink<Framed<TcpStream, MsgCodec>>,
+                                   SplitStream<Framed<TcpStream, MsgCodec>>>;
+pub type Room<I> = comms::Room<I,
+                               SplitSink<Framed<TcpStream, MsgCodec>>,
+                               SplitStream<Framed<TcpStream, MsgCodec>>>;
+
+pub fn client(tx: SplitSink<Framed<TcpStream, MsgCodec>>,
+              rx: SplitStream<Framed<TcpStream, MsgCodec>>)
+              -> Client<Uuid> {
+    Client::new(Uuid::new_v4(), tx, rx)
+}
 
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

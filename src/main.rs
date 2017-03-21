@@ -100,8 +100,7 @@ fn server(listener: TcpListener,
         });
 
     let server = clients.for_each(move |(msg_tx, msg_rx, addr)| {
-            let (mut client, client_relay) =
-                client(Some(format!("{}", addr)), Some(16), msg_tx, msg_rx);
+            let mut client = client(Some(format!("{}", addr)), Some(16), msg_tx, msg_rx);
             handle.spawn(client_relay.map_err(|e| {
                 println!("CLIENTRELAY ERROR: {:?}", e);
                 ()
