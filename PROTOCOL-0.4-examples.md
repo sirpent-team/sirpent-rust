@@ -29,8 +29,8 @@
 ```
 
 {"kind": "register", "data": {"desired_name": "play", "kind": "player"}}
-{"kind": "register", "data": {"desired_name": "spectate", "kind": "spectator"}}
 {"kind": "move", "data": {"direction": "north"}}
+{"kind": "register", "data": {"desired_name": "spectate", "kind": "spectator"}}
 
 ``` json
 {"kind": "version", "data": {"sirpent": "X.X.X", "protocol": "0.4"}}

@@ -58,7 +58,7 @@ impl<R> GameFuture<R>
         let game_msg = Msg::Game { game: Box::new(self.game.game_state().clone()) };
 
         Box::new(self.players()
-            .broadcast(game_msg.clone())
+            .broadcast_all(game_msg.clone())
             .and_then(|players| {
                 self.spectator_msg_tx()
                     .send(game_msg)
@@ -93,7 +93,7 @@ impl<R> GameFuture<R>
         };
 
         Box::new(self.players()
-            .broadcast(round_msg.clone())
+            .broadcast_all(round_msg.clone())
             .and_then(|players| {
                 self.spectator_msg_tx()
                     .send(round_msg)
@@ -107,11 +107,10 @@ impl<R> GameFuture<R>
     }
 
     fn move_rx(mut self) -> BoxedFuture<(Self, HashMap<String, Msg>), ()> {
-        let receive_timeout = ClientTimeout::keep_alive_after(self.timeout, self.timer.clone());
+        let receive_timeout = Timeout::keep_alive_after(self.timeout, self.timer.clone());
         let mut players = self.players();
         players.set_timeout(receive_timeout);
-        Box::new(players.receive_from(self.game.round_state().snakes.keys().cloned().collect())
-            .unwrap()
+        Box::new(players.receive(self.game.round_state().snakes.keys().cloned().collect())
             .map(|(msgs, players)| {
                 self.players = Some(players);
                 (self, msgs)
@@ -128,7 +127,7 @@ impl<R> GameFuture<R>
                                        self.game.game_state().uuid);
 
         Box::new(self.players()
-            .broadcast(outcome_msg.clone())
+            .broadcast_all(outcome_msg.clone())
             .and_then(|players| {
                 self.spectator_msg_tx()
                     .send(outcome_msg)

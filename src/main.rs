@@ -110,8 +110,7 @@ fn server(listener: TcpListener,
     let server = clients.for_each(move |(msg_tx, msg_rx, _)| {
             let mut client = client(msg_tx, msg_rx);
 
-            let client_timeout = ClientTimeout::disconnect_after(timeout.map(|m| *m),
-                                                                 timer.clone());
+            let client_timeout = Timeout::disconnect_after(timeout.map(|m| *m), timer.clone());
             client.set_timeout(client_timeout);
 
             // @TODO: If and when I build a client object, keep addr handy in it.

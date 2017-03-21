@@ -41,7 +41,7 @@ impl Future for Spectators {
                     // If stream closed, shutdown this future.
                     // @TODO: Guard this a bit better with panics.
                     self.spectator_rx.close();
-                    self.spectators.close();
+                    self.spectators.close_all();
                 }
                 Err(_) => {}
             }
@@ -55,15 +55,24 @@ impl Future for Spectators {
                     // If stream closed, shutdown this future.
                     // @TODO: Guard this a bit better with panics.
                     self.spectator_rx.close();
-                    self.spectators.close();
+                    self.spectators.close_all();
                 }
                 Err(_) => {}
             }
         }
 
+        // If any spectator sends a message, disconnect them as that behaviour is not
+        // consistent with spectating.
+        match self.spectators.poll() {
+            Ok(Async::Ready(Some(msgs))) => {
+                self.spectators.close(msgs.into_iter().map(|(id, _)| id).collect());
+            }
+            _ => {}
+        }
+
         match self.spectators.poll_complete() {
             Ok(Async::Ready(())) => {}
-            Ok(Async::NotReady) => {},
+            Ok(Async::NotReady) => {}
             Err(_) => {}
         }
 
@@ -75,7 +84,7 @@ impl Future for Spectators {
                 Err(_) => {
                     self.msg_queue.push_front(msg);
                     break;
-                },
+                }
                 Ok(AsyncSink::Ready) => {}
             }
 

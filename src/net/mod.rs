@@ -18,7 +18,7 @@ use utils::*;
 use errors::*;
 
 // Use `comms`. Define some local type aliases and reexport some plain comms one.
-pub use comms::{ClientStatus, ClientTimeout};
+pub use comms::{Status, Timeout};
 pub type Client<I> = comms::Client<I,
                                    sink::SinkFromErr<SplitSink<MsgTransport>, IoErrorString>,
                                    stream::FromErr<SplitStream<MsgTransport>, IoErrorString>>;
@@ -30,7 +30,7 @@ pub fn client(tx: SplitSink<Framed<TcpStream, MsgCodec>>,
               rx: SplitStream<Framed<TcpStream, MsgCodec>>)
               -> Client<Uuid> {
     Client::new(Uuid::new_v4(),
-                ClientTimeout::None,
+                Timeout::None,
                 tx.sink_from_err(),
                 rx.from_err())
 }

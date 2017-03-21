@@ -19,7 +19,7 @@ serde_json = "0.9"
 serde_derive = "0.9"
 clippy = {version = "*", optional = true}
 error-chain = "0.9"
-comms = { git = "https://github.com/sirpent-team/comms", branch = "master" }
+comms = { git = "https://github.com/sirpent-team/comms", branch = "develop" }
 
 [dev-dependencies]
 quickcheck = "0.2"

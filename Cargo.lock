@@ -4,7 +4,7 @@ version = "0.1.1"
 dependencies = [
  "ansi_term 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "clippy 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clippy 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)",
  "comms 0.1.0 (git+https://github.com/sirpent-team/comms?branch=develop)",
  "env_logger 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-chain 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -96,16 +96,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "clippy"
-version = "0.0.120"
+version = "0.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cargo_metadata 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "clippy_lints 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clippy_lints 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "clippy_lints"
-version = "0.0.120"
+version = "0.0.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -119,7 +119,7 @@ dependencies = [
 [[package]]
 name = "comms"
 version = "0.1.0"
-source = "git+https://github.com/sirpent-team/comms?branch=develop#efd81d53d82ea553afc9265b22920c17a54ec1c7"
+source = "git+https://github.com/sirpent-team/comms?branch=develop#c694994513dde0a21bc15fc1e2c55ddf7634db5a"
 dependencies = [
  "futures 0.1.11 (git+https://github.com/sirpent-team/futures-rs?branch=master2)",
  "tokio-timer 0.1.0 (git+https://github.com/sirpent-team/tokio-timer?branch=traits)",
@@ -579,8 +579,8 @@ dependencies = [
 "checksum bytes 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "46112a0060ae15e3a3f9a445428a53e082b91215b744fa27a1948842f4a64b96"
 "checksum cargo_metadata 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "34fdab49a2904acb112c83b62f0118de3de3ce28e52a9188dec2858e43878f25"
 "checksum cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de1e760d7b6535af4241fca8bd8adf68e2e7edacc6b29f5d399050c5e48cf88c"
-"checksum clippy 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)" = "b442c42e823fb8b70e4a9b6f801d3e4d521999a873d8bd7fb293a47243068783"
-"checksum clippy_lints 0.0.120 (registry+https://github.com/rust-lang/crates.io-index)" = "d428e3083a552a6608091220a6fa70224b067c43cb9898e7b64dc774b294c804"
+"checksum clippy 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)" = "72c1d7d8ad4a41a722c0a09f747f085db980303e68b09dee2880231de4035c50"
+"checksum clippy_lints 0.0.121 (registry+https://github.com/rust-lang/crates.io-index)" = "83e1775d962387976aeae9f97f484e685dc92b05ed305bb62d5a9477722d9210"
 "checksum comms 0.1.0 (git+https://github.com/sirpent-team/comms?branch=develop)" = "<none>"
 "checksum dbghelp-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97590ba53bcb8ac28279161ca943a924d1fd4a8fb3fa63302591647c4fc5b850"
 "checksum dtoa 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "80c8b71fd71146990a9742fc06dcbbde19161a267e0ad4e572c35162f4578c90"
