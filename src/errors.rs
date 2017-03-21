@@ -34,3 +34,12 @@ error_chain! {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IoErrorString(String);
+
+impl From<::std::io::Error> for IoErrorString {
+    fn from(e: ::std::io::Error) -> IoErrorString {
+        IoErrorString(format!("{}", e))
+    }
+}

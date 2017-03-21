@@ -1,6 +1,5 @@
 use rand::Rng;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use futures::{future, Future, Sink, IntoFuture};
 use futures::sync::mpsc;
@@ -109,9 +108,10 @@ impl<R> GameFuture<R>
 
     fn move_rx(mut self) -> BoxedFuture<(Self, HashMap<String, Msg>), ()> {
         let receive_timeout = ClientTimeout::keep_alive_after(self.timeout, self.timer.clone());
-        Box::new(self.players()
-            .receive_from(self.game.round_state().snakes.keys().cloned().collect(),
-                          receive_timeout)
+        let mut players = self.players();
+        players.set_timeout(receive_timeout);
+        Box::new(players.receive_from(self.game.round_state().snakes.keys().cloned().collect())
+            .unwrap()
             .map(|(msgs, players)| {
                 self.players = Some(players);
                 (self, msgs)
