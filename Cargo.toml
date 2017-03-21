@@ -24,6 +24,9 @@ comms = { git = "https://github.com/sirpent-team/comms", branch = "develop" }
 [dev-dependencies]
 quickcheck = "0.2"
 
+[replace]
+"futures:0.1.11" = { git = "https://github.com/sirpent-team/futures-rs", branch = "master" }
+
 [features]
 default = ["hexagon"]
 square = []

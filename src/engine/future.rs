@@ -2,7 +2,8 @@ use rand::Rng;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
-use futures::{future, Future, IntoFuture};
+use futures::{future, Future, Sink, IntoFuture};
+use futures::sync::mpsc;
 use tokio_timer::Timer;
 
 use super::*;
@@ -11,7 +12,7 @@ use utils::*;
 
 pub fn game_future<R>(mut game: Game<R>,
                       players: Room<String>,
-                      spectators_ref: Arc<Mutex<Room<String>>>,
+                      spectator_msg_tx: mpsc::Sender<Msg>,
                       timeout: Option<Milliseconds>,
                       timer: Timer)
                       -> <GameFuture<R> as IntoFuture>::Future
@@ -23,8 +24,8 @@ pub fn game_future<R>(mut game: Game<R>,
 
     GameFuture {
             game: game,
-            players: players,
-            spectators_ref: spectators_ref,
+            players: Some(players),
+            spectator_msg_tx: Some(spectator_msg_tx),
             timeout: timeout.map(|m| *m),
             timer: timer,
         }
@@ -37,8 +38,8 @@ pub struct GameFuture<R>
     where R: Rng + 'static
 {
     game: Game<R>,
-    players: Room<String>,
-    spectators_ref: Arc<Mutex<Room<String>>>,
+    players: Option<Room<String>>,
+    spectator_msg_tx: Option<mpsc::Sender<Msg>>,
     timeout: Option<Duration>,
     timer: Timer,
 }
@@ -46,25 +47,28 @@ pub struct GameFuture<R>
 impl<R> GameFuture<R>
     where R: Rng + 'static
 {
+    fn players(&mut self) -> Room<String> {
+        self.players.take().unwrap()
+    }
+
+    fn spectator_msg_tx(&mut self) -> mpsc::Sender<Msg> {
+        self.spectator_msg_tx.take().unwrap()
+    }
+
     fn game_tx(mut self) -> BoxedFuture<Self, ()> {
         let game_msg = Msg::Game { game: Box::new(self.game.game_state().clone()) };
-        // N.B. Clones Room and associated Clients. Expensive.
-        // Box::new(self.players
-        //     .broadcast(game_msg.clone())
-        //     .and_then(|players| {
-        //         self.players = players;
-        //         self.spectators_ref.clone().lock().unwrap().broadcast(game_msg).map(|_| {
-        //             self.players = players;
-        //             self
-        //         })
-        //     }))
-        let spectators_ref = self.spectators_ref.clone();
-        let spectators = spectators_ref.lock().unwrap();
-        Box::new((self.players.broadcast(game_msg.clone()), spectators.broadcast(game_msg))
-            .into_future()
-            .map(|(players, _)| {
-                self.players = players;
-                self
+
+        Box::new(self.players()
+            .broadcast(game_msg.clone())
+            .and_then(|players| {
+                self.spectator_msg_tx()
+                    .send(game_msg)
+                    .map(|spectator_msg_tx| {
+                        self.players = Some(players);
+                        self.spectator_msg_tx = Some(spectator_msg_tx);
+                        self
+                    })
+                    .map_err(|_| ())
             }))
     }
 
@@ -88,27 +92,28 @@ impl<R> GameFuture<R>
             round: Box::new(self.game.round_state().clone()),
             game_uuid: self.game.game_state().uuid,
         };
-        let spectators_ref2 = self.spectators_ref.clone();
-        let spectators = spectators_ref2.lock().unwrap();
-        // N.B. Clones Room and associated Clients. Expensive.
 
-        Box::new(self.players
+        Box::new(self.players()
             .broadcast(round_msg.clone())
             .and_then(|players| {
-                spectators.broadcast(round_msg).map(|_| {
-                    self.players = players;
-                    self
-                })
+                self.spectator_msg_tx()
+                    .send(round_msg)
+                    .map(|spectator_msg_tx| {
+                        self.players = Some(players);
+                        self.spectator_msg_tx = Some(spectator_msg_tx);
+                        self
+                    })
+                    .map_err(|_| ())
             }))
     }
 
     fn move_rx(mut self) -> BoxedFuture<(Self, HashMap<String, Msg>), ()> {
-        let receive_timeout = ClientTimeout::keep_alive_after(self.timeout, &self.timer);
-        Box::new(self.players
+        let receive_timeout = ClientTimeout::keep_alive_after(self.timeout, self.timer.clone());
+        Box::new(self.players()
             .receive_from(self.game.round_state().snakes.keys().cloned().collect(),
                           receive_timeout)
             .map(|(msgs, players)| {
-                self.players = players;
+                self.players = Some(players);
                 (self, msgs)
             }))
     }
@@ -121,16 +126,18 @@ impl<R> GameFuture<R>
     fn outcome_tx(mut self) -> BoxedFuture<Self, ()> {
         let outcome_msg = Msg::outcome(self.game.round_state().clone(),
                                        self.game.game_state().uuid);
-        let spectators_ref2 = self.spectators_ref.clone();
-        let spectators = spectators_ref2.lock().unwrap();
-        // N.B. Clones Room and associated Clients. Expensive.
-        Box::new(self.players
+
+        Box::new(self.players()
             .broadcast(outcome_msg.clone())
             .and_then(|players| {
-                spectators.broadcast(outcome_msg).map(|_| {
-                    self.players = players;
-                    self
-                })
+                self.spectator_msg_tx()
+                    .send(outcome_msg)
+                    .map(|spectator_msg_tx| {
+                        self.players = Some(players);
+                        self.spectator_msg_tx = Some(spectator_msg_tx);
+                        self
+                    })
+                    .map_err(|_| ())
             }))
     }
 
@@ -149,13 +156,15 @@ impl<R> IntoFuture for GameFuture<R>
     where R: Rng + 'static
 {
     type Future = BoxedFuture<Self::Item, Self::Error>;
-    type Item = (Game<R>, Room<String>, Arc<Mutex<Room<String>>>);
+    type Item = (Game<R>, Room<String>, mpsc::Sender<Msg>);
     type Error = ();
 
     fn into_future(self) -> Self::Future {
         Box::new(self.game_tx()
             .and_then(Self::round_loop)
             .and_then(Self::outcome_tx)
-            .map(|self_| (self_.game, self_.players, self_.spectators_ref)))
+            .map(|mut self_| {
+                (self_.game, self_.players.take().unwrap(), self_.spectator_msg_tx.take().unwrap())
+            }))
     }
 }
