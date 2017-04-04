@@ -1,18 +1,19 @@
 use std::collections::VecDeque;
 use futures::{Future, Sink, Stream, Poll, Async, AsyncSink};
 use futures::sync::mpsc;
+use comms::Room;
 
 use net::*;
 
 pub struct Spectators {
-    spectator_rx: mpsc::Receiver<Client<String, MsgTransport>>,
-    spectators: Room<String, MsgTransport>,
+    spectator_rx: mpsc::Receiver<MsgClient<String>>,
+    spectators: MsgRoom<String>,
     msg_rx: mpsc::Receiver<Msg>,
     msg_queue: VecDeque<Msg>,
 }
 
 impl Spectators {
-    pub fn new(spectator_rx: mpsc::Receiver<Client<String, MsgTransport>>,
+    pub fn new(spectator_rx: mpsc::Receiver<MsgClient<String>>,
                msg_rx: mpsc::Receiver<Msg>)
                -> Spectators {
         Spectators {

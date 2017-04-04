@@ -8,14 +8,12 @@ use serde_json;
 use bytes::{BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder, Framed};
 use tokio_core::net::TcpStream;
-use uuid::Uuid;
 
-pub use comms::{Client, Room};
+use comms::{Client, Room};
 use utils::*;
 
-pub fn client(tx_rx: MsgTransport) -> Client<Uuid, MsgTransport> {
-    Client::new(Uuid::new_v4(), tx_rx)
-}
+pub type MsgClient<I> = Client<I, MsgTransport>;
+pub type MsgRoom<I> = Room<I, MsgTransport>;
 
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

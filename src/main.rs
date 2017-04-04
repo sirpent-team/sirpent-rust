@@ -8,6 +8,7 @@ extern crate rand;
 extern crate tokio_timer;
 extern crate tokio_io;
 extern crate uuid;
+extern crate comms;
 
 use std::env;
 use std::str;
@@ -23,6 +24,7 @@ use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
 use tokio_timer::Timer;
 use tokio_io::AsyncRead;
+use comms::{Client, Room};
 
 use sirpent::utils::*;
 use sirpent::net::*;
@@ -54,7 +56,7 @@ fn main() {
     let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players: Arc<Mutex<Vec<Client<String, MsgTransport>>>> = Arc::new(Mutex::new(Vec::new()));
+    let players: Arc<Mutex<Vec<MsgClient<String>>>> = Arc::new(Mutex::new(Vec::new()));
 
     let (spectator_tx, spectator_rx) = mpsc::channel(3);
     let (spectator_msg_tx, spectator_msg_rx) = mpsc::channel(3);
@@ -66,7 +68,7 @@ fn main() {
                         handle.clone(),
                         names.clone(),
                         grid,
-                        timeout,
+                        timeout.unwrap(),
                         players.clone(),
                         spectator_tx,
                         timer.clone()));
@@ -93,77 +95,83 @@ fn main() {
         lp.turn(None);
     }
 }
+
 fn server(listener: TcpListener,
           handle: Handle,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
-          timeout_millis: Option<Milliseconds>,
-          players_pool: Arc<Mutex<Vec<Client<String, MsgTransport>>>>,
-          spectator_tx: mpsc::Sender<Client<String, MsgTransport>>,
+          timeout_millis: Milliseconds,
+          players_pool: Arc<Mutex<Vec<MsgClient<String>>>>,
+          spectator_tx: mpsc::Sender<MsgClient<String>>,
           timer: tokio_timer::Timer)
           -> Box<Future<Item = (), Error = ()>> {
-    let clients = listener
+    let server = listener
         .incoming()
-        .map(move |(socket, addr)| {
-                 let msg_transport = socket.framed(MsgCodec);
-                 (msg_transport, addr)
-             });
+        .map_err(|_| ())
+        .for_each(move |(socket, addr)| {
+            let msg_transport = socket.framed(MsgCodec);
+            let client = Client::new(addr, msg_transport);
 
-    let server = clients
-        .for_each(move |(msg_transport, _)| {
-            let client = client(msg_transport);
+            let players_pool = players_pool.clone();
+            let spectator_tx = spectator_tx.clone();
 
-            let timeout = *timeout_millis.unwrap();
-            let timer2 = timer.clone();
-
-            // @TODO: If and when I build a client object, keep addr handy in it.
-            let mut names_ref = names.clone();
-            let players_ref = players_pool.clone();
-
-            let spectator_tx_2 = spectator_tx.clone();
-
-            handle.spawn(client.transmit(Msg::version())
-                .and_then(move |client| client.receive().with_hard_timeout(timeout, &timer2))
-                .map_err(|_| ())
-                .and_then(move |(maybe_msg, client)| -> Box<Future<Item = (), Error = ()>> {
-                    if let Msg::Register { desired_name, kind } = maybe_msg {
-                        let name = find_unique_name(&mut names_ref, desired_name);
-                        let client = client.rename(name.clone());
-
-                        let welcome_tx = Box::new(client.transmit(Msg::Welcome {
-                            name: name,
-                            grid: grid.into(),
-                            timeout_millis: timeout_millis,
-                        }));
-
-                        let welcome_tx: Box<Future<Item = (), Error = ()>> = match kind {
-                            ClientKind::Spectator => {
-                                        Box::new(welcome_tx.map_err(|_| ()).and_then(|client| {
-                                            spectator_tx_2.send(client).map(|_| ()).map_err(|_| ())
-                                        }))
-                            }
+            let handshake_future =
+                handshake(client, timeout_millis, timer.clone(), names.clone(), grid)
+                    .map_err(|_| ())
+                    .and_then(move |(client, kind)| -> Box<Future<Item = (), Error = ()>> {
+                        match kind {
                             ClientKind::Player => {
-                                Box::new(welcome_tx.map(move |client| {
-                                        println!("prelock1");
-                                        players_ref.lock().unwrap().push(client);
-                                        println!("postlock1");
-                                        ()
-                                    })
-                                    .map_err(|_| ()))
+                                players_pool.lock().unwrap().push(client);
+                                Box::new(future::ok(()))
                             }
-                        };
+                            ClientKind::Spectator => {
+                                Box::new(spectator_tx.send(client).map(|_| ()).map_err(|_| ()))
+                            }
+                        }
+                    });
 
-                        Box::new(welcome_tx)
-                    } else {
-                        println!("Error welcoming client: unexpected {:?}", maybe_msg);
-                        Box::new(future::err(()))
-                    }
-                }));
-
+            handle.spawn(handshake_future);
             Ok(())
         })
         .then(|_| Ok(()));
     Box::new(server)
+}
+
+fn handshake(client: MsgClient<SocketAddr>,
+             timeout_millis: Milliseconds,
+             timer: tokio_timer::Timer,
+             mut names: Arc<Mutex<HashSet<String>>>,
+             grid: Grid)
+             -> Box<Future<Item = (MsgClient<String>, ClientKind), Error = ()>> {
+    let version_msg = Msg::version();
+    Box::new(client
+                 .transmit(version_msg)
+                 .map_err(|_| ())
+                 .and_then(move |client| {
+                               client
+                                   .receive()
+                                   .with_hard_timeout(*timeout_millis, &timer)
+                                   .map_err(|_| ())
+                           })
+                 .and_then(move |(maybe_msg, client)| -> Box<Future<Item = _, Error = _>> {
+        if let Msg::Register { desired_name, kind } = maybe_msg {
+            let name = find_unique_name(&mut names, desired_name);
+            let client = client.rename(name.clone());
+
+            let welcome_future = client.transmit(Msg::Welcome {
+                                                     name: name,
+                                                     grid: grid.into(),
+                                                     timeout_millis: Some(timeout_millis),
+                                                 });
+
+            Box::new(welcome_future
+                         .map(move |client| (client, kind))
+                         .map_err(|_| ()))
+        } else {
+            println!("Error welcoming client: unexpected {:?}", maybe_msg);
+            Box::new(future::err(()))
+        }
+    }))
 }
 
 /// Find an unused name based upon the `desired_name`.
@@ -199,7 +207,7 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 
 fn play_games(_: Arc<Mutex<HashSet<String>>>,
               grid: Grid,
-              player_queue_ref: Arc<Mutex<Vec<Client<String, MsgTransport>>>>,
+              player_queue_ref: Arc<Mutex<Vec<MsgClient<String>>>>,
               spectators_ref: mpsc::Sender<Msg>,
               timer: Timer,
               timeout: Option<Milliseconds>)
