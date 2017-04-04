@@ -85,25 +85,28 @@ mod tests {
                 })
                 .collect();
             return Snake {
-                segments: segments,
-                previous_tail: None,
-            };
+                       segments: segments,
+                       previous_tail: None,
+                   };
         }
 
         fn shrink(&self) -> Box<Iterator<Item = Snake>> {
             let mut shrinks = Vec::new();
             for i in 0..self.segments.len() {
                 shrinks.push(Snake {
-                    segments: self.segments[..i].to_vec(),
-                    previous_tail: None,
-                })
+                                 segments: self.segments[..i].to_vec(),
+                                 previous_tail: None,
+                             })
             }
             return Box::new(shrinks.into_iter());
         }
     }
 
     fn snake_is_connected_prop(snake: Snake) -> bool {
-        snake.segments.windows(2).all(|x| x[0].distance(&x[1]) == 1)
+        snake
+            .segments
+            .windows(2)
+            .all(|x| x[0].distance(&x[1]) == 1)
     }
 
     #[test]

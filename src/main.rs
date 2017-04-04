@@ -34,7 +34,9 @@ fn main() {
 
     // Take the first command line argument as an address to listen on, or fall
     // back to just some localhost default.
-    let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    let addr = env::args()
+        .nth(1)
+        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let addr = addr.parse::<SocketAddr>().unwrap();
 
     // Initialize the various data structures we're going to use in our server.
@@ -52,7 +54,7 @@ fn main() {
     let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
 
     let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players: Arc<Mutex<Vec<Client<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let players: Arc<Mutex<Vec<Client<String, MsgTransport>>>> = Arc::new(Mutex::new(Vec::new()));
 
     let (spectator_tx, spectator_rx) = mpsc::channel(3);
     let (spectator_msg_tx, spectator_msg_rx) = mpsc::channel(3);
@@ -95,23 +97,24 @@ fn server(listener: TcpListener,
           handle: Handle,
           names: Arc<Mutex<HashSet<String>>>,
           grid: Grid,
-          timeout: Option<Milliseconds>,
-          players_pool: Arc<Mutex<Vec<Client<String>>>>,
-          spectator_tx: mpsc::Sender<Client<String>>,
+          timeout_millis: Option<Milliseconds>,
+          players_pool: Arc<Mutex<Vec<Client<String, MsgTransport>>>>,
+          spectator_tx: mpsc::Sender<Client<String, MsgTransport>>,
           timer: tokio_timer::Timer)
           -> Box<Future<Item = (), Error = ()>> {
-    let clients = listener.incoming()
+    let clients = listener
+        .incoming()
         .map(move |(socket, addr)| {
-            let msg_transport = socket.framed(MsgCodec);
-            let (tx, rx) = msg_transport.split();
-            (tx, rx, addr)
-        });
+                 let msg_transport = socket.framed(MsgCodec);
+                 (msg_transport, addr)
+             });
 
-    let server = clients.for_each(move |(msg_tx, msg_rx, _)| {
-            let mut client = client(msg_tx, msg_rx);
+    let server = clients
+        .for_each(move |(msg_transport, _)| {
+            let client = client(msg_transport);
 
-            let client_timeout = Timeout::disconnect_after(timeout.map(|m| *m), timer.clone());
-            client.set_timeout(client_timeout);
+            let timeout = *timeout_millis.unwrap();
+            let timer2 = timer.clone();
 
             // @TODO: If and when I build a client object, keep addr handy in it.
             let mut names_ref = names.clone();
@@ -120,17 +123,17 @@ fn server(listener: TcpListener,
             let spectator_tx_2 = spectator_tx.clone();
 
             handle.spawn(client.transmit(Msg::version())
-                .and_then(|client| client.receive())
+                .and_then(move |client| client.receive().with_hard_timeout(timeout, &timer2))
                 .map_err(|_| ())
                 .and_then(move |(maybe_msg, client)| -> Box<Future<Item = (), Error = ()>> {
-                    if let Some(Msg::Register { desired_name, kind }) = maybe_msg {
+                    if let Msg::Register { desired_name, kind } = maybe_msg {
                         let name = find_unique_name(&mut names_ref, desired_name);
                         let client = client.rename(name.clone());
 
                         let welcome_tx = Box::new(client.transmit(Msg::Welcome {
                             name: name,
                             grid: grid.into(),
-                            timeout_millis: timeout,
+                            timeout_millis: timeout_millis,
                         }));
 
                         let welcome_tx: Box<Future<Item = (), Error = ()>> = match kind {
@@ -196,7 +199,7 @@ fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: Strin
 
 fn play_games(_: Arc<Mutex<HashSet<String>>>,
               grid: Grid,
-              player_queue_ref: Arc<Mutex<Vec<Client<String>>>>,
+              player_queue_ref: Arc<Mutex<Vec<Client<String, MsgTransport>>>>,
               spectators_ref: mpsc::Sender<Msg>,
               timer: Timer,
               timeout: Option<Milliseconds>)
@@ -224,27 +227,25 @@ fn play_games(_: Arc<Mutex<HashSet<String>>>,
                                  spectators_ref.clone(),
                                  timeout,
                                  timer.clone())
-                .and_then(move |(game, players, _)| {
-                    println!("End of game! {:?} {:?}",
-                             game.game_state(),
-                             game.round_state());
+                             .and_then(move |(game, _, _)| {
+                println!("End of game! {:?} {:?}",
+                         game.game_state(),
+                         game.round_state());
 
-                    // @TODO: Return players and spectators to the waiting pool.
-                    // let mut players_queue = player_queue_ref2.lock().unwrap();
-                    // players_queue.extend(players.into_clients()
-                    //     .0
-                    //     .into_iter()
-                    //     .map(|(_, v)| v)
-                    //     .collect::<Vec<_>>());
+                // @TODO: Return players and spectators to the waiting pool.
+                // let mut players_queue = player_queue_ref2.lock().unwrap();
+                // players_queue.extend(players.into_clients()
+                //     .0
+                //     .into_iter()
+                //     .map(|(_, v)| v)
+                //     .collect::<Vec<_>>());
 
-                    sleep(&timer2, milliseconds(2000)).map(|_| continue_)
-                }))
+                sleep(&timer2, milliseconds(2000)).map(|_| continue_)
+            }))
         }
     }))
 }
 
 fn sleep(timer: &Timer, ms: Milliseconds) -> Box<Future<Item = (), Error = ()>> {
-    Box::new(timer.sleep(ms.into())
-        .map(|_| ())
-        .map_err(|_| ()))
+    Box::new(timer.sleep(ms.into()).map(|_| ()).map_err(|_| ()))
 }

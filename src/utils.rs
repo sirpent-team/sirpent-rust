@@ -34,9 +34,9 @@ pub fn io_error_broken_pipe() -> io::Error {
 pub fn retain_oks<O>(h: HashMap<String, Result<O>>) -> HashMap<String, O> {
     h.into_iter()
         .filter_map(|(id, result)| match result {
-            Ok(o) => Some((id, o)),
-            Err(_) => None,
-        })
+                        Ok(o) => Some((id, o)),
+                        Err(_) => None,
+                    })
         .collect()
 }
 

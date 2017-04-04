@@ -86,7 +86,10 @@ impl VectorTrait for TriangleVector {
     }
 
     fn neighbours(&self) -> Vec<Self> {
-        TriangleDirection::variants().into_iter().map(|d| self.neighbour(d)).collect()
+        TriangleDirection::variants()
+            .into_iter()
+            .map(|d| self.neighbour(d))
+            .collect()
     }
 }
 

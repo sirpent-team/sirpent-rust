@@ -1,7 +1,7 @@
 use rand::Rng;
 use std::time::Duration;
 use std::collections::HashMap;
-use futures::{future, Future, Sink, IntoFuture};
+use futures::{Future, Sink, Poll, Async, Stream};
 use futures::sync::mpsc;
 use tokio_timer::Timer;
 
@@ -9,161 +9,196 @@ use super::*;
 use net::*;
 use utils::*;
 
-pub fn game_future<R>(mut game: Game<R>,
-                      players: Room<String>,
-                      spectator_msg_tx: mpsc::Sender<Msg>,
-                      timeout: Option<Milliseconds>,
-                      timer: Timer)
-                      -> <GameFuture<R> as IntoFuture>::Future
+pub fn game_future<R>
+    (mut game: Game<R>,
+     players: Room<String, MsgTransport>,
+     spectator_tx: mpsc::Sender<Msg>,
+     timeout: Option<Milliseconds>,
+     timer: Timer)
+     -> Box<Future<Item = (Game<R>, Room<String, MsgTransport>, mpsc::Sender<Msg>), Error = ()>>
     where R: Rng + 'static
 {
+    let timeout = *timeout.unwrap();
+
     for id in players.ids() {
         game.add_player(id.clone());
     }
 
-    GameFuture {
-            game: game,
-            players: Some(players),
-            spectator_msg_tx: Some(spectator_msg_tx),
-            timeout: timeout.map(|m| *m),
-            timer: timer,
-        }
-        .into_future()
-}
+    let game_msg = Msg::Game { game: Box::new(game.game_state().clone()) };
+    let future = players
+        .broadcast_all(game_msg.clone())
+        .and_then(move |players| {
+            spectator_tx
+                .send(game_msg)
+                .map_err(|_| ())
+                .and_then(move |spectator_tx| {
+                    let rounds_future =
+                        RoundsFuture::new(game, players, spectator_tx, timeout, timer);
+                    rounds_future.and_then(|(game, players, spectator_tx)| {
+                        let outcome_msg = Msg::outcome(game.round_state().clone(),
+                                                       game.game_state().uuid);
 
-type BoxedFuture<I, E> = Box<Future<Item = I, Error = E>>;
-
-pub struct GameFuture<R>
-    where R: Rng + 'static
-{
-    game: Game<R>,
-    players: Option<Room<String>>,
-    spectator_msg_tx: Option<mpsc::Sender<Msg>>,
-    timeout: Option<Duration>,
-    timer: Timer,
-}
-
-impl<R> GameFuture<R>
-    where R: Rng + 'static
-{
-    fn players(&mut self) -> Room<String> {
-        self.players.take().unwrap()
-    }
-
-    fn spectator_msg_tx(&mut self) -> mpsc::Sender<Msg> {
-        self.spectator_msg_tx.take().unwrap()
-    }
-
-    fn game_tx(mut self) -> BoxedFuture<Self, ()> {
-        let game_msg = Msg::Game { game: Box::new(self.game.game_state().clone()) };
-
-        Box::new(self.players()
-            .broadcast_all(game_msg.clone())
-            .and_then(|players| {
-                self.spectator_msg_tx()
-                    .send(game_msg)
-                    .map(|spectator_msg_tx| {
-                        self.players = Some(players);
-                        self.spectator_msg_tx = Some(spectator_msg_tx);
-                        self
+                        players
+                            .broadcast_all(outcome_msg.clone())
+                            .and_then(|players| {
+                                          spectator_tx
+                                              .send(outcome_msg)
+                                              .map_err(|_| ())
+                                              .map(|spectator_tx| (game, players, spectator_tx))
+                                      })
                     })
-                    .map_err(|_| ())
-            }))
-    }
-
-    fn round_loop(self) -> BoxedFuture<Self, ()> {
-        Box::new(future::loop_fn(self, |self_| {
-            self_.round_tx()
-                .and_then(Self::move_rx)
-                .map(|(mut self_, msgs)| {
-                    self_.perform_move(msgs);
-                    if self_.game.concluded() {
-                        future::Loop::Break(self_)
-                    } else {
-                        future::Loop::Continue(self_)
-                    }
                 })
-        }))
-    }
+        });
+    Box::new(future)
+}
 
-    fn round_tx(mut self) -> BoxedFuture<Self, ()> {
-        let round_msg = Msg::Round {
-            round: Box::new(self.game.round_state().clone()),
-            game_uuid: self.game.game_state().uuid,
-        };
+pub struct RoundsFuture<R>
+    where R: Rng + 'static
+{
+    rounds_stream: Option<RoundsStream<R>>,
+}
 
-        Box::new(self.players()
-            .broadcast_all(round_msg.clone())
-            .and_then(|players| {
-                self.spectator_msg_tx()
-                    .send(round_msg)
-                    .map(|spectator_msg_tx| {
-                        self.players = Some(players);
-                        self.spectator_msg_tx = Some(spectator_msg_tx);
-                        self
-                    })
-                    .map_err(|_| ())
-            }))
-    }
-
-    fn move_rx(mut self) -> BoxedFuture<(Self, HashMap<String, Msg>), ()> {
-        let receive_timeout = Timeout::keep_alive_after(self.timeout, self.timer.clone());
-        let mut players = self.players();
-        players.set_timeout(receive_timeout);
-        Box::new(players.receive(self.game.round_state().snakes.keys().cloned().collect())
-            .map(|(msgs, players)| {
-                self.players = Some(players);
-                (self, msgs)
-            }))
-    }
-
-    fn perform_move(&mut self, msgs: HashMap<String, Msg>) {
-        let directions = self.msgs_to_directions(msgs);
-        self.game.next(Event::Turn(directions));
-    }
-
-    fn outcome_tx(mut self) -> BoxedFuture<Self, ()> {
-        let outcome_msg = Msg::outcome(self.game.round_state().clone(),
-                                       self.game.game_state().uuid);
-
-        Box::new(self.players()
-            .broadcast_all(outcome_msg.clone())
-            .and_then(|players| {
-                self.spectator_msg_tx()
-                    .send(outcome_msg)
-                    .map(|spectator_msg_tx| {
-                        self.players = Some(players);
-                        self.spectator_msg_tx = Some(spectator_msg_tx);
-                        self
-                    })
-                    .map_err(|_| ())
-            }))
-    }
-
-    fn msgs_to_directions(&self, msgs: HashMap<String, Msg>) -> HashMap<String, Direction> {
-        msgs.into_iter()
-            .filter_map(|(id, msg)| if let Msg::Move { direction } = msg {
-                Some((id, direction))
-            } else {
-                None
-            })
-            .collect()
+impl<R> RoundsFuture<R>
+    where R: Rng + 'static
+{
+    pub fn new(game: Game<R>,
+               players: Room<String, MsgTransport>,
+               spectator_tx: mpsc::Sender<Msg>,
+               timeout: Duration,
+               timer: Timer)
+               -> RoundsFuture<R> {
+        let rounds_stream = RoundsStream::new(game, players, spectator_tx, timeout, timer);
+        RoundsFuture { rounds_stream: Some(rounds_stream) }
     }
 }
 
-impl<R> IntoFuture for GameFuture<R>
+impl<R> Future for RoundsFuture<R>
     where R: Rng + 'static
 {
-    type Future = BoxedFuture<Self::Item, Self::Error>;
-    type Item = (Game<R>, Room<String>, mpsc::Sender<Msg>);
+    type Item = (Game<R>, Room<String, MsgTransport>, mpsc::Sender<Msg>);
     type Error = ();
 
-    fn into_future(self) -> Self::Future {
-        Box::new(self.game_tx()
-            .and_then(Self::round_loop)
-            .and_then(Self::outcome_tx)
-            .map(|mut self_| {
-                (self_.game, self_.players.take().unwrap(), self_.spectator_msg_tx.take().unwrap())
-            }))
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let poll = {
+            let rounds_stream = self.rounds_stream.as_mut().unwrap();
+            rounds_stream.poll()
+        };
+        match poll {
+            Ok(Async::Ready(None)) => {
+                let rounds_stream = self.rounds_stream.take().unwrap();
+                Ok(Async::Ready(rounds_stream.into_inner()))
+            }
+            Ok(Async::Ready(Some(_))) => self.poll(),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(e) => Err(e),
+        }
     }
+}
+
+pub struct RoundsStream<R>
+    where R: Rng + 'static
+{
+    timeout: Duration,
+    timer: Timer,
+    round_future: Box<Future<Item = (Game<R>, Room<String, MsgTransport>, mpsc::Sender<Msg>),
+                             Error = ()>>,
+    // This screams that either this wants to be a Future or `round` must become a custom Future.
+    // I'd prefer `round` a custom future (such that these things can be taken out of it) and yet
+    // such a future could be vast.
+    inner: Option<(Game<R>, Room<String, MsgTransport>, mpsc::Sender<Msg>)>,
+}
+
+impl<R> RoundsStream<R>
+    where R: Rng + 'static
+{
+    pub fn new(game: Game<R>,
+               players: Room<String, MsgTransport>,
+               spectator_tx: mpsc::Sender<Msg>,
+               timeout: Duration,
+               timer: Timer)
+               -> RoundsStream<R> {
+        let round_future = round(game, players, spectator_tx, timeout, timer.clone());
+        RoundsStream {
+            timeout: timeout,
+            timer: timer,
+            round_future: round_future,
+            inner: None,
+        }
+    }
+
+    pub fn into_inner(mut self) -> (Game<R>, Room<String, MsgTransport>, mpsc::Sender<Msg>) {
+        self.inner.take().unwrap()
+    }
+}
+
+impl<R> Stream for RoundsStream<R>
+    where R: Rng + 'static
+{
+    type Item = Vec<String>;
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        match self.round_future.poll() {
+            Ok(Async::Ready((game, players, spectator_tx))) => {
+                if game.concluded() {
+                    self.inner = Some((game, players, spectator_tx));
+                    Ok(Async::Ready(None))
+                } else {
+                    let living_player_ids = game.round_state().snakes.keys().cloned().collect();
+                    self.round_future = round(game,
+                                              players,
+                                              spectator_tx,
+                                              self.timeout,
+                                              self.timer.clone());
+                    Ok(Async::Ready(Some(living_player_ids)))
+                }
+            }
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+fn round<R>
+    (mut game: Game<R>,
+     players: Room<String, MsgTransport>,
+     spectator_tx: mpsc::Sender<Msg>,
+     _: Duration,
+     _: Timer)
+     -> Box<Future<Item = (Game<R>, Room<String, MsgTransport>, mpsc::Sender<Msg>), Error = ()>>
+    where R: Rng + 'static
+{
+    let round_msg = Msg::Round {
+        round: Box::new(game.round_state().clone()),
+        game_uuid: game.game_state().uuid,
+    };
+    let fut = players
+        .broadcast_all(round_msg.clone())
+        .and_then(|players| {
+            spectator_tx
+                .send(round_msg)
+                .map_err(|_| ())
+                .and_then(|spectator_tx| {
+                    let living_player_ids = game.round_state().snakes.keys().cloned().collect();
+                    players
+                        .receive(living_player_ids)
+                        //.with_soft_timeout(timeout, &timer)
+                        .map(|(msgs, players)| {
+                                 let directions = msgs_to_directions(msgs);
+                                 game.next(Event::Turn(directions));
+                                 (game, players, spectator_tx)
+                             })
+                })
+        });
+    Box::new(fut)
+}
+
+fn msgs_to_directions(msgs: HashMap<String, Msg>) -> HashMap<String, Direction> {
+    msgs.into_iter()
+        .filter_map(|(id, msg)| if let Msg::Move { direction } = msg {
+                        Some((id, direction))
+                    } else {
+                        None
+                    })
+        .collect()
 }

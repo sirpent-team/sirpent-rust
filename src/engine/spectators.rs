@@ -5,14 +5,14 @@ use futures::sync::mpsc;
 use net::*;
 
 pub struct Spectators {
-    spectator_rx: mpsc::Receiver<Client<String>>,
-    spectators: Room<String>,
+    spectator_rx: mpsc::Receiver<Client<String, MsgTransport>>,
+    spectators: Room<String, MsgTransport>,
     msg_rx: mpsc::Receiver<Msg>,
     msg_queue: VecDeque<Msg>,
 }
 
 impl Spectators {
-    pub fn new(spectator_rx: mpsc::Receiver<Client<String>>,
+    pub fn new(spectator_rx: mpsc::Receiver<Client<String, MsgTransport>>,
                msg_rx: mpsc::Receiver<Msg>)
                -> Spectators {
         Spectators {
@@ -29,13 +29,13 @@ impl Future for Spectators {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
-        println!("spectators wakeup {:?}", self.spectators.ready_ids());
+        println!("spectators wakeup {:?}", self.spectators.ids());
 
         loop {
             match self.spectator_rx.poll() {
                 Ok(Async::NotReady) => break,
                 Ok(Async::Ready(Some(client))) => {
-                    client.join(&mut self.spectators);
+                    self.spectators.insert(client);
                 }
                 Ok(Async::Ready(None)) => {
                     // If stream closed, shutdown this future.
@@ -64,8 +64,9 @@ impl Future for Spectators {
         // If any spectator sends a message, disconnect them as that behaviour is not
         // consistent with spectating.
         match self.spectators.poll() {
-            Ok(Async::Ready(Some(msgs))) => {
-                self.spectators.close(msgs.into_iter().map(|(id, _)| id).collect());
+            Ok(Async::Ready(Some((id, _)))) => {
+                // @TODO: Would be nice to have a `close_one` method to avoid the heap Vec.
+                self.spectators.close(vec![id].into_iter().collect());
             }
             _ => {}
         }
@@ -77,15 +78,14 @@ impl Future for Spectators {
         }
 
         while let Some(msg) = self.msg_queue.pop_front() {
-            let msgs = self.spectators.ids().into_iter().map(|id| (id, msg.clone())).collect();
-            println!("{:?}", msgs);
-            match self.spectators.start_send(msgs) {
-                Ok(AsyncSink::NotReady(_)) |
-                Err(_) => {
-                    self.msg_queue.push_front(msg);
-                    break;
+            for id in self.spectators.ids() {
+                match self.spectators.start_send((id.clone(), msg.clone())) {
+                    Ok(AsyncSink::NotReady(_)) |
+                    Err(_) => {
+                        self.spectators.close(vec![id].into_iter().collect());
+                    }
+                    Ok(AsyncSink::Ready) => {}
                 }
-                Ok(AsyncSink::Ready) => {}
             }
 
             match self.spectators.poll_complete() {

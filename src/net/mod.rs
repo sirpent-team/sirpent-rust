@@ -8,31 +8,13 @@ use serde_json;
 use bytes::{BufMut, BytesMut};
 use tokio_io::codec::{Encoder, Decoder, Framed};
 use tokio_core::net::TcpStream;
-use futures::{sink, Sink, Stream};
-use futures::stream::{self, SplitSink, SplitStream};
 use uuid::Uuid;
 
-use comms;
-
+pub use comms::{Client, Room};
 use utils::*;
-use errors::*;
 
-// Use `comms`. Define some local type aliases and reexport some plain comms one.
-pub use comms::{Status, Timeout};
-pub type Client<I> = comms::Client<I,
-                                   sink::SinkFromErr<SplitSink<MsgTransport>, IoErrorString>,
-                                   stream::FromErr<SplitStream<MsgTransport>, IoErrorString>>;
-pub type Room<I> = comms::Room<I,
-                               sink::SinkFromErr<SplitSink<MsgTransport>, IoErrorString>,
-                               stream::FromErr<SplitStream<MsgTransport>, IoErrorString>>;
-
-pub fn client(tx: SplitSink<Framed<TcpStream, MsgCodec>>,
-              rx: SplitStream<Framed<TcpStream, MsgCodec>>)
-              -> Client<Uuid> {
-    Client::new(Uuid::new_v4(),
-                Timeout::None,
-                tx.sink_from_err(),
-                rx.from_err())
+pub fn client(tx_rx: MsgTransport) -> Client<Uuid, MsgTransport> {
+    Client::new(Uuid::new_v4(), tx_rx)
 }
 
 #[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
@@ -68,9 +50,9 @@ impl Decoder for MsgCodec {
 
             // Attempt JSON decode into Msg.
             return match serde_json::from_str(line) {
-                Ok(msg) => Ok(Some(msg)),
-                Err(e) => Err(io_error_from_error(&e)),
-            };
+                       Ok(msg) => Ok(Some(msg)),
+                       Err(e) => Err(io_error_from_error(&e)),
+                   };
         }
 
         Ok(None)

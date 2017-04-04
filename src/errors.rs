@@ -21,7 +21,6 @@ error_chain! {
         Fmt(::std::fmt::Error);
         Io(::std::io::Error);
         Serde(::serde_json::Error);
-        TokioTimer(::tokio_timer::TimerError);
     }
 
     // Define additional `ErrorKind` variants. The syntax here is

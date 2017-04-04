@@ -66,7 +66,10 @@ impl VectorTrait for SquareVector {
     }
 
     fn neighbours(&self) -> Vec<Self> {
-        SquareDirection::variants().into_iter().map(|d| self.neighbour(d)).collect()
+        SquareDirection::variants()
+            .into_iter()
+            .map(|d| self.neighbour(d))
+            .collect()
     }
 }
 
@@ -141,9 +144,9 @@ mod tests {
                 height = 1;
             }
             return SquareGrid {
-                width: width,
-                height: height,
-            };
+                       width: width,
+                       height: height,
+                   };
         }
     }
 

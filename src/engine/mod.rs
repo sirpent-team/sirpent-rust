@@ -61,7 +61,9 @@ impl<R: Rng> Game<R> {
         // Generate and insert a snake.
         let head = self.grid.random_cell(&mut *self.rng);
         let snake = Snake::new(vec![head]);
-        self.round_state.snakes.insert(final_name.clone(), snake);
+        self.round_state
+            .snakes
+            .insert(final_name.clone(), snake);
 
         final_name
     }
@@ -150,7 +152,9 @@ impl<R: Rng> Game<R> {
                 }
                 _ => {
                     let cause_of_death = CauseOfDeath::NoMoveMade;
-                    next_round.casualties.insert(name.clone(), cause_of_death);
+                    next_round
+                        .casualties
+                        .insert(name.clone(), cause_of_death);
                 }
             }
         }
@@ -172,7 +176,8 @@ impl<R: Rng> Game<R> {
         for (name, snake) in &next_round.snakes {
             for coll_snake in next_round.snakes.values() {
                 if snake != coll_snake && snake.has_collided_into(coll_snake) {
-                    next_round.casualties
+                    next_round
+                        .casualties
                         .insert(name.clone(), CauseOfDeath::CollidedWithSnake);
                     break;
                 }
@@ -184,7 +189,8 @@ impl<R: Rng> Game<R> {
         for (name, snake) in &next_round.snakes {
             for &segment in &snake.segments {
                 if !self.grid.is_within_bounds(segment) {
-                    next_round.casualties
+                    next_round
+                        .casualties
                         .insert(name.clone(), CauseOfDeath::CollidedWithBounds);
                 }
             }
@@ -202,7 +208,8 @@ impl<R: Rng> Game<R> {
                 if let Some((_, headless_segments)) = dead_snake.segments.split_first() {
                     // Only retain segments if within grid.
                     // @TODO: Move this to food management?
-                    let corpse_food: Vec<&Vector> = headless_segments.iter()
+                    let corpse_food: Vec<&Vector> = headless_segments
+                        .iter()
                         .filter(|&s| self.grid.is_within_bounds(*s))
                         .collect();
                     next_round.food.extend(corpse_food);
