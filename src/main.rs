@@ -19,7 +19,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 use futures::{future, Future, Sink, Stream};
-use futures::sync::mpsc;
+use futures::sync::{mpsc, oneshot};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::{Core, Handle};
 use tokio_timer::Timer;
@@ -55,7 +55,6 @@ fn main() {
     let grid = Grid::new(25);
     let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
 
-    let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let players: Arc<Mutex<Vec<MsgClient<String>>>> = Arc::new(Mutex::new(Vec::new()));
 
     let (spectator_tx, spectator_rx) = mpsc::channel(3);
@@ -63,10 +62,14 @@ fn main() {
     let spectators = Spectators::new(spectator_rx, spectator_msg_rx);
     handle.spawn(spectators);
 
+    // Run a nameserver to decide unique names for clients.
+    let (nameserver_tx, nameserver_rx) = mpsc::channel(5);
+    handle.spawn(nameserver(nameserver_rx));
+
     // Run TCP server to welcome clients and register them as players.
     handle.spawn(server(listener,
                         handle.clone(),
-                        names.clone(),
+                        nameserver_tx,
                         grid,
                         timeout.unwrap(),
                         players.clone(),
@@ -81,8 +84,7 @@ fn main() {
     thread::spawn(move || {
         thread::sleep(Milliseconds::new(10000).into());
         let mut lp = Core::new().unwrap();
-        lp.run(play_games(names.clone(),
-                            grid,
+        lp.run(play_games(grid,
                             players.clone(),
                             spectator_msg_tx,
                             timer.clone(),
@@ -98,7 +100,7 @@ fn main() {
 
 fn server(listener: TcpListener,
           handle: Handle,
-          names: Arc<Mutex<HashSet<String>>>,
+          nameserver_tx: mpsc::Sender<(String, oneshot::Sender<String>)>,
           grid: Grid,
           timeout_millis: Milliseconds,
           players_pool: Arc<Mutex<Vec<MsgClient<String>>>>,
@@ -115,8 +117,11 @@ fn server(listener: TcpListener,
             let players_pool = players_pool.clone();
             let spectator_tx = spectator_tx.clone();
 
-            let handshake_future =
-                handshake(client, timeout_millis, timer.clone(), names.clone(), grid)
+            let handshake_future = handshake(client,
+                                             timeout_millis,
+                                             timer.clone(),
+                                             nameserver_tx.clone(),
+                                             grid)
                     .map_err(|_| ())
                     .and_then(move |(client, kind)| -> Box<Future<Item = (), Error = ()>> {
                         match kind {
@@ -140,7 +145,7 @@ fn server(listener: TcpListener,
 fn handshake(client: MsgClient<SocketAddr>,
              timeout_millis: Milliseconds,
              timer: tokio_timer::Timer,
-             mut names: Arc<Mutex<HashSet<String>>>,
+             nameserver_tx: mpsc::Sender<(String, oneshot::Sender<String>)>,
              grid: Grid)
              -> Box<Future<Item = (MsgClient<String>, ClientKind), Error = ()>> {
     let version_msg = Msg::version();
@@ -155,18 +160,26 @@ fn handshake(client: MsgClient<SocketAddr>,
                            })
                  .and_then(move |(maybe_msg, client)| -> Box<Future<Item = _, Error = _>> {
         if let Msg::Register { desired_name, kind } = maybe_msg {
-            let name = find_unique_name(&mut names, desired_name);
-            let client = client.rename(name.clone());
-
-            let welcome_future = client.transmit(Msg::Welcome {
-                                                     name: name,
-                                                     grid: grid.into(),
-                                                     timeout_millis: Some(timeout_millis),
-                                                 });
-
-            Box::new(welcome_future
-                         .map(move |client| (client, kind))
-                         .map_err(|_| ()))
+            let (name_tx, name_rx) = oneshot::channel();
+            Box::new(nameserver_tx
+                         .send((desired_name, name_tx))
+                         .map_err(|_| ())
+                         .and_then(move |_| {
+                name_rx
+                    .map_err(|_| ())
+                    .and_then(move |name| {
+                        let client = client.rename(name.clone());
+                        let welcome_future = client.transmit(Msg::Welcome {
+                                                                 name: name,
+                                                                 grid: grid.into(),
+                                                                 timeout_millis:
+                                                                     Some(timeout_millis),
+                                                             });
+                        welcome_future
+                            .map(move |client| (client, kind))
+                            .map_err(|_| ())
+                    })
+            }))
         } else {
             println!("Error welcoming client: unexpected {:?}", maybe_msg);
             Box::new(future::err(()))
@@ -174,39 +187,23 @@ fn handshake(client: MsgClient<SocketAddr>,
     }))
 }
 
-/// Find an unused name based upon the `desired_name`.
-fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: String) -> String {
-    {
-        // Use the desired name if it's unused.
-        println!("prelock2");
-        let mut names_lock = names.lock().unwrap();
-        if !names_lock.contains(&desired_name) {
-            // Reserve this name.
-            names_lock.insert(desired_name.clone());
-            return desired_name;
+fn nameserver(desires: mpsc::Receiver<(String, oneshot::Sender<String>)>)
+              -> Box<Future<Item = (), Error = ()>> {
+    let mut names: HashSet<String> = HashSet::new();
+    Box::new(desires.for_each(move |(desired_name, name_tx)| {
+        let mut name = desired_name.clone();
+        let mut n = 1;
+        while names.contains(&name) {
+            name = format!("{}_{}", desired_name, roman_numerals(n));
+            n += 1;
         }
-        println!("postlock2");
-    }
-
-    // Find a unique name.
-    let mut n = 1;
-    loop {
-        let name = format!("{}_{}", desired_name, roman_numerals(n));
-        println!("{:?}", name);
-        println!("prelock3");
-        let mut names_lock = names.lock().unwrap();
-        if !names_lock.contains(&name) {
-            // Reserve this name.
-            names_lock.insert(name.clone());
-            return name;
-        }
-        println!("postlock3");
-        n += 1;
-    }
+        names.insert(name.clone());
+        let _ = name_tx.send(name);
+        future::ok(())
+    }))
 }
 
-fn play_games(_: Arc<Mutex<HashSet<String>>>,
-              grid: Grid,
+fn play_games(grid: Grid,
               player_queue_ref: Arc<Mutex<Vec<MsgClient<String>>>>,
               spectators_ref: mpsc::Sender<Msg>,
               timer: Timer,
