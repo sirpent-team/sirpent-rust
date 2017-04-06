@@ -19,14 +19,10 @@ serde_json = "0.9"
 serde_derive = "0.9"
 clippy = {version = "*", optional = true}
 error-chain = "0.9"
-comms = { git = "https://github.com/sirpent-team/comms", branch = "develop" }
+comms = "0.1.4"
 
 [dev-dependencies]
 quickcheck = "0.2"
-
-[replace]
-"futures:0.1.12" = { git = "https://github.com/sirpent-team/futures-rs", branch = "master" }
-"tokio-timer:0.1.0" = { git = "https://github.com/sirpent-team/tokio-timer", branch = "master" }
 
 [features]
 default = ["hexagon"]
