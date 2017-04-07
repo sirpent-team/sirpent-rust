@@ -5,6 +5,7 @@ pub mod grids;
 pub use self::game::*;
 pub use self::snake::*;
 use self::grids::*;
+pub use self::grids::GridEnum;
 
 #[cfg(feature = "hexagon")]
 pub type Direction = HexagonDirection;

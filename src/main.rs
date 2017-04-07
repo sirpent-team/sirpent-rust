@@ -16,9 +16,7 @@ use rand::OsRng;
 use std::thread;
 use std::cmp::min;
 use std::time::Duration;
-use std::convert::Into;
 use std::net::SocketAddr;
-use std::collections::HashSet;
 use futures::{future, stream, Future, Sink, Stream};
 use futures::sync::{mpsc, oneshot};
 use tokio_core::net::TcpListener;
@@ -71,7 +69,7 @@ fn main() {
 
     // Run a nameserver to decide unique names for clients.
     let (nameserver_tx, nameserver_rx) = mpsc::channel(5);
-    handle.spawn(nameserver(nameserver_rx));
+    handle.spawn(client_nameserver(nameserver_rx));
 
     // Run TCP server to welcome clients and register them as players.
     handle.spawn(server(listener,
@@ -89,7 +87,6 @@ fn main() {
     // * After a short wait Milliseconds play a new game, as before with all pooled player clients.
     // * Continue indefinitely.
     thread::spawn(move || {
-        thread::sleep(Milliseconds::new(10000).into());
         let mut lp = Core::new().unwrap();
         lp.run(play_games(grid,
                             dequeue_player_tx,
@@ -120,94 +117,22 @@ fn server(listener: TcpListener,
         .map_err(|_| ())
         .for_each(move |(socket, addr)| {
             let msg_transport = socket.framed(MsgCodec);
-            let client = Client::new(addr, msg_transport);
+            let unnamed_client = Client::new(addr, msg_transport);
 
-            let spectator_tx = spectator_tx.clone();
+            let nameserver_tx = nameserver_tx.clone();
             let player_tx = player_tx.clone();
-
-            let handshake_future = handshake(client,
-                                             timeout_millis,
-                                             timer.clone(),
-                                             nameserver_tx.clone(),
-                                             grid)
-                    .map_err(|_| ())
-                    .and_then(move |(client, kind)| -> Box<Future<Item = (), Error = ()>> {
-                        match kind {
-                            ClientKind::Player => {
-                                Box::new(player_tx.send(client).map(|_| ()).map_err(|_| ()))
-                            }
-                            ClientKind::Spectator => {
-                                Box::new(spectator_tx.send(client).map(|_| ()).map_err(|_| ()))
-                            }
-                        }
-                    });
-
-            handle.spawn(handshake_future);
+            let spectator_tx = spectator_tx.clone();
+            handle.spawn(client_handshake(unnamed_client,
+                                          grid,
+                                          timeout_millis,
+                                          timer.clone(),
+                                          nameserver_tx,
+                                          player_tx,
+                                          spectator_tx));
             Ok(())
         })
         .then(|_| Ok(()));
     Box::new(server)
-}
-
-fn handshake(client: MsgClient<SocketAddr>,
-             timeout_millis: Milliseconds,
-             timer: tokio_timer::Timer,
-             nameserver_tx: mpsc::Sender<(String, oneshot::Sender<String>)>,
-             grid: Grid)
-             -> Box<Future<Item = (MsgClient<String>, ClientKind), Error = ()>> {
-    let version_msg = Msg::version();
-    Box::new(client
-                 .transmit(version_msg)
-                 .map_err(|_| ())
-                 .and_then(move |client| {
-                               client
-                                   .receive()
-                                   .with_hard_timeout(*timeout_millis, &timer)
-                                   .map_err(|_| ())
-                           })
-                 .and_then(move |(maybe_msg, client)| -> Box<Future<Item = _, Error = _>> {
-        if let Msg::Register { desired_name, kind } = maybe_msg {
-            let (name_tx, name_rx) = oneshot::channel();
-            Box::new(nameserver_tx
-                         .send((desired_name, name_tx))
-                         .map_err(|_| ())
-                         .and_then(move |_| {
-                name_rx
-                    .map_err(|_| ())
-                    .and_then(move |name| {
-                        let client = client.rename(name.clone());
-                        let welcome_msg = Msg::Welcome {
-                            name: name,
-                            grid: grid.into(),
-                            timeout_millis: Some(timeout_millis),
-                        };
-                        client
-                            .transmit(welcome_msg)
-                            .map(move |client| (client, kind))
-                            .map_err(|_| ())
-                    })
-            }))
-        } else {
-            println!("Error welcoming client: unexpected {:?}", maybe_msg);
-            Box::new(future::err(()))
-        }
-    }))
-}
-
-fn nameserver(desires: mpsc::Receiver<(String, oneshot::Sender<String>)>)
-              -> Box<Future<Item = (), Error = ()>> {
-    let mut names: HashSet<String> = HashSet::new();
-    Box::new(desires.for_each(move |(desired_name, name_tx)| {
-        let mut name = desired_name.clone();
-        let mut n = 1;
-        while names.contains(&name) {
-            name = format!("{}_{}", desired_name, roman_numerals(n));
-            n += 1;
-        }
-        names.insert(name.clone());
-        let _ = name_tx.send(name);
-        future::ok(())
-    }))
 }
 
 fn clientqueue(add_rx: mpsc::Receiver<MsgClient<String>>,
@@ -264,26 +189,27 @@ fn play_games(grid: Grid,
         let grid = grid.clone();
         let spectators_ref = spectators_ref.clone();
         let queue_players_tx = queue_players_tx.clone();
-        dequeue_players_tx
+
+        let dequeue_players_tx_future = dequeue_players_tx
             .clone()
             .send((2, 10, tx))
-            .map_err(|_| ())
-            .and_then(move |_| {
-                rx.map_err(|_| ())
-                    .and_then(move |players_vec| -> Box<Future<Item = _, Error = _>> {
-                        if players_vec.is_empty() {
-                            println!("Not enough players yet.");
-                            return Box::new(future::ok(()));
-                        }
+            .map_err(|_| ());
+        let dequeue_players_rx_future = rx.map_err(|_| ());
+        dequeue_players_tx_future
+            .join(dequeue_players_rx_future)
+            .and_then(move |(_, players_vec)| -> Box<Future<Item = _, Error = _>> {
+                if players_vec.is_empty() {
+                    println!("Not enough players yet.");
+                    return Box::new(future::ok(()));
+                }
 
-                        let players = Room::new(players_vec.into_iter().collect());
-                        play_game(grid.clone(),
-                                  players,
-                                  queue_players_tx,
-                                  spectators_ref,
-                                  timer,
-                                  timeout)
-                    })
+                let players = Room::new(players_vec.into_iter().collect());
+                play_game(grid.clone(),
+                          players,
+                          queue_players_tx,
+                          spectators_ref,
+                          timer,
+                          timeout)
             })
     }))
 }
@@ -296,16 +222,17 @@ fn play_game(grid: Grid,
              timeout: Option<Milliseconds>)
              -> Box<Future<Item = (), Error = ()>> {
     let game = Game::new(OsRng::new().unwrap(), grid);
-    Box::new(game_future(game, players, spectators_ref, timeout, timer)
-                 .and_then(move |(game, players, _)| {
-        println!("End of game! {:?} {:?}",
-                 game.game_state(),
-                 game.round_state());
+    let game_future = game_future(game, players, spectators_ref, timeout, timer)
+        .and_then(move |(game, players, _)| {
+            println!("End of game! {:?} {:?}",
+                     game.game_state(),
+                     game.round_state());
 
-        let players_ok = players.into_iter().map(Ok);
-        queue_players_tx
-            .send_all(stream::iter(players_ok))
-            .map_err(|_| ())
-            .map(|_| ())
-    }))
+            let players_ok = players.into_iter().map(Ok);
+            queue_players_tx
+                .send_all(stream::iter(players_ok))
+                .map_err(|_| ())
+                .map(|_| ())
+        });
+    Box::new(game_future)
 }

@@ -1,6 +1,8 @@
 mod msg;
+mod futures;
 
 pub use self::msg::*;
+pub use self::futures::*;
 
 use std::io;
 use std::str;
