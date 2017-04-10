@@ -9,6 +9,7 @@ extern crate tokio_timer;
 extern crate tokio_io;
 extern crate uuid;
 extern crate comms;
+extern crate kabuki;
 
 use std::env;
 use std::str;
@@ -18,9 +19,10 @@ use std::cmp::min;
 use std::time::Duration;
 use std::net::SocketAddr;
 use futures::{future, stream, Future, Sink, Stream};
+use futures::future::Either;
 use futures::sync::{mpsc, oneshot};
 use tokio_core::net::TcpListener;
-use tokio_core::reactor::{Core, Handle};
+use tokio_core::reactor::Core;
 use tokio_timer::Timer;
 use tokio_io::AsyncRead;
 use comms::{Client, Room};
@@ -31,6 +33,7 @@ use sirpent::utils::*;
 use sirpent::net::*;
 use sirpent::engine::*;
 use sirpent::state::*;
+use sirpent::actors::*;
 
 fn main() {
     drop(env_logger::init());
@@ -67,19 +70,17 @@ fn main() {
     let spectators = Spectators::new(spectator_rx, spectator_msg_rx);
     handle.spawn(spectators);
 
-    // Run a nameserver to decide unique names for clients.
-    let (nameserver_tx, nameserver_rx) = mpsc::channel(5);
-    handle.spawn(client_nameserver(nameserver_rx));
-
-    // Run TCP server to welcome clients and register them as players.
+    let nameserver = Nameserver::default();
+    let nameserver_actor = kabuki::Builder::new().spawn(&handle, nameserver);
+    let handshaker = Handshake::new(grid.clone(),
+                                    timeout.unwrap(),
+                                    timer.clone(),
+                                    nameserver_actor);
+    let handshaker_actor = kabuki::Builder::new().spawn(&handle, handshaker);
     handle.spawn(server(listener,
-                        handle.clone(),
-                        nameserver_tx,
-                        grid,
-                        timeout.unwrap(),
+                        handshaker_actor,
                         queue_player_tx.clone(),
-                        spectator_tx,
-                        timer.clone()));
+                        spectator_tx));
 
     // @TODO: Game requirements:
     // * Take existing player clients and play a game of sirpent with them until completion.
@@ -104,13 +105,11 @@ fn main() {
 }
 
 fn server(listener: TcpListener,
-          handle: Handle,
-          nameserver_tx: mpsc::Sender<(String, oneshot::Sender<String>)>,
-          grid: Grid,
-          timeout_millis: Milliseconds,
+          handshaker_actor: kabuki::ActorRef<MsgClient<SocketAddr>,
+                                             (MsgClient<String>, ClientKind),
+                                             ()>,
           player_tx: mpsc::Sender<MsgClient<String>>,
-          spectator_tx: mpsc::Sender<MsgClient<String>>,
-          timer: tokio_timer::Timer)
+          spectator_tx: mpsc::Sender<MsgClient<String>>)
           -> Box<Future<Item = (), Error = ()>> {
     let server = listener
         .incoming()
@@ -118,18 +117,23 @@ fn server(listener: TcpListener,
         .for_each(move |(socket, addr)| {
             let msg_transport = socket.framed(MsgCodec);
             let unnamed_client = Client::new(addr, msg_transport);
-
-            let nameserver_tx = nameserver_tx.clone();
             let player_tx = player_tx.clone();
             let spectator_tx = spectator_tx.clone();
-            handle.spawn(client_handshake(unnamed_client,
-                                          grid,
-                                          timeout_millis,
-                                          timer.clone(),
-                                          nameserver_tx,
-                                          player_tx,
-                                          spectator_tx));
-            Ok(())
+
+            handshaker_actor
+                .clone()
+                .call(unnamed_client)
+                .map_err(|_| ())
+                .and_then(move |(client, kind)| match kind {
+                              ClientKind::Player => {
+                                  Either::A(player_tx.send(client).map_err(|_| ()))
+                              }
+                              ClientKind::Spectator => {
+                                  Either::B(spectator_tx.send(client).map_err(|_| ()))
+                              }
+                          })
+                .map(|_| ())
+                .map_err(|_| ())
         })
         .then(|_| Ok(()));
     Box::new(server)

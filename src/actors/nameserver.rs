@@ -6,6 +6,12 @@ pub struct Nameserver {
     names: HashSet<String>,
 }
 
+impl Default for Nameserver {
+    fn default() -> Nameserver {
+        Nameserver { names: HashSet::new() }
+    }
+}
+
 impl Actor for Nameserver {
     type Request = String;
     type Response = String;
