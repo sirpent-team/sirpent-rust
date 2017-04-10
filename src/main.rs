@@ -116,9 +116,9 @@ fn server(listener: TcpListener,
         .for_each(move |(socket, addr)| {
             let msg_transport = socket.framed(MsgCodec);
             let unnamed_client = Client::new(addr, msg_transport);
+
             let player_tx = player_tx.clone();
             let spectator_tx = spectator_tx.clone();
-
             handshaker_actor
                 .clone()
                 .call(unnamed_client)

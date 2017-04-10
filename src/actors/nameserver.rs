@@ -12,17 +12,6 @@ impl Default for Nameserver {
     }
 }
 
-impl Actor for Nameserver {
-    type Request = String;
-    type Response = String;
-    type Error = ();
-    type Future = future::FutureResult<String, ()>;
-
-    fn call(&mut self, desired_name: Self::Request) -> Self::Future {
-        future::ok(self.uniqueify(desired_name))
-    }
-}
-
 impl Nameserver {
     pub fn uniqueify(&mut self, desired_name: String) -> String {
         let unique_name = self.find_unused_name(desired_name);
@@ -44,6 +33,17 @@ impl Nameserver {
             }
         }
         unique_name
+    }
+}
+
+impl Actor for Nameserver {
+    type Request = String;
+    type Response = String;
+    type Error = ();
+    type Future = future::FutureResult<String, ()>;
+
+    fn call(&mut self, desired_name: Self::Request) -> Self::Future {
+        future::ok(self.uniqueify(desired_name))
     }
 }
 
