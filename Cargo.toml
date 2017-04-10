@@ -20,6 +20,7 @@ serde_derive = "0.9"
 clippy = {version = "*", optional = true}
 error-chain = "0.9"
 comms = "0.1.4"
+kabuki = { git = "https://github.com/carllerche/kabuki", rev = "4cc9aa77b7a59890b8cbfd276a067be015ed54f7" }
 
 [dev-dependencies]
 quickcheck = "0.2"
