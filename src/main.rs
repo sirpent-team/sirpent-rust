@@ -158,7 +158,7 @@ fn clientqueue(add_rx: mpsc::Receiver<MsgClient<String>>,
                 n = 0;
             }
             let reply = if n > 0 {
-                queue_lock.drain(..n - 1).collect()
+                queue_lock.drain(..n).collect()
             } else {
                 vec![]
             };
