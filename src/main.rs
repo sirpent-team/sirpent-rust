@@ -128,8 +128,7 @@ fn server(listener: TcpListener,
                          ClientKind::Spectator => (client, spectator_tx),
                      })
                 .and_then(|(client, tx)| tx.send(client).map_err(|_| ()))
-                .map(|_| ())
-                .map_err(|_| ())
+                .then(|_| Ok(()))
         })
         .then(|_| Ok(()));
     Box::new(server)
