@@ -9,27 +9,30 @@ extern crate tokio_timer;
 extern crate tokio_io;
 extern crate uuid;
 extern crate comms;
+extern crate kabuki;
 
 use std::env;
 use std::str;
 use rand::OsRng;
 use std::thread;
-use std::convert::Into;
+use std::cmp::min;
+use std::time::Duration;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use std::collections::HashSet;
-use futures::{future, Future, Sink, Stream};
-use futures::sync::mpsc;
+use futures::{future, stream, Future, Sink, Stream};
+use futures::sync::{mpsc, oneshot};
 use tokio_core::net::TcpListener;
-use tokio_core::reactor::{Core, Handle};
+use tokio_core::reactor::Core;
 use tokio_timer::Timer;
 use tokio_io::AsyncRead;
 use comms::{Client, Room};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use sirpent::utils::*;
 use sirpent::net::*;
 use sirpent::engine::*;
 use sirpent::state::*;
+use sirpent::actors::*;
 
 fn main() {
     drop(env_logger::init());
@@ -55,23 +58,28 @@ fn main() {
     let grid = Grid::new(25);
     let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
 
-    let names: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
-    let players: Arc<Mutex<Vec<MsgClient<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let (queue_player_tx, queue_player_rx) = mpsc::channel(3);
+    let (dequeue_player_tx, dequeue_player_rx) = mpsc::channel(3);
+    let clientqueue = clientqueue(queue_player_rx, dequeue_player_rx);
+    handle.spawn(clientqueue.0);
+    handle.spawn(clientqueue.1);
 
     let (spectator_tx, spectator_rx) = mpsc::channel(3);
     let (spectator_msg_tx, spectator_msg_rx) = mpsc::channel(3);
     let spectators = Spectators::new(spectator_rx, spectator_msg_rx);
     handle.spawn(spectators);
 
-    // Run TCP server to welcome clients and register them as players.
+    let nameserver = Nameserver::default();
+    let nameserver_actor = kabuki::Builder::new().spawn(&handle, nameserver);
+    let handshaker = Handshake::new(grid.clone(),
+                                    timeout.unwrap(),
+                                    timer.clone(),
+                                    nameserver_actor);
+    let handshaker_actor = kabuki::Builder::new().spawn(&handle, handshaker);
     handle.spawn(server(listener,
-                        handle.clone(),
-                        names.clone(),
-                        grid,
-                        timeout.unwrap(),
-                        players.clone(),
-                        spectator_tx,
-                        timer.clone()));
+                        handshaker_actor,
+                        queue_player_tx.clone(),
+                        spectator_tx));
 
     // @TODO: Game requirements:
     // * Take existing player clients and play a game of sirpent with them until completion.
@@ -79,11 +87,10 @@ fn main() {
     // * After a short wait Milliseconds play a new game, as before with all pooled player clients.
     // * Continue indefinitely.
     thread::spawn(move || {
-        thread::sleep(Milliseconds::new(10000).into());
         let mut lp = Core::new().unwrap();
-        lp.run(play_games(names.clone(),
-                            grid,
-                            players.clone(),
+        lp.run(play_games(grid,
+                            dequeue_player_tx,
+                            queue_player_tx,
                             spectator_msg_tx,
                             timer.clone(),
                             timeout))
@@ -97,163 +104,134 @@ fn main() {
 }
 
 fn server(listener: TcpListener,
-          handle: Handle,
-          names: Arc<Mutex<HashSet<String>>>,
-          grid: Grid,
-          timeout_millis: Milliseconds,
-          players_pool: Arc<Mutex<Vec<MsgClient<String>>>>,
-          spectator_tx: mpsc::Sender<MsgClient<String>>,
-          timer: tokio_timer::Timer)
+          handshaker_actor: kabuki::ActorRef<MsgClient<SocketAddr>,
+                                             (MsgClient<String>, ClientKind),
+                                             ()>,
+          player_tx: mpsc::Sender<MsgClient<String>>,
+          spectator_tx: mpsc::Sender<MsgClient<String>>)
           -> Box<Future<Item = (), Error = ()>> {
     let server = listener
         .incoming()
         .map_err(|_| ())
         .for_each(move |(socket, addr)| {
             let msg_transport = socket.framed(MsgCodec);
-            let client = Client::new(addr, msg_transport);
+            let unnamed_client = Client::new(addr, msg_transport);
 
-            let players_pool = players_pool.clone();
+            let player_tx = player_tx.clone();
             let spectator_tx = spectator_tx.clone();
-
-            let handshake_future =
-                handshake(client, timeout_millis, timer.clone(), names.clone(), grid)
-                    .map_err(|_| ())
-                    .and_then(move |(client, kind)| -> Box<Future<Item = (), Error = ()>> {
-                        match kind {
-                            ClientKind::Player => {
-                                players_pool.lock().unwrap().push(client);
-                                Box::new(future::ok(()))
-                            }
-                            ClientKind::Spectator => {
-                                Box::new(spectator_tx.send(client).map(|_| ()).map_err(|_| ()))
-                            }
-                        }
-                    });
-
-            handle.spawn(handshake_future);
-            Ok(())
+            handshaker_actor
+                .clone()
+                .call(unnamed_client)
+                .map_err(|_| ())
+                .map(move |(client, kind)| match kind {
+                         ClientKind::Player => (client, player_tx),
+                         ClientKind::Spectator => (client, spectator_tx),
+                     })
+                .and_then(|(client, tx)| tx.send(client).map_err(|_| ()))
+                .then(|_| Ok(()))
         })
         .then(|_| Ok(()));
     Box::new(server)
 }
 
-fn handshake(client: MsgClient<SocketAddr>,
-             timeout_millis: Milliseconds,
-             timer: tokio_timer::Timer,
-             mut names: Arc<Mutex<HashSet<String>>>,
-             grid: Grid)
-             -> Box<Future<Item = (MsgClient<String>, ClientKind), Error = ()>> {
-    let version_msg = Msg::version();
-    Box::new(client
-                 .transmit(version_msg)
-                 .map_err(|_| ())
-                 .and_then(move |client| {
-                               client
-                                   .receive()
-                                   .with_hard_timeout(*timeout_millis, &timer)
-                                   .map_err(|_| ())
-                           })
-                 .and_then(move |(maybe_msg, client)| -> Box<Future<Item = _, Error = _>> {
-        if let Msg::Register { desired_name, kind } = maybe_msg {
-            let name = find_unique_name(&mut names, desired_name);
-            let client = client.rename(name.clone());
+fn clientqueue(add_rx: mpsc::Receiver<MsgClient<String>>,
+               dequeue_rx: mpsc::Receiver<(usize,
+                                           usize,
+                                           oneshot::Sender<Vec<MsgClient<String>>>)>)
+               -> (Box<Future<Item = (), Error = ()>>, Box<Future<Item = (), Error = ()>>) {
+    let queue = Rc::new(RefCell::new(Vec::new()));
 
-            let welcome_future = client.transmit(Msg::Welcome {
-                                                     name: name,
-                                                     grid: grid.into(),
-                                                     timeout_millis: Some(timeout_millis),
-                                                 });
+    let queue_ref = queue.clone();
+    let add_future = add_rx
+        .for_each(move |client| {
+                      queue_ref.borrow_mut().push(client);
+                      future::ok(())
+                  })
+        .map_err(|_| ());
 
-            Box::new(welcome_future
-                         .map(move |client| (client, kind))
-                         .map_err(|_| ()))
-        } else {
-            println!("Error welcoming client: unexpected {:?}", maybe_msg);
-            Box::new(future::err(()))
-        }
-    }))
+    let queue_ref = queue.clone();
+    let dequeue_future = dequeue_rx
+        .for_each(move |(min_n, max_n, reply_tx)| {
+            let mut queue_lock = queue_ref.borrow_mut();
+            let mut n = min(max_n, queue_lock.len());
+            if n < min_n {
+                n = 0;
+            }
+            let reply = if n > 0 {
+                queue_lock.drain(..n).collect()
+            } else {
+                vec![]
+            };
+            reply_tx.send(reply).map_err(|_| ())
+        })
+        .map_err(|_| ());
+
+    (Box::new(add_future), Box::new(dequeue_future))
 }
 
-/// Find an unused name based upon the `desired_name`.
-fn find_unique_name(names: &mut Arc<Mutex<HashSet<String>>>, desired_name: String) -> String {
-    {
-        // Use the desired name if it's unused.
-        println!("prelock2");
-        let mut names_lock = names.lock().unwrap();
-        if !names_lock.contains(&desired_name) {
-            // Reserve this name.
-            names_lock.insert(desired_name.clone());
-            return desired_name;
-        }
-        println!("postlock2");
-    }
-
-    // Find a unique name.
-    let mut n = 1;
-    loop {
-        let name = format!("{}_{}", desired_name, roman_numerals(n));
-        println!("{:?}", name);
-        println!("prelock3");
-        let mut names_lock = names.lock().unwrap();
-        if !names_lock.contains(&name) {
-            // Reserve this name.
-            names_lock.insert(name.clone());
-            return name;
-        }
-        println!("postlock3");
-        n += 1;
-    }
-}
-
-fn play_games(_: Arc<Mutex<HashSet<String>>>,
-              grid: Grid,
-              player_queue_ref: Arc<Mutex<Vec<MsgClient<String>>>>,
+fn play_games(grid: Grid,
+              dequeue_players_tx: mpsc::Sender<(usize,
+                                                usize,
+                                                oneshot::Sender<Vec<MsgClient<String>>>)>,
+              queue_players_tx: mpsc::Sender<MsgClient<String>>,
               spectators_ref: mpsc::Sender<Msg>,
               timer: Timer,
               timeout: Option<Milliseconds>)
               -> Box<Future<Item = (), Error = ()>> {
-    Box::new(future::loop_fn((), move |_| -> Box<Future<Item = _, Error = _>> {
-        let continue_ = future::Loop::Continue(());
-        let timer2 = timer.clone();
+    Box::new(timer
+                 .clone()
+                 .interval(Duration::from_secs(10))
+                 .map_err(|_| ())
+                 .for_each(move |_| {
+        let (tx, rx) = oneshot::channel();
+        let timer = timer.clone();
+        let grid = grid.clone();
+        let spectators_ref = spectators_ref.clone();
+        let queue_players_tx = queue_players_tx.clone();
 
-        println!("prelock4");
-        let mut players_queue = player_queue_ref.lock().unwrap();
-        if players_queue.len() < 2 {
-            println!("Not enough players yet. Waiting 10 seconds.");
-            println!("postlock4/1");
-            Box::new(sleep(&timer, milliseconds(10000)).map(|_| continue_))
-        } else {
-            // Acquire players and spectators from those available.
-            // @TODO: Once drained, check we still have sufficient players. No lock between
-            // the waiting loop above and now.
-            let players = Room::new(players_queue.drain(..).collect());
-            println!("postlock4/2");
+        let dequeue_players_tx_future = dequeue_players_tx
+            .clone()
+            .send((2, 10, tx))
+            .map_err(|_| ());
+        let dequeue_players_rx_future = rx.map_err(|_| ());
+        dequeue_players_tx_future
+            .join(dequeue_players_rx_future)
+            .and_then(move |(_, players_vec)| -> Box<Future<Item = _, Error = _>> {
+                if players_vec.is_empty() {
+                    println!("Not enough players yet.");
+                    return Box::new(future::ok(()));
+                }
 
-            let game = Game::new(OsRng::new().unwrap(), grid);
-            Box::new(game_future(game,
-                                 players,
-                                 spectators_ref.clone(),
-                                 timeout,
-                                 timer.clone())
-                             .and_then(move |(game, _, _)| {
-                println!("End of game! {:?} {:?}",
-                         game.game_state(),
-                         game.round_state());
-
-                // @TODO: Return players and spectators to the waiting pool.
-                // let mut players_queue = player_queue_ref2.lock().unwrap();
-                // players_queue.extend(players.into_clients()
-                //     .0
-                //     .into_iter()
-                //     .map(|(_, v)| v)
-                //     .collect::<Vec<_>>());
-
-                sleep(&timer2, milliseconds(2000)).map(|_| continue_)
-            }))
-        }
+                let players = Room::new(players_vec.into_iter().collect());
+                play_game(grid.clone(),
+                          players,
+                          queue_players_tx,
+                          spectators_ref,
+                          timer,
+                          timeout)
+            })
     }))
 }
 
-fn sleep(timer: &Timer, ms: Milliseconds) -> Box<Future<Item = (), Error = ()>> {
-    Box::new(timer.sleep(ms.into()).map(|_| ()).map_err(|_| ()))
+fn play_game(grid: Grid,
+             players: MsgRoom<String>,
+             queue_players_tx: mpsc::Sender<MsgClient<String>>,
+             spectators_ref: mpsc::Sender<Msg>,
+             timer: Timer,
+             timeout: Option<Milliseconds>)
+             -> Box<Future<Item = (), Error = ()>> {
+    let game = Game::new(OsRng::new().unwrap(), grid);
+    let game_future = game_future(game, players, spectators_ref, timeout, timer)
+        .and_then(move |(game, players, _)| {
+            println!("End of game! {:?} {:?}",
+                     game.game_state(),
+                     game.round_state());
+
+            let players_ok = players.into_iter().map(Ok);
+            queue_players_tx
+                .send_all(stream::iter(players_ok))
+                .map_err(|_| ())
+                .map(|_| ())
+        });
+    Box::new(game_future)
 }

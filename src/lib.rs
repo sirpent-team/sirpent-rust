@@ -29,11 +29,13 @@ extern crate bytes;
 #[macro_use]
 extern crate error_chain;
 extern crate comms;
+extern crate kabuki;
 
 pub mod state;
 pub mod engine;
 pub mod net;
 pub mod utils;
+pub mod actors;
 mod errors;
 
 pub use errors::*;

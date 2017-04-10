@@ -42,6 +42,16 @@ impl Msg {
         }
     }
 
+    pub fn welcome<G>(name: String, grid: G, timeout_millis: Option<Milliseconds>) -> Msg
+        where G: Into<GridEnum>
+    {
+        Msg::Welcome {
+            name: name,
+            grid: grid.into(),
+            timeout_millis: timeout_millis,
+        }
+    }
+
     pub fn outcome(final_round_state: RoundState, game_uuid: Uuid) -> Msg {
         Msg::Outcome {
             winners: final_round_state.snakes.keys().cloned().collect(),
