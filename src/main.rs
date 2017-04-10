@@ -19,7 +19,6 @@ use std::cmp::min;
 use std::time::Duration;
 use std::net::SocketAddr;
 use futures::{future, stream, Future, Sink, Stream};
-use futures::future::Either;
 use futures::sync::{mpsc, oneshot};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
@@ -124,14 +123,11 @@ fn server(listener: TcpListener,
                 .clone()
                 .call(unnamed_client)
                 .map_err(|_| ())
-                .and_then(move |(client, kind)| match kind {
-                              ClientKind::Player => {
-                                  Either::A(player_tx.send(client).map_err(|_| ()))
-                              }
-                              ClientKind::Spectator => {
-                                  Either::B(spectator_tx.send(client).map_err(|_| ()))
-                              }
-                          })
+                .map(move |(client, kind)| match kind {
+                         ClientKind::Player => (client, player_tx),
+                         ClientKind::Spectator => (client, spectator_tx),
+                     })
+                .and_then(|(client, tx)| tx.send(client).map_err(|_| ()))
                 .map(|_| ())
                 .map_err(|_| ())
         })
