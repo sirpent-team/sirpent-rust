@@ -56,7 +56,7 @@ fn main() {
     println!("Listening on {}", addr);
 
     let grid = Grid::new(25);
-    let timeout: Option<Milliseconds> = Some(Milliseconds::new(5000));
+    let timeout = Milliseconds::new(5000);
 
     let (queue_player_tx, queue_player_rx) = mpsc::channel(3);
     let (dequeue_player_tx, dequeue_player_rx) = mpsc::channel(3);
@@ -71,10 +71,7 @@ fn main() {
 
     let nameserver = Nameserver::default();
     let nameserver_actor = kabuki::Builder::new().spawn(&handle, nameserver);
-    let handshaker = Handshake::new(grid.clone(),
-                                    timeout.unwrap(),
-                                    timer.clone(),
-                                    nameserver_actor);
+    let handshaker = Handshake::new(grid.clone(), timeout, timer.clone(), nameserver_actor);
     let handshaker_actor = kabuki::Builder::new().spawn(&handle, handshaker);
     handle.spawn(server(listener,
                         handshaker_actor,
@@ -88,11 +85,16 @@ fn main() {
     // * Continue indefinitely.
     thread::spawn(move || {
         let mut lp = Core::new().unwrap();
+        let handle = lp.handle();
+
+        let game_actor = GameActor::new(timer.clone(), spectator_msg_tx);
+        let game_actor = kabuki::Builder::new().spawn(&handle, game_actor);
+
         lp.run(play_games(grid,
                             dequeue_player_tx,
                             queue_player_tx,
-                            spectator_msg_tx,
-                            timer.clone(),
+                            game_actor,
+                            timer,
                             timeout))
             .unwrap();
     });
@@ -174,9 +176,11 @@ fn play_games(grid: Grid,
                                                 usize,
                                                 oneshot::Sender<Vec<MsgClient<String>>>)>,
               queue_players_tx: mpsc::Sender<MsgClient<String>>,
-              spectators_ref: mpsc::Sender<Msg>,
-              timer: Timer,
-              timeout: Option<Milliseconds>)
+              game_actor: kabuki::ActorRef<(Game, MsgRoom<String>, Milliseconds),
+                                           (Game, MsgRoom<String>),
+                                           ()>,
+              timer: tokio_timer::Timer,
+              timeout: Milliseconds)
               -> Box<Future<Item = (), Error = ()>> {
     Box::new(timer
                  .clone()
@@ -184,10 +188,9 @@ fn play_games(grid: Grid,
                  .map_err(|_| ())
                  .for_each(move |_| {
         let (tx, rx) = oneshot::channel();
-        let timer = timer.clone();
-        let grid = grid.clone();
-        let spectators_ref = spectators_ref.clone();
         let queue_players_tx = queue_players_tx.clone();
+        let grid = grid.clone();
+        let game_actor = game_actor.clone();
 
         let dequeue_players_tx_future = dequeue_players_tx
             .clone()
@@ -203,26 +206,24 @@ fn play_games(grid: Grid,
                 }
 
                 let players = Room::new(players_vec.into_iter().collect());
-                play_game(grid.clone(),
-                          players,
-                          queue_players_tx,
-                          spectators_ref,
-                          timer,
-                          timeout)
+                play_game(grid, players, timeout, game_actor, queue_players_tx)
             })
     }))
 }
 
 fn play_game(grid: Grid,
              players: MsgRoom<String>,
-             queue_players_tx: mpsc::Sender<MsgClient<String>>,
-             spectators_ref: mpsc::Sender<Msg>,
-             timer: Timer,
-             timeout: Option<Milliseconds>)
+             timeout: Milliseconds,
+             mut game_actor: kabuki::ActorRef<(Game, MsgRoom<String>, Milliseconds),
+                                              (Game, MsgRoom<String>),
+                                              ()>,
+             queue_players_tx: mpsc::Sender<MsgClient<String>>)
              -> Box<Future<Item = (), Error = ()>> {
-    let game = Game::new(OsRng::new().unwrap(), grid);
-    let game_future = game_future(game, players, spectators_ref, timeout, timer)
-        .and_then(move |(game, players, _)| {
+    let game = Game::new(Box::new(OsRng::new().unwrap()), grid);
+
+    let game_future = game_actor
+        .call((game, players, timeout))
+        .and_then(|(game, players)| {
             println!("End of game! {:?} {:?}",
                      game.game_state(),
                      game.round_state());
