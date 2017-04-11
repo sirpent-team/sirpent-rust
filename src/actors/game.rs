@@ -1,9 +1,6 @@
 use futures::{future, Future};
 use tokio_timer;
-use std::net::SocketAddr;
-use state::GridEnum;
-use kabuki::{Actor, ActorRef};
-use std::fmt::Debug;
+use kabuki::Actor;
 use std::collections::{HashMap, HashSet};
 use futures::sync::mpsc;
 use rand::Rng;
@@ -45,10 +42,73 @@ impl GameActor {
          -> Box<Future<Item = (HashMap<String, Direction>, MsgRoom<String>), Error = ()>> {
         let future = players
             .receive(living_player_ids)
-            //.with_soft_timeout(timeout, &timer)
+            //.with_soft_timeout(timeout, timer) // @TODO
             .map(|(msgs, players)| {
                 (msgs_to_directions(msgs), players)
             });
+        Box::new(future)
+    }
+
+    fn rounds
+        (game: Game<Box<Rng>>,
+         players: MsgRoom<String>,
+         spectator_tx: mpsc::Sender<Msg>,
+         timeout: Milliseconds,
+         timer: tokio_timer::Timer)
+         -> Box<Future<Item = (Game<Box<Rng>>, MsgRoom<String>, mpsc::Sender<Msg>), Error = ()>> {
+        let inputs = (game, players, spectator_tx, timeout, timer.clone());
+        let future = future::loop_fn(inputs, |(a, b, c, d, e)| {
+            Self::round(a, b, c, d, e).map(|ret| {
+                let (game, players, spectator_tx, timeout, timer) = ret;
+                if game.concluded() {
+                    future::Loop::Break((game, players, spectator_tx))
+                } else {
+                    future::Loop::Continue((game, players, spectator_tx, timeout, timer))
+                }
+            })
+        });
+        Box::new(future)
+    }
+
+    fn round(mut game: Game<Box<Rng>>,
+             players: MsgRoom<String>,
+             spectator_tx: mpsc::Sender<Msg>,
+             timeout: Milliseconds,
+             timer: tokio_timer::Timer)
+             -> Box<Future<Item = (Game<Box<Rng>>,
+                                   MsgRoom<String>,
+                                   mpsc::Sender<Msg>,
+                                   Milliseconds,
+                                   tokio_timer::Timer),
+                           Error = ()>> {
+        let round_msg = Msg::Round {
+            round: Box::new(game.round_state().clone()),
+            game_uuid: game.game_state().uuid,
+        };
+        let future = Self::broadcast(round_msg, players, spectator_tx)
+            .and_then(move |(players, spectator_tx)| {
+                let living_player_ids = game.round_state().snakes.keys().cloned().collect();
+                Self::receive_move_direction(players, living_player_ids, timeout, &timer)
+                    .map(move |(directions, players)| {
+                             game.next(Event::Turn(directions));
+                             (game, players, spectator_tx, timeout, timer)
+                         })
+            });
+        Box::new(future)
+    }
+
+    fn outcome
+        (game: Game<Box<Rng>>,
+         players: MsgRoom<String>,
+         spectator_tx: mpsc::Sender<Msg>)
+         -> Box<Future<Item = (Game<Box<Rng>>, MsgRoom<String>, mpsc::Sender<Msg>), Error = ()>> {
+        let outcome_msg = Msg::outcome(game.round_state().clone(), game.game_state().uuid);
+        let future = Self::broadcast(outcome_msg, players, spectator_tx).map(|(players,
+                                                                               spectator_tx)| {
+                                                                                 (game,
+                                                                                  players,
+                                                                                  spectator_tx)
+                                                                             });
         Box::new(future)
     }
 }
@@ -59,7 +119,7 @@ impl Actor for GameActor {
     type Error = ();
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
-    fn call(&mut self, (game, players, timeout): Self::Request) -> Self::Future {
+    fn call(&mut self, (mut game, players, timeout): Self::Request) -> Self::Future {
         let GameActor {
             timer,
             spectator_tx,
@@ -71,8 +131,11 @@ impl Actor for GameActor {
 
         let game_msg = Msg::Game { game: Box::new(game.game_state().clone()) };
         let future = Self::broadcast(game_msg, players, spectator_tx)
-            .and_then(Self::rounds)
-            .and_then(Self::outcome);
+            .and_then(move |(players, spectator_tx)| {
+                          Self::rounds(game, players, spectator_tx, timeout, timer)
+                      })
+            .and_then(|(game, players, spectator_tx)| Self::outcome(game, players, spectator_tx))
+            .map(|(game, players, _)| (game, players));
         Box::new(future)
     }
 }

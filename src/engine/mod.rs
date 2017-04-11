@@ -83,7 +83,7 @@ impl<R: Rng> Game<R> {
         };
     }
 
-    fn concluded(&self) -> bool {
+    pub fn concluded(&self) -> bool {
         let number_of_living_snakes = self.round_state.snakes.len();
         match number_of_living_snakes {
             0 | 1 => true,
