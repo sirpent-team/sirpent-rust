@@ -3,7 +3,6 @@ use tokio_timer;
 use kabuki::Actor;
 use std::collections::{HashMap, HashSet};
 use futures::sync::mpsc;
-use rand::Rng;
 use futures::Sink;
 
 use net::*;
@@ -49,13 +48,12 @@ impl GameActor {
         Box::new(future)
     }
 
-    fn rounds
-        (game: Game<Box<Rng>>,
-         players: MsgRoom<String>,
-         spectator_tx: mpsc::Sender<Msg>,
-         timeout: Milliseconds,
-         timer: tokio_timer::Timer)
-         -> Box<Future<Item = (Game<Box<Rng>>, MsgRoom<String>, mpsc::Sender<Msg>), Error = ()>> {
+    fn rounds(game: Game,
+              players: MsgRoom<String>,
+              spectator_tx: mpsc::Sender<Msg>,
+              timeout: Milliseconds,
+              timer: tokio_timer::Timer)
+              -> Box<Future<Item = (Game, MsgRoom<String>, mpsc::Sender<Msg>), Error = ()>> {
         let inputs = (game, players, spectator_tx, timeout, timer.clone());
         let future = future::loop_fn(inputs, |(a, b, c, d, e)| {
             Self::round(a, b, c, d, e).map(|ret| {
@@ -70,12 +68,12 @@ impl GameActor {
         Box::new(future)
     }
 
-    fn round(mut game: Game<Box<Rng>>,
+    fn round(mut game: Game,
              players: MsgRoom<String>,
              spectator_tx: mpsc::Sender<Msg>,
              timeout: Milliseconds,
              timer: tokio_timer::Timer)
-             -> Box<Future<Item = (Game<Box<Rng>>,
+             -> Box<Future<Item = (Game,
                                    MsgRoom<String>,
                                    mpsc::Sender<Msg>,
                                    Milliseconds,
@@ -97,11 +95,10 @@ impl GameActor {
         Box::new(future)
     }
 
-    fn outcome
-        (game: Game<Box<Rng>>,
-         players: MsgRoom<String>,
-         spectator_tx: mpsc::Sender<Msg>)
-         -> Box<Future<Item = (Game<Box<Rng>>, MsgRoom<String>, mpsc::Sender<Msg>), Error = ()>> {
+    fn outcome(game: Game,
+               players: MsgRoom<String>,
+               spectator_tx: mpsc::Sender<Msg>)
+               -> Box<Future<Item = (Game, MsgRoom<String>, mpsc::Sender<Msg>), Error = ()>> {
         let outcome_msg = Msg::outcome(game.round_state().clone(), game.game_state().uuid);
         let future = Self::broadcast(outcome_msg, players, spectator_tx).map(|(players,
                                                                                spectator_tx)| {
@@ -114,8 +111,8 @@ impl GameActor {
 }
 
 impl Actor for GameActor {
-    type Request = (Game<Box<Rng>>, MsgRoom<String>, Milliseconds);
-    type Response = (Game<Box<Rng>>, MsgRoom<String>);
+    type Request = (Game, MsgRoom<String>, Milliseconds);
+    type Response = (Game, MsgRoom<String>);
     type Error = ();
     type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 

@@ -1,13 +1,12 @@
 use rand::Rng;
 use std::collections::HashMap;
+use std::fmt;
 
 use state::*;
 use state::grids::*;
 
-mod future;
 mod spectators;
 
-pub use self::future::*;
 pub use self::spectators::*;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -23,20 +22,19 @@ pub enum Event {
     Turn(HashMap<String, Direction>),
 }
 
-#[derive(Debug)]
-pub struct Game<R: Rng> {
+pub struct Game {
     state: State,
-    rng: Box<R>,
+    rng: Box<Rng>,
     grid: Grid,
     game_state: GameState,
     round_state: RoundState,
 }
 
-impl<R: Rng> Game<R> {
-    pub fn new(rng: R, grid: Grid) -> Self {
+impl Game {
+    pub fn new(rng: Box<Rng>, grid: Grid) -> Self {
         let mut game = Game {
             state: State::Start,
-            rng: Box::new(rng),
+            rng: rng,
             grid: grid,
             game_state: GameState::new(grid),
             round_state: RoundState::default(),
@@ -59,7 +57,7 @@ impl<R: Rng> Game<R> {
         // Reserve the new name.
         self.game_state.players.insert(final_name.clone());
         // Generate and insert a snake.
-        let head = self.grid.random_cell(&mut *self.rng);
+        let head = self.grid.random_cell(&mut self.rng);
         let snake = Snake::new(vec![head]);
         self.round_state
             .snakes
@@ -224,8 +222,19 @@ impl<R: Rng> Game<R> {
         }
 
         if next_round.food.len() < 1 {
-            let new_food = self.grid.random_cell(&mut *self.rng);
+            let new_food = self.grid.random_cell(&mut self.rng);
             next_round.food.insert(new_food);
         }
+    }
+}
+
+impl fmt::Debug for Game {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("Game")
+            .field("state", &self.state)
+            .field("grid", &self.grid)
+            .field("game_state", &self.game_state)
+            .field("round_state", &self.round_state)
+            .finish()
     }
 }
