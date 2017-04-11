@@ -228,7 +228,7 @@ fn play_game(grid: Grid,
                      game.game_state(),
                      game.round_state());
 
-            let players_ok = players.into_iter().map(Ok);
+            let players_ok = players.into_iter().filter(Client::is_connected).map(Ok);
             queue_players_tx
                 .send_all(stream::iter(players_ok))
                 .map_err(|_| ())
