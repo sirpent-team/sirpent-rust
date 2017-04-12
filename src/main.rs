@@ -19,6 +19,7 @@ use std::cmp::min;
 use std::time::Duration;
 use std::net::SocketAddr;
 use futures::{future, stream, Future, Sink, Stream};
+use futures::future::Either;
 use futures::sync::{mpsc, oneshot};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
@@ -190,7 +191,7 @@ fn play_games(grid: Grid,
         let (tx, rx) = oneshot::channel();
         let queue_players_tx = queue_players_tx.clone();
         let grid = grid.clone();
-        let game_actor = game_actor.clone();
+        let mut game_actor = game_actor.clone();
 
         let dequeue_players_tx_future = dequeue_players_tx
             .clone()
@@ -199,40 +200,27 @@ fn play_games(grid: Grid,
         let dequeue_players_rx_future = rx.map_err(|_| ());
         dequeue_players_tx_future
             .join(dequeue_players_rx_future)
-            .and_then(move |(_, players_vec)| -> Box<Future<Item = _, Error = _>> {
+            .and_then(move |(_, players_vec)| {
                 if players_vec.is_empty() {
                     println!("Not enough players yet.");
-                    return Box::new(future::ok(()));
+                    return Either::A(future::ok(()));
                 }
 
                 let players = Room::new(players_vec.into_iter().collect());
-                play_game(grid, players, timeout, game_actor, queue_players_tx)
+                let game = Game::new(Box::new(OsRng::new().unwrap()), grid);
+                Either::B(game_actor
+                              .call((game, players, timeout))
+                              .and_then(|(game, players)| {
+                    println!("End of game! {:?} {:?}",
+                             game.game_state(),
+                             game.round_state());
+
+                    let players_ok = players.into_iter().filter(Client::is_connected).map(Ok);
+                    queue_players_tx
+                        .send_all(stream::iter(players_ok))
+                        .map_err(|_| ())
+                        .map(|_| ())
+                }))
             })
     }))
-}
-
-fn play_game(grid: Grid,
-             players: MsgRoom<String>,
-             timeout: Milliseconds,
-             mut game_actor: kabuki::ActorRef<(Game, MsgRoom<String>, Milliseconds),
-                                              (Game, MsgRoom<String>),
-                                              ()>,
-             queue_players_tx: mpsc::Sender<MsgClient<String>>)
-             -> Box<Future<Item = (), Error = ()>> {
-    let game = Game::new(Box::new(OsRng::new().unwrap()), grid);
-
-    let game_future = game_actor
-        .call((game, players, timeout))
-        .and_then(|(game, players)| {
-            println!("End of game! {:?} {:?}",
-                     game.game_state(),
-                     game.round_state());
-
-            let players_ok = players.into_iter().filter(Client::is_connected).map(Ok);
-            queue_players_tx
-                .send_all(stream::iter(players_ok))
-                .map_err(|_| ())
-                .map(|_| ())
-        });
-    Box::new(game_future)
 }
