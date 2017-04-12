@@ -1,6 +1,6 @@
 use futures::{future, Future};
 use tokio_timer;
-use kabuki::Actor;
+use kabuki::{Actor, ActorRef};
 use std::collections::{HashMap, HashSet};
 use futures::sync::mpsc;
 use futures::Sink;
@@ -9,6 +9,10 @@ use net::*;
 use state::*;
 use engine::*;
 use utils::*;
+
+pub type GameActorRef = ActorRef<<GameActor as Actor>::Request,
+                                 <GameActor as Actor>::Response,
+                                 <GameActor as Actor>::Error>;
 
 #[derive(Clone)]
 pub struct GameActor {
