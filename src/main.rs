@@ -15,19 +15,15 @@ use std::env;
 use std::str;
 use rand::OsRng;
 use std::thread;
-use std::cmp::min;
-use std::time::Duration;
 use std::net::SocketAddr;
 use futures::{future, stream, Future, Sink, Stream};
 use futures::future::Either;
-use futures::sync::{mpsc, oneshot};
+use futures::sync::mpsc;
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_timer::Timer;
 use tokio_io::AsyncRead;
 use comms::{Client, Room};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use sirpent::utils::*;
 use sirpent::net::*;
@@ -60,10 +56,6 @@ fn main() {
     let timeout = Milliseconds::new(5000);
 
     let (queue_player_tx, queue_player_rx) = mpsc::channel(3);
-    let (dequeue_player_tx, dequeue_player_rx) = mpsc::channel(3);
-    let clientqueue = clientqueue(queue_player_rx, dequeue_player_rx);
-    handle.spawn(clientqueue.0);
-    handle.spawn(clientqueue.1);
 
     let (spectator_tx, spectator_rx) = mpsc::channel(3);
     let (spectator_msg_tx, spectator_msg_rx) = mpsc::channel(3);
@@ -92,10 +84,9 @@ fn main() {
         let game_actor = kabuki::Builder::new().spawn(&handle, game_actor);
 
         lp.run(play_games(grid,
-                            dequeue_player_tx,
                             queue_player_tx,
+                            Box::new(queue_player_rx.chunks(10)),
                             game_actor,
-                            timer,
                             timeout))
             .unwrap();
     });
@@ -137,90 +128,44 @@ fn server(listener: TcpListener,
     Box::new(server)
 }
 
-fn clientqueue(add_rx: mpsc::Receiver<MsgClient<String>>,
-               dequeue_rx: mpsc::Receiver<(usize,
-                                           usize,
-                                           oneshot::Sender<Vec<MsgClient<String>>>)>)
-               -> (Box<Future<Item = (), Error = ()>>, Box<Future<Item = (), Error = ()>>) {
-    let queue = Rc::new(RefCell::new(Vec::new()));
-
-    let queue_ref = queue.clone();
-    let add_future = add_rx
-        .for_each(move |client| {
-                      queue_ref.borrow_mut().push(client);
-                      future::ok(())
-                  })
-        .map_err(|_| ());
-
-    let queue_ref = queue.clone();
-    let dequeue_future = dequeue_rx
-        .for_each(move |(min_n, max_n, reply_tx)| {
-            let mut queue_lock = queue_ref.borrow_mut();
-            let mut n = min(max_n, queue_lock.len());
-            if n < min_n {
-                n = 0;
-            }
-            let reply = if n > 0 {
-                queue_lock.drain(..n).collect()
-            } else {
-                vec![]
-            };
-            reply_tx.send(reply).map_err(|_| ())
-        })
-        .map_err(|_| ());
-
-    (Box::new(add_future), Box::new(dequeue_future))
-}
-
 fn play_games(grid: Grid,
-              dequeue_players_tx: mpsc::Sender<(usize,
-                                                usize,
-                                                oneshot::Sender<Vec<MsgClient<String>>>)>,
-              queue_players_tx: mpsc::Sender<MsgClient<String>>,
-              game_actor: kabuki::ActorRef<(Game, MsgRoom<String>, Milliseconds),
-                                           (Game, MsgRoom<String>),
-                                           ()>,
-              timer: tokio_timer::Timer,
+              add_tx: mpsc::Sender<MsgClient<String>>,
+              add_rx: Box<Stream<Item = Vec<MsgClient<String>>, Error = ()>>,
+              mut game_actor: kabuki::ActorRef<(Game, MsgRoom<String>, Milliseconds),
+                                               (Game, MsgRoom<String>),
+                                               ()>,
               timeout: Milliseconds)
               -> Box<Future<Item = (), Error = ()>> {
-    Box::new(timer
-                 .clone()
-                 .interval(Duration::from_secs(10))
-                 .map_err(|_| ())
-                 .for_each(move |_| {
-        let (tx, rx) = oneshot::channel();
-        let queue_players_tx = queue_players_tx.clone();
-        let grid = grid.clone();
-        let mut game_actor = game_actor.clone();
+    let future = add_rx
+        .then(|res| match res {
+                  Ok(players_vec) => {
+                      if players_vec.is_empty() {
+                          Ok(None)
+                      } else {
+                          Ok(Some(players_vec))
+                      }
+                  }
+                  Err(()) => Ok(None),
+              })
+        .for_each(move |res| if let Some(players_vec) = res {
+                      let players = Room::new(players_vec.into_iter().collect());
+                      let game = Game::new(Box::new(OsRng::new().unwrap()), grid.clone());
+                      let add_tx = add_tx.clone();
+                      Either::A(game_actor
+                                    .call((game, players, timeout))
+                                    .and_then(move |(game, players)| {
+                println!("End of game! {:?} {:?}",
+                         game.game_state(),
+                         game.round_state());
 
-        let dequeue_players_tx_future = dequeue_players_tx
-            .clone()
-            .send((2, 10, tx))
-            .map_err(|_| ());
-        let dequeue_players_rx_future = rx.map_err(|_| ());
-        dequeue_players_tx_future
-            .join(dequeue_players_rx_future)
-            .and_then(move |(_, players_vec)| {
-                if players_vec.is_empty() {
-                    println!("Not enough players yet.");
-                    return Either::A(future::ok(()));
-                }
-
-                let players = Room::new(players_vec.into_iter().collect());
-                let game = Game::new(Box::new(OsRng::new().unwrap()), grid);
-                Either::B(game_actor
-                              .call((game, players, timeout))
-                              .and_then(|(game, players)| {
-                    println!("End of game! {:?} {:?}",
-                             game.game_state(),
-                             game.round_state());
-
-                    let players_ok = players.into_iter().filter(Client::is_connected).map(Ok);
-                    queue_players_tx
-                        .send_all(stream::iter(players_ok))
-                        .map_err(|_| ())
-                        .map(|_| ())
-                }))
-            })
-    }))
+                let players_ok = players.into_iter().filter(Client::is_connected).map(Ok);
+                add_tx
+                    .send_all(stream::iter(players_ok))
+                    .map_err(|_| ())
+                    .map(|_| ())
+            }))
+                  } else {
+                      Either::B(future::ok(()))
+                  });
+    Box::new(future)
 }
