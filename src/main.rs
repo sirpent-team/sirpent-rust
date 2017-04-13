@@ -32,50 +32,81 @@ use sirpent::actors::*;
 fn main() {
     drop(env_logger::init());
 
-    // Take the first command line argument as an address to listen on, or fall
-    // back to just some localhost default.
+    let mut lp = Core::new().unwrap();
+    let handle = lp.handle();
+    let timer = Timer::default();
+
     let addr = env::args()
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let addr = addr.parse::<SocketAddr>().unwrap();
 
-    let mut lp = Core::new().unwrap();
-    let handle = lp.handle();
-    let timer = Timer::default();
-
     let listener = TcpListener::bind(&addr, &handle).unwrap();
     println!("Listening on {}", addr);
+
+    // ----------------------------------------------------------------
 
     let grid = Grid::new(25);
     let timeout = Milliseconds::new(5000);
 
-    let (queue_player_tx, queue_player_rx) = mpsc::channel(3);
+    // ----------------------------------------------------------------
 
+    let (player_tx, player_rx) = mpsc::channel(3);
     let (spectator_tx, spectator_rx) = mpsc::channel(3);
-    let (spectator_msg_tx, spectator_msg_rx) = mpsc::channel(3);
-    let spectators = Spectators::new(spectator_rx, spectator_msg_rx);
-    handle.spawn(spectators);
+    let (spectate_msg_tx, spectate_msg_rx) = mpsc::channel(3);
 
     let handshaker_actor = kabuki::Builder::new().spawn(&handle, {
-        let nameserver_actor = kabuki::Builder::new().spawn(&handle, {
-            Nameserver::default()
-        });
-        Handshake::new(grid.clone(), timeout, timer.clone(), nameserver_actor)
+        Handshake::new(grid.clone(), timeout, timer.clone(), {
+            kabuki::Builder::new().spawn(&handle, Nameserver::default())
+        })
     });
-    handle.spawn(server(listener,
-                        handshaker_actor,
-                        queue_player_tx.clone(),
-                        spectator_tx));
+
+    let (client_tx, client_rx) = mpsc::channel(3);
+    let player_tx_clone = player_tx.clone();
+    handle.spawn(client_rx.for_each(move |client| {
+        let player_tx = player_tx_clone.clone();
+        let spectator_tx = spectator_tx.clone();
+        handshaker_actor
+            .clone()
+            .call(client)
+            .and_then(move |(client, kind)| {
+                match kind {
+                        ClientKind::Player => player_tx,
+                        ClientKind::Spectator => spectator_tx,
+                    }
+                    .send(client)
+                    .map_err(|_| ())
+                    .map(|_| ())
+            })
+    }));
+    handle.spawn(listener
+                     .incoming()
+                     .map_err(|_| ())
+                     .for_each(move |(socket, addr)| {
+                                   let client = Client::new(addr, socket.framed(MsgCodec));
+                                   client_tx
+                                       .clone()
+                                       .send(client)
+                                       .map_err(|_| ())
+                                       .map(|_| ())
+                               }));
+
+    // ----------------------------------------------------------------
+
+    let spectators = Spectators::new(spectator_rx, spectate_msg_rx);
+    handle.spawn(spectators);
+
+    // ----------------------------------------------------------------
 
     let game_server_actor_ref = kabuki::Builder::new().spawn(&handle, {
         let game_actor_ref = kabuki::Builder::new().spawn(&handle, {
-            GameActor::new(timer.clone(), spectator_msg_tx)
+            GameActor::new(timer.clone(), spectate_msg_tx)
         });
         let rng_fn = || -> Box<Rng> { Box::new(OsRng::new().unwrap()) };
         GameServerActor::new(rng_fn, grid, timeout, game_actor_ref)
     });
 
-    let gsw = queue_player_rx
+    let gsw = player_rx
         .chunks(10)
         .map(|players_vec| Room::new(players_vec.into_iter().collect()))
         .and_then(move |players| game_server_actor_ref.clone().call(players))
@@ -87,43 +118,14 @@ fn main() {
              })
         .flatten()
         .filter(Client::is_connected)
-        .forward(queue_player_tx.sink_map_err(|_| ()))
+        .forward(player_tx.sink_map_err(|_| ()))
         .map(|_| ());
     handle.spawn(gsw);
+
+    // ----------------------------------------------------------------
 
     // Poll event loop to keep program running.
     loop {
         lp.turn(None);
     }
-}
-
-fn server(listener: TcpListener,
-          handshaker_actor: kabuki::ActorRef<MsgClient<SocketAddr>,
-                                             (MsgClient<String>, ClientKind),
-                                             ()>,
-          player_tx: mpsc::Sender<MsgClient<String>>,
-          spectator_tx: mpsc::Sender<MsgClient<String>>)
-          -> Box<Future<Item = (), Error = ()>> {
-    let server = listener
-        .incoming()
-        .map_err(|_| ())
-        .for_each(move |(socket, addr)| {
-            let msg_transport = socket.framed(MsgCodec);
-            let unnamed_client = Client::new(addr, msg_transport);
-
-            let player_tx = player_tx.clone();
-            let spectator_tx = spectator_tx.clone();
-            handshaker_actor
-                .clone()
-                .call(unnamed_client)
-                .map_err(|_| ())
-                .map(move |(client, kind)| match kind {
-                         ClientKind::Player => (client, player_tx),
-                         ClientKind::Spectator => (client, spectator_tx),
-                     })
-                .and_then(|(client, tx)| tx.send(client).map_err(|_| ()))
-                .then(|_| Ok(()))
-        })
-        .then(|_| Ok(()));
-    Box::new(server)
 }
