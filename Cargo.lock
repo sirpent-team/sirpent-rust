@@ -4,12 +4,12 @@ version = "0.1.1"
 dependencies = [
  "ansi_term 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "clippy 0.0.122 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clippy 0.0.123 (registry+https://github.com/rust-lang/crates.io-index)",
  "comms 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-chain 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)",
- "kabuki 0.0.1 (git+https://github.com/carllerche/kabuki?rev=4cc9aa77b7a59890b8cbfd276a067be015ed54f7)",
+ "kabuki 0.0.1 (git+https://github.com/sirpent-team/kabuki.git)",
  "log 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "quickcheck 0.2.27 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -97,16 +97,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "clippy"
-version = "0.0.122"
+version = "0.0.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cargo_metadata 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "clippy_lints 0.0.122 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clippy_lints 0.0.123 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "clippy_lints"
-version = "0.0.122"
+version = "0.0.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "matches 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -226,12 +226,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "kabuki"
 version = "0.0.1"
-source = "git+https://github.com/carllerche/kabuki?rev=4cc9aa77b7a59890b8cbfd276a067be015ed54f7#4cc9aa77b7a59890b8cbfd276a067be015ed54f7"
+source = "git+https://github.com/sirpent-team/kabuki.git#7b80469580a4ad70be4904ae9cb7e01a9cac6eb5"
 dependencies = [
  "futures 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-mpsc 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-spawn 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-threadpool 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "scoped-tls 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-core 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -627,8 +628,8 @@ dependencies = [
 "checksum bytes 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "3941933da81d8717b427c2ddc2d73567cd15adb6c57514a2726d9ee598a5439a"
 "checksum cargo_metadata 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "34fdab49a2904acb112c83b62f0118de3de3ce28e52a9188dec2858e43878f25"
 "checksum cfg-if 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "de1e760d7b6535af4241fca8bd8adf68e2e7edacc6b29f5d399050c5e48cf88c"
-"checksum clippy 0.0.122 (registry+https://github.com/rust-lang/crates.io-index)" = "d06b770a0e145b422f918ed12e29504490dc65c2d7dc80f79424fd62e2d8a34e"
-"checksum clippy_lints 0.0.122 (registry+https://github.com/rust-lang/crates.io-index)" = "e9abd228ba0d18cf0cad8bb07468ebd24847a9d60f7f6520a0bff45ae5176836"
+"checksum clippy 0.0.123 (registry+https://github.com/rust-lang/crates.io-index)" = "a7198363c39e70567fea459257382656acc6605f60cb3e481e8d58cef561758d"
+"checksum clippy_lints 0.0.123 (registry+https://github.com/rust-lang/crates.io-index)" = "6c5b194842d135d10d08d8fd5d2ab6315648c5cdec66ce8611d5c476bac8c706"
 "checksum comms 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "55007dd25578d47822286e2df77e95c07e366e44cc40a4a7d3e3775adc71f68b"
 "checksum crossbeam 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)" = "0c5ea215664ca264da8a9d9c3be80d2eaf30923c259d03e870388eb927508f97"
 "checksum dbghelp-sys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97590ba53bcb8ac28279161ca943a924d1fd4a8fb3fa63302591647c4fc5b850"
@@ -643,7 +644,7 @@ dependencies = [
 "checksum gcc 0.3.45 (registry+https://github.com/rust-lang/crates.io-index)" = "40899336fb50db0c78710f53e87afc54d8c7266fb76262fecc78ca1a7f09deae"
 "checksum iovec 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "29d062ee61fccdf25be172e70f34c9f6efc597e1fb8f6526e8437b2046ab26be"
 "checksum itoa 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "eb2f404fbc66fd9aac13e998248505e7ecb2ad8e44ab6388684c5fb11c6c251c"
-"checksum kabuki 0.0.1 (git+https://github.com/carllerche/kabuki?rev=4cc9aa77b7a59890b8cbfd276a067be015ed54f7)" = "<none>"
+"checksum kabuki 0.0.1 (git+https://github.com/sirpent-team/kabuki.git)" = "<none>"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 "checksum lazycell 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ce12306c4739d86ee97c23139f3a34ddf0387bbf181bc7929d287025a8c3ef6b"
 "checksum libc 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)" = "88ee81885f9f04bff991e306fea7c1c60a5f0f9e409e99f6b40e3311a3363135"
