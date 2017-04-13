@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["NewThread","Spawn all futures on a new thread"],["SpawnHandle","The type of future returned from the `Spawn::spawn` function, which proxies the futures running on the thread pool."],["Spawned","Contains a future that was spawned"]],"trait":[["Spawn","Value that can spawn a future"],["SpawnHelper","Additional strategies for spawning a future."]]});

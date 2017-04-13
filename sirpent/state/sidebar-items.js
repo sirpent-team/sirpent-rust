@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["CauseOfDeath",""],["GridEnum",""]],"mod":[["grids",""]],"struct":[["GameState",""],["RoundState",""],["Snake",""]],"type":[["Direction",""],["Grid",""],["Vector",""]]});

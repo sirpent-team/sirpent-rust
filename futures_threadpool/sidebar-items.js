@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Builder","Thread pool configuration object"],["ThreadPool","A thread pool intended to run CPU intensive work."]]});

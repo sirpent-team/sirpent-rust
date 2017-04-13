@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["ClientKind",""],["Msg",""]],"static":[["PROTOCOL_VERSION",""]],"struct":[["MsgCodec",""]],"type":[["MsgClient",""],["MsgRoom",""],["MsgTransport",""]]});
