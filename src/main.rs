@@ -39,12 +39,8 @@ fn main() {
         .unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let addr = addr.parse::<SocketAddr>().unwrap();
 
-    // Initialize the various data structures we're going to use in our server.
-    // Here we create the event loop, the global buffer that all threads will
-    // read/write into, and the bound TCP listener itself.
     let mut lp = Core::new().unwrap();
     let handle = lp.handle();
-
     let timer = Timer::default();
 
     let listener = TcpListener::bind(&addr, &handle).unwrap();
@@ -60,21 +56,24 @@ fn main() {
     let spectators = Spectators::new(spectator_rx, spectator_msg_rx);
     handle.spawn(spectators);
 
-    let nameserver = Nameserver::default();
-    let nameserver_actor = kabuki::Builder::new().spawn(&handle, nameserver);
-    let handshaker = Handshake::new(grid.clone(), timeout, timer.clone(), nameserver_actor);
-    let handshaker_actor = kabuki::Builder::new().spawn(&handle, handshaker);
+    let handshaker_actor = kabuki::Builder::new().spawn(&handle, {
+        let nameserver_actor = kabuki::Builder::new().spawn(&handle, {
+            Nameserver::default()
+        });
+        Handshake::new(grid.clone(), timeout, timer.clone(), nameserver_actor)
+    });
     handle.spawn(server(listener,
                         handshaker_actor,
                         queue_player_tx.clone(),
                         spectator_tx));
 
-    let game_actor = GameActor::new(timer.clone(), spectator_msg_tx);
-    let game_actor_ref = kabuki::Builder::new().spawn(&handle, game_actor);
-
-    let rng_fn = || -> Box<Rng> { return Box::new(OsRng::new().unwrap()) };
-    let game_server_actor = GameServerActor::new(rng_fn, grid, timeout, game_actor_ref);
-    let game_server_actor_ref = kabuki::Builder::new().spawn(&handle, game_server_actor);
+    let game_server_actor_ref = kabuki::Builder::new().spawn(&handle, {
+        let game_actor_ref = kabuki::Builder::new().spawn(&handle, {
+            GameActor::new(timer.clone(), spectator_msg_tx)
+        });
+        let rng_fn = || -> Box<Rng> { Box::new(OsRng::new().unwrap()) };
+        GameServerActor::new(rng_fn, grid, timeout, game_actor_ref)
+    });
 
     let gsw = queue_player_rx
         .chunks(10)
@@ -84,10 +83,10 @@ fn main() {
                  println!("End of game! {:?} {:?}",
                           game.game_state(),
                           game.round_state());
-                 let living_players = players.into_iter().filter(Client::is_connected);
-                 stream::iter(living_players.map(Ok))
+                 stream::iter(players.into_iter().map(Ok))
              })
         .flatten()
+        .filter(Client::is_connected)
         .forward(queue_player_tx.sink_map_err(|_| ()))
         .map(|_| ());
     handle.spawn(gsw);
